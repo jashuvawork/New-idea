@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Set paper trading capital (default ₹2L) on EC2 — env + runtime API + backend restart.
+# Set paper trading capital (default ₹1.5L) on EC2 — env + runtime API + backend restart.
 #
 # Usage (on EC2 as root):
 #   sudo bash deploy/set-paper-capital.sh
-#   PAPER_CAPITAL_INR=200000 sudo bash deploy/set-paper-capital.sh
+#   PAPER_OVERLAY=deploy/env.paper-150k.overlay sudo bash deploy/set-paper-capital.sh
 #
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-/opt/nexusquant/New-idea}"
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
-PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-200000}"
+PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-150000}"
+PAPER_OVERLAY="${PAPER_OVERLAY:-${REPO_DIR}/deploy/env.paper-150k.overlay}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
 CAPITAL_URL="${CAPITAL_URL:-http://127.0.0.1:8000/api/auto-trader/capital}"
 
@@ -33,6 +34,10 @@ _set_env_key() {
 echo "=== Set paper capital to ₹${PAPER_CAPITAL_INR} $(date -Iseconds) ==="
 mkdir -p "$(dirname "$ENV_FILE")"
 touch "$ENV_FILE"
+if [ -f "$PAPER_OVERLAY" ]; then
+  echo "Applying overlay: $PAPER_OVERLAY"
+  ENV_FILE="$ENV_FILE" bash "$REPO_DIR/deploy/apply-env-overlay.sh" "$PAPER_OVERLAY"
+fi
 _set_env_key FALLBACK_CAPITAL_INR "$PAPER_CAPITAL_INR"
 _set_env_key MAX_SIZING_CAPITAL_INR "$PAPER_CAPITAL_INR"
 

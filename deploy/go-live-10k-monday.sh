@@ -20,7 +20,8 @@
 #   REPO_DIR=     Override repo path (default /opt/nexusquant/New-idea)
 #   LIVE_OVERLAY= Path to overlay (default deploy/env.live-200k.overlay)
 #   LIVE_CAPITAL_INR= Runtime capital ceiling when arming (default 200000)
-#   PAPER_CAPITAL_INR= Paper capital when disarming (default 200000)
+#   PAPER_CAPITAL_INR= Paper capital when disarming (default 150000)
+#   PAPER_OVERLAY=  Capital/risk overlay on --paper (default deploy/env.paper-150k.overlay)
 #   ₹1.5L live: LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000
 #   Small-cap legacy: LIVE_OVERLAY=deploy/env.live-10k.overlay LIVE_CAPITAL_INR=10000
 #
@@ -43,8 +44,9 @@ HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
 STATUS_URL="${STATUS_URL:-http://127.0.0.1:8000/api/deployment/status}"
 READINESS_URL="${READINESS_URL:-http://127.0.0.1:8000/api/deployment/readiness}"
 CAPITAL_URL="${CAPITAL_URL:-http://127.0.0.1:8000/api/auto-trader/capital}"
-PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-200000}"
-LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-200000}"
+PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-150000}"
+LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-150000}"
+PAPER_OVERLAY="${PAPER_OVERLAY:-${REPO_DIR}/deploy/env.paper-150k.overlay}"
 
 MODE=""
 DRY_RUN=0
@@ -107,6 +109,12 @@ if [ "$MODE" != "paper" ]; then
 fi
 
 if [ "$MODE" = "paper" ]; then
+  if [ -f "$PAPER_OVERLAY" ] && [ "$DRY_RUN" -eq 0 ]; then
+    echo "Applying paper capital/risk overlay: $PAPER_OVERLAY"
+    ENV_FILE="$ENV_FILE" bash "$REPO_DIR/deploy/apply-env-overlay.sh" "$PAPER_OVERLAY"
+  elif [ -f "$PAPER_OVERLAY" ]; then
+    echo "[dry-run] apply paper overlay $PAPER_OVERLAY"
+  fi
   echo "Stopping auto-trader before returning to paper mode..."
   curl -sf -X POST "http://127.0.0.1:8000/api/execution/stop" >/dev/null 2>&1 || true
   echo "Disarming live execution (paper mode)..."
