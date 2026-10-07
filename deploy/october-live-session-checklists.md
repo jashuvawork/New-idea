@@ -2,6 +2,8 @@
 
 Operational checklists for **live and paper** when [`env.october-frozen.overlay`](env.october-frozen.overlay) is active. Use with [`verify-oct-live-ready.sh`](verify-oct-live-ready.sh) before open and the **post-session audit** at the bottom after close.
 
+**What is / isn’t mirrored paper↔live:** [`paper-live-parity-scope.md`](paper-live-parity-scope.md)
+
 **HUD (read-only):** `GET https://api.jashuvatrade.xyz/api/deployment/status`  
 **Readiness:** `GET /api/deployment/readiness`  
 **Sep917 four-step lane vocabulary:** `backend/app/engines/sep917_live_checklist.py` (overlay has `SEP917_LIVE_CHECKLIST_ENFORCEMENT_ENABLED=false`; lanes still appear in funnel/HUD context).

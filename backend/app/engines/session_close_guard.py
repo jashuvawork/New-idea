@@ -31,9 +31,11 @@ def live_session_close_force_exit_applies(settings: Settings | None = None) -> b
         return False
     if not bool(getattr(settings, "auto_trading_enabled", True)):
         return False
+    from app.engines.live_paper_parity import entry_gates_match_paper
+
     is_live = bool(getattr(settings, "enable_live_trading", False))
     parity = bool(getattr(settings, "paper_live_parity_enabled", True))
-    if not is_live and not parity:
+    if not is_live and not parity and not entry_gates_match_paper(settings):
         return False
     now = datetime.now(IST)
     if now.weekday() >= 5:

@@ -1334,9 +1334,9 @@ def best_trade_chop_deep_chase_blocked(
     if bool(
         getattr(settings, "live_paper_parity_near_base_waives_chop_deep_chase", True)
     ):
-        from app.engines.live_paper_parity import live_paper_parity_active
+        from app.engines.live_paper_parity import trading_rules_match_paper
 
-        if live_paper_parity_active(settings):
+        if trading_rules_match_paper(settings):
             snap = getattr(candidate, "snap", None)
             alert = _alert_for_candidate(candidate)
             ok_shape, _ = symmetric_best_trade_at_base_capture(

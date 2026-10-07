@@ -502,6 +502,10 @@ def chop_live_early_fail_exit_reason(
     LIVE_HOLD_TO_STRUCTURAL_SL would otherwise defer early exits.
     """
     settings = get_settings()
+    from app.engines.live_paper_parity import trading_rules_match_paper
+
+    if trading_rules_match_paper(settings):
+        return None
     if not getattr(settings, "chop_live_early_fail_exit_enabled", True):
         return None
     ctx = getattr(trade, "entryContext", None) or {}

@@ -35,19 +35,39 @@ def entry_gates_match_paper(settings: Any | None = None) -> bool:
     )
 
 
+def trading_rules_match_paper(settings: Any | None = None) -> bool:
+    """
+    Frozen Oct / parity rule stack — live with entry_gates_match_paper, or paper with same profile.
+
+    Use for sizing book, selection helpers, and live-only exit narrowings that paper skips.
+    Does not simulate broker fills (execution still differs on live).
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not _strict_bool(getattr(s, "enable_live_trading", False)):
+        return live_paper_parity_active(s) or _strict_bool(
+            getattr(s, "october_frozen_profile_enabled", False)
+        )
+    return entry_gates_match_paper(s)
+
+
 def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
     """HUD / readiness: Oct 1 / 5 paper stack when live is armed with parity."""
     from app.config import get_settings
 
     s = settings or get_settings()
     parity = live_paper_parity_active(s)
+    gates = entry_gates_match_paper(s)
     return {
         "active": parity,
+        "entryGatesMatchPaper": gates,
+        "tradingRulesMatchPaper": trading_rules_match_paper(s),
         "liveBestTradesOnlyEnabled": bool(getattr(s, "live_best_trades_only_enabled", True)),
         "worstDayBlocksLive": bool(getattr(s, "worst_day_blocks_live", True)),
         "liveHoldToStructuralSl": bool(getattr(s, "live_hold_to_structural_sl", False)),
         "useUpstoxCapitalForSizing": bool(getattr(s, "use_upstox_capital_for_sizing", False)),
-        "sizesFromPaperBook": parity and not should_use_live_broker_capital_for_summary(s),
+        "sizesFromPaperBook": gates and not should_use_live_broker_capital_for_summary(s),
         "sep917LegacyProfileEnabled": bool(getattr(s, "sep917_legacy_profile_enabled", True)),
         "topMomentsOnlyEnabled": bool(getattr(s, "top_moments_only_enabled", False)),
         "paperSimpleProfitMode": bool(getattr(s, "paper_simple_profit_mode", False)),
@@ -70,12 +90,14 @@ def should_use_live_broker_capital_for_summary(settings: Any) -> bool:
     """Avoid import cycle with capital_allocator in summary-only callers."""
     from app.engines.capital_allocator import should_use_live_broker_capital
 
-    if not live_paper_parity_active(settings):
-        return bool(
-            getattr(settings, "use_upstox_capital_for_sizing", False)
-            and getattr(settings, "enable_live_trading", False)
-        )
-    return should_use_live_broker_capital()
+    if entry_gates_match_paper(settings):
+        return should_use_live_broker_capital()
+    if not _strict_bool(getattr(settings, "enable_live_trading", False)):
+        return False
+    return bool(
+        getattr(settings, "use_upstox_capital_for_sizing", False)
+        and getattr(settings, "enable_live_trading", False)
+    )
 
 
 # Minimum sizing book for parity go-live (deploy/env.live-150k.overlay and env.live-200k.overlay).
