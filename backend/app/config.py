@@ -110,6 +110,8 @@ class Settings(BaseSettings):
     # Sep08: armed-base launch on chop day below base window — hard block at entry wire.
     chop_live_block_armed_base_launch: bool = True
     chop_live_armed_base_max_local_pad_pct: float = 20.0
+    # Sep917 / Oct paper: v_rip + FTV/V near-base on chop days skip extra live-only hard blocks.
+    chop_live_waive_near_base_sep917_shape: bool = True
     # Sep08: second 23650 PE after morning loss — one explosion attempt per strike after loss.
     session_same_strike_loss_reentry_enabled: bool = True
     session_same_strike_loss_reentry_min_loss_inr: float = 500.0

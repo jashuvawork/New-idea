@@ -8,7 +8,9 @@ from unittest.mock import patch
 from app.engines.best_trade_policy import (
     best_trade_chop_deep_chase_blocked,
     call_atm_itm_base_capture_eligible,
+    symmetric_best_trade_at_base_capture,
     symmetric_near_base_premium_fade_bypass,
+    symmetric_new_base_moment_evidence,
     symmetric_structural_base_evidence,
 )
 from app.engines.winner_entry_guards import premium_fading_blocks_entry
@@ -105,6 +107,18 @@ def test_live_parity_waives_chop_deep_chase_for_v_rip_atm_base():
     )
     assert blocked is False
     assert reason == ""
+
+
+def test_v_rip_counts_as_new_base_moment_token():
+    s = settings_mock()
+    ev = {
+        "localBaseMovePct": 9.0,
+        "momentType": "v_rip_session_low",
+        "ictBaseReadinessReason": "v_rip_session_low_ready",
+    }
+    assert symmetric_new_base_moment_evidence(ev, settings=s) is True
+    ok, reason = symmetric_best_trade_at_base_capture(ev, settings=s)
+    assert ok is True
 
 
 def test_v_rip_premium_fade_shallow_retest_ok():
