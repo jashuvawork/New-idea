@@ -39,6 +39,12 @@ def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
         "paperSimpleProfitMode": bool(getattr(s, "paper_simple_profit_mode", False)),
         "fallbackCapitalInr": float(getattr(s, "fallback_capital_inr", 0) or 0),
         "maxSizingCapitalInr": float(getattr(s, "max_sizing_capital_inr", 0) or 0),
+        "padEntryGuardEnabled": bool(
+            getattr(s, "live_paper_parity_pad_entry_guard_enabled", True)
+        ),
+        "padEntryMaxSessionRangePosition": float(
+            getattr(s, "live_paper_parity_max_session_range_position", 0.52) or 0.52
+        ),
     }
 
 

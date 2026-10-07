@@ -3025,6 +3025,16 @@ async def _open_from_candidate(
 
     from app.engines.live_paper_parity import live_paper_parity_active
 
+    if is_live and live_paper_parity_active(settings) and candidate.mode == "explosion":
+        from app.engines.live_oct1_pad_entry_guard import live_oct1_pad_entry_blocked
+
+        oct1_blocked, oct1_reason, oct1_meta = live_oct1_pad_entry_blocked(
+            candidate, snap, settings=settings,
+        )
+        if oct1_blocked:
+            return False, oct1_reason
+        ctx_extra["liveOct1PadGuard"] = oct1_meta
+
     if (
         is_live
         and not live_paper_parity_active(settings)
