@@ -10,6 +10,68 @@ from typing import Any, Optional
 
 from app.config import get_settings
 from app.models.schemas import SymbolSnapshot
+from app.engines.live_paper_parity import live_paper_parity_active
+
+_OCT1_PAD_CHASE_BLOCK_REASONS = frozenset({
+    "live_oct1_chase_at_session_high",
+    "live_oct1_chase_session_range_high",
+})
+
+
+def oct1_pad_entry_guard_active(settings: Any = None) -> bool:
+    """
+    Oct 1 pad location guard — paper parity and/or live under Frozen October.
+
+    Oct 7 live had parity flags off while still on the Oct book; guard must run
+    whenever frozen Oct + live execution, not only when live_paper_parity is set.
+    """
+    settings = settings or get_settings()
+    pad_on = getattr(settings, "live_paper_parity_pad_entry_guard_enabled", True)
+    if not (pad_on if isinstance(pad_on, bool) else True):
+        return False
+    if live_paper_parity_active(settings):
+        return True
+    frozen = getattr(settings, "october_frozen_profile_enabled", False)
+    live = getattr(settings, "enable_live_trading", False)
+    if isinstance(frozen, bool) and frozen and isinstance(live, bool) and live:
+        return True
+    return False
+
+
+def apply_oct1_pad_timing_block(
+    timing: dict[str, Any],
+    candidate: Any,
+    snap: Optional[SymbolSnapshot] = None,
+    *,
+    settings: Any = None,
+) -> dict[str, Any]:
+    """
+    When timing says GOOD/OK but premium is at session high on a near-base shape,
+    hard-block as CHASE (Oct 7 NIFTY CE @ ₹158).
+    """
+    settings = settings or get_settings()
+    if not oct1_pad_entry_guard_active(settings):
+        return timing
+    if str(timing.get("action") or "") == "block":
+        return timing
+    blocked, reason, _meta = live_oct1_pad_entry_blocked(
+        candidate, snap, settings=settings,
+    )
+    if not blocked:
+        return timing
+    if reason in _OCT1_PAD_CHASE_BLOCK_REASONS or (
+        reason and str(reason).startswith("live_oct1_sep09")
+    ):
+        reasons = list(timing.get("reasons") or [])
+        reasons.append(reason)
+        return {
+            **timing,
+            "assessment": "CHASE",
+            "action": "block",
+            "oct1PadTimingBlock": True,
+            "reasons": reasons,
+        }
+    return timing
 
 
 def _alert_and_evidence(candidate: Any) -> dict[str, Any]:
@@ -55,11 +117,9 @@ def live_oct1_pad_entry_order_gate(
     *,
     settings: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
-    """Order / paper-parity submit boundary — hard pad location under parity stack."""
-    from app.engines.live_paper_parity import live_paper_parity_active
-
+    """Order boundary — Oct 1 pad location (paper parity or live Frozen October)."""
     settings = settings or get_settings()
-    if not live_paper_parity_active(settings):
+    if not oct1_pad_entry_guard_active(settings):
         return False, "", {}
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         return False, "", {}
@@ -76,14 +136,12 @@ def live_oct1_pad_entry_blocked(
     settings: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
-    Under live paper parity: require Sep917 near-base shape AND pad location
-    (not session-high chase). CE/PE symmetric.
+    Require Sep917 near-base shape AND pad location (not session-high chase).
+    CE/PE symmetric. Active under paper parity or live + Frozen October profile.
     """
-    from app.engines.live_paper_parity import live_paper_parity_active
-
     settings = settings or get_settings()
     meta: dict[str, Any] = {"liveOct1PadGuard": True}
-    if not live_paper_parity_active(settings):
+    if not oct1_pad_entry_guard_active(settings):
         return False, "", meta
     if not bool(getattr(settings, "live_paper_parity_pad_entry_guard_enabled", True)):
         return False, "", meta

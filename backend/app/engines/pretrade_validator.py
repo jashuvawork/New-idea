@@ -746,11 +746,12 @@ def validate_candidate(
             return False, policy_reason, policy_meta
 
     if str(getattr(candidate, "mode", "") or "").lower() == "explosion":
-        from app.engines.live_paper_parity import live_paper_parity_active
+        from app.engines.live_oct1_pad_entry_guard import (
+            live_oct1_pad_entry_blocked,
+            oct1_pad_entry_guard_active,
+        )
 
-        if live_paper_parity_active(settings):
-            from app.engines.live_oct1_pad_entry_guard import live_oct1_pad_entry_blocked
-
+        if oct1_pad_entry_guard_active(settings):
             sym_pad = str(getattr(candidate, "symbol", "") or "").upper()
             snap_pad = None
             if snapshots:
