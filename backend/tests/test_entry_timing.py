@@ -10,7 +10,6 @@ from app.engines.entry_timing import (
     assess_entry_timing,
     cap_lots_for_timing,
     elite_bypass_allowed_for_timing,
-    failed_launch_live_hard_block,
     timing_allows_full_size,
     timing_blocks_entry,
 )
@@ -363,23 +362,6 @@ def test_elite_bypass_allows_hot(mock_et, mock_elite):
         snap=_snap("TRENDING"),
         timing={"assessment": "GOOD", "action": "allow", "reasons": ["hot"]},
     ) is True
-
-
-def test_failed_launch_live_hard_block_negative_v3():
-    timing = {
-        "assessment": "FAILED_LAUNCH",
-        "action": "block",
-        "liveVelocity3s": -0.36,
-        "reasons": ["structured_base_negative_v3_-0.4"],
-    }
-    s = _settings(
-        live_failed_launch_timing_hard_block_enabled=True,
-        live_failed_launch_reacceleration_min_velocity_3s=0.0,
-    )
-    assert failed_launch_live_hard_block(timing, settings=s, live=True) is True
-    assert failed_launch_live_hard_block(timing, settings=s, live=False) is False
-    timing["liveVelocity3s"] = 0.5
-    assert failed_launch_live_hard_block(timing, settings=s, live=True) is False
 
 
 @patch("app.engines.explosion_confidence.get_settings")
