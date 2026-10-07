@@ -166,6 +166,10 @@ class Settings(BaseSettings):
     # Oct 1 / Sep917 paper stack on live: ATM/ITM near-base (v_rip / pad-lane) may fill through
     # chop deep-ITM chase guard — same as paper parity sessions.
     live_paper_parity_near_base_waives_chop_deep_chase: bool = True
+    # Oct 1 live: block session-high chase fills (22700 CE @ ₹158) — pad location only.
+    live_paper_parity_pad_entry_guard_enabled: bool = True
+    live_paper_parity_max_session_range_position: float = 0.52
+    live_paper_parity_min_off_session_high_pct: float = 6.0
 
     # Latency profile — normal uses field defaults; low/aggressive apply cadence presets
     latency_mode: Literal["normal", "low", "aggressive"] = "low"
