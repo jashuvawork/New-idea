@@ -37,6 +37,10 @@ def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
         "sep917LegacyProfileEnabled": bool(getattr(s, "sep917_legacy_profile_enabled", True)),
         "topMomentsOnlyEnabled": bool(getattr(s, "top_moments_only_enabled", False)),
         "paperSimpleProfitMode": bool(getattr(s, "paper_simple_profit_mode", False)),
+        "adaptiveExitsEnabled": bool(getattr(s, "adaptive_exits_enabled", True)),
+        "executedEntrySlOnlyLossExits": bool(
+            getattr(s, "executed_entry_sl_only_loss_exits", True)
+        ),
         "fallbackCapitalInr": float(getattr(s, "fallback_capital_inr", 0) or 0),
         "maxSizingCapitalInr": float(getattr(s, "max_sizing_capital_inr", 0) or 0),
         "padEntryGuardEnabled": bool(

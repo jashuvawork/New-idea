@@ -28,7 +28,6 @@ def _trade(entry: float = 100.0) -> PaperTrade:
 
 
 def test_wider_adaptive_stop_delays_explosion_stop_loss():
-    default = default_explosion_exit_params("EXPLODING")
     wide = explosion_exit_params_from_plan(
         AdaptiveExitPlan(
             stopPoints=6.0,
@@ -42,23 +41,22 @@ def test_wider_adaptive_stop_delays_explosion_stop_loss():
     trade = _trade()
 
     with patch("app.engines.explosion_profit.get_settings") as mock_settings:
-        settings = MagicMock()
+        from app.config import Settings
+
+        settings = Settings()
         settings.emergency_stop_enabled = False
         settings.explosion_stop_min_hold_seconds = 0
-        settings.explosion_trail_tight_arm = 12.0
-        settings.explosion_trail_tight_points = 3.0
-        settings.explosion_trail_step_points = 2.0
-        settings.runner_trail_keep_ratio = 0.45
-        settings.runner_min_best_points = 6.0
-        settings.runner_micro_giveback_points = 2.5
-        settings.explosion_trail_keep_ratio = 0.65
-        settings.explosion_trail_arm_points = 4.0
         settings.explosion_initial_stop_points = 4.0
-        settings.explosion_no_progress_seconds = 90
-        settings.explosion_per_trade_max_loss_inr = 0.0
+        settings.executed_entry_sl_only_loss_exits = True
+        settings.explosion_peak_fade_lock_enabled = False
+        settings.explosion_peak_capture_enabled = False
+        settings.explosion_no_progress_enabled = False
         mock_settings.return_value = settings
 
-        default_reason, _ = evaluate_explosion_exit(trade, 95.5, "EXPLODING", 65)
+        default = default_explosion_exit_params("EXPLODING")
+        default_reason, _ = evaluate_explosion_exit(
+            trade, 95.5, "EXPLODING", 65, params=default,
+        )
         adaptive_reason, _ = evaluate_explosion_exit(
             trade, 95.5, "EXPLODING", 65, params=wide,
         )

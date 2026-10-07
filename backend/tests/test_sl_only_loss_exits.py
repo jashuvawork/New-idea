@@ -84,7 +84,11 @@ def _sep21_chop_put_trade(**ctx_overrides):
             "setup": "V",
             "mustTake": False,
         },
-        "exitPlan": {"stopPoints": 11.9, "adaptiveStop": True},
+        "exitPlan": {
+            "stopPoints": 11.9,
+            "adaptiveStop": True,
+            "trailArmPoints": 15.0,
+        },
     }
     ctx.update(ctx_overrides)
     return PaperTrade(
