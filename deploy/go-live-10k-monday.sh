@@ -24,7 +24,9 @@
 #   PAPER_CAPITAL_INR= Paper capital when disarming (default 150000)
 #   PAPER_OVERLAY=  Capital/risk overlay on --paper (default deploy/env.paper-150k.overlay)
 #   ₹1.5L live: LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000
-#   Small-cap legacy: LIVE_OVERLAY=deploy/env.live-10k.overlay LIVE_CAPITAL_INR=10000
+#   ₹50k + Oct frozen: LIVE_OVERLAY=deploy/env.live-50k.overlay LIVE_CAPITAL_INR=50000 \
+#     PAPER_OVERLAY=deploy/env.paper-50k.overlay PAPER_CAPITAL_INR=50000
+#   Small-cap legacy (NOT Oct frozen stack): LIVE_OVERLAY=deploy/env.live-10k.overlay LIVE_CAPITAL_INR=10000
 #
 set -euo pipefail
 

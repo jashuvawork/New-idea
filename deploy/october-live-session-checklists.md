@@ -28,6 +28,7 @@ Operational checklists for **live and paper** when [`env.october-frozen.overlay`
 sudo EXPECT_LIVE=false bash deploy/verify-oct-live-ready.sh
 # After arm-live
 sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=150000 bash deploy/verify-oct-live-ready.sh
+# ₹50k live: CAPITAL_OVERLAY=deploy/env.live-50k.overlay and LIVE_CAPITAL_INR=50000
 ```
 
 ---
