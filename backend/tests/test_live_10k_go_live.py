@@ -207,6 +207,8 @@ def test_live_hold_skips_inr_force_stop_and_rides_to_adaptive_sl():
         patch.object(s, "explosion_peak_fade_lock_enabled", False),
         patch.object(s, "explosion_peak_capture_enabled", False),
         patch.object(s, "explosion_no_progress_enabled", False),
+        patch("app.engines.explosion_profit.get_settings", return_value=s),
+        patch("app.engines.adaptive_exits.get_settings", return_value=s),
     ):
         reason, _ = evaluate_explosion_exit(trade, 48.0, "ELITE", 65, live_velocity_3s=-1.0)
     assert reason not in (
@@ -222,6 +224,9 @@ def test_live_hold_skips_inr_force_stop_and_rides_to_adaptive_sl():
         patch.object(s, "explosion_peak_fade_lock_enabled", False),
         patch.object(s, "explosion_peak_capture_enabled", False),
         patch.object(s, "explosion_no_progress_enabled", False),
+        patch("app.engines.explosion_profit.get_settings", return_value=s),
+        patch("app.engines.adaptive_exits.get_settings", return_value=s),
+        patch("app.engines.explosion_profit._adaptive_stop_min_hold", return_value=0),
     ):
         reason2, _ = evaluate_explosion_exit(trade, 43.0, "ELITE", 65, live_velocity_3s=-1.0)
     assert reason2 in ("adaptive_stop_loss", "explosion_stop_loss")

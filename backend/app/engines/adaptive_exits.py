@@ -26,6 +26,7 @@ class AdaptiveExitPlan:
     exitBias: str = "BALANCED"
     # Pre-chart premium/structure invalidation — chart/edge must not crush below this.
     naturalStopPoints: float = 0.0
+    adaptiveStop: bool = True
     reasoning: list[str] = None
 
     def __post_init__(self):
@@ -52,6 +53,7 @@ class AdaptiveExitPlan:
             psychologyLabel=data.get("psychologyLabel", "NEUTRAL"),
             exitBias=data.get("exitBias", "BALANCED"),
             naturalStopPoints=float(data.get("naturalStopPoints") or 0.0),
+            adaptiveStop=bool(data.get("adaptiveStop", True)),
             reasoning=data.get("reasoning", []),
         )
 
@@ -337,6 +339,119 @@ def predict_entry_ml_win_prob(
     )()
     features = ml.extract_features(sig, ctx)
     return float(ml.predict_win_probability(features))
+
+
+def should_trade_use_adaptive_stop(trade: PaperTrade, settings=None) -> bool:
+    """Live/paper open legs: per-trade adaptive SL (not fixed explosion_stop_loss)."""
+    settings = settings or get_settings()
+    if not getattr(settings, "adaptive_exits_enabled", True):
+        return False
+    ctx = trade.entryContext or {}
+    plan = ctx.get("exitPlan") or {}
+    if isinstance(plan, dict) and plan.get("adaptiveStop") is False:
+        return False
+    if trade.strategyType == StrategyType.EXPLOSIVE:
+        return True
+    return bool(isinstance(plan, dict) and float(plan.get("stopPoints") or 0) > 0)
+
+
+def build_merged_adaptive_exit_plan(
+    snap: SymbolSnapshot,
+    strategy_type: StrategyType,
+    side: str,
+    confidence: float,
+    news: Optional[list[dict[str, Any]]] = None,
+    *,
+    entry_premium: Optional[float] = None,
+    entry_velocity_3s: Optional[float] = None,
+    explosion_tier: Optional[str] = None,
+    local_base_premium: Optional[float] = None,
+) -> dict[str, Any]:
+    """ML + psychology + chart merge — stamped for live and paper exit evaluation."""
+    settings = get_settings()
+    if not settings.adaptive_exits_enabled:
+        return {}
+
+    from app.engines.psychology_engine import PsychologyState, analyze_psychology
+    from app.engines.simple_profit import get_session_targets
+
+    ps_data = snap.psychology or {}
+    if ps_data:
+        psychology = PsychologyState(
+            score=ps_data.get("score", 0),
+            label=ps_data.get("label", "NEUTRAL"),
+            exit_bias=ps_data.get("exitBias", "BALANCED"),
+            news_bias=ps_data.get("newsBias", "NEUTRAL"),
+            breadth_bias=ps_data.get("breadthBias", "NEUTRAL"),
+        )
+    else:
+        psychology = analyze_psychology(snap, news)
+
+    profile = snap.optimizedProfile or get_session_targets()
+    plan = compute_adaptive_exit_plan(
+        snap,
+        strategy_type,
+        psychology,
+        profile,
+        side=side,
+        confidence=confidence,
+        news=news,
+        entry_premium=entry_premium,
+        entry_velocity_3s=entry_velocity_3s,
+        explosion_tier=explosion_tier,
+    )
+    from app.engines.chart_exit_levels import merge_chart_into_exit_plan
+
+    base_prem = float(local_base_premium or 0)
+    if base_prem <= 0:
+        top = snap.topExplosion or {}
+        base_prem = float(top.get("ictBasePremium") or 0)
+
+    merged = merge_chart_into_exit_plan(
+        plan.to_dict(),
+        snap,
+        side,
+        float(entry_premium or snap.spot or 50),
+        local_base_premium=base_prem if base_prem > 0 else None,
+    )
+    if merged:
+        merged["adaptiveStop"] = True
+    return merged
+
+
+def ensure_open_trade_exit_plan(
+    trade: PaperTrade,
+    snap: SymbolSnapshot,
+    *,
+    news: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    """Persist adaptive exit plan on open trades missing one (e.g. broker-adopted legs)."""
+    ctx = trade.entryContext or {}
+    existing = ctx.get("exitPlan")
+    if isinstance(existing, dict) and float(existing.get("stopPoints") or 0) > 0:
+        if existing.get("adaptiveStop") is not False:
+            existing.setdefault("adaptiveStop", True)
+        return existing
+
+    confidence = float(
+        ctx.get("explosionScore") or ctx.get("confidence") or ctx.get("selectionScore") or 70,
+    )
+    plan = build_merged_adaptive_exit_plan(
+        snap,
+        trade.strategyType,
+        trade.side.value,
+        confidence,
+        news,
+        entry_premium=trade.entryPremium,
+        entry_velocity_3s=float(ctx.get("velocity3s") or 0) or None,
+        explosion_tier=str(ctx.get("explosionTier") or "") or None,
+    )
+    if not plan:
+        return {}
+    trade.entryContext = ctx
+    ctx["exitPlan"] = plan
+    trade.entryContext = ctx
+    return plan
 
 
 def _build_ml_context(

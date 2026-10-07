@@ -974,6 +974,7 @@ def _simulate_trade_from_entry(
             "stopPoints": round(stop_pts, 2),
             "entryStopPoints": round(stop_pts, 2),
             "targetPoints": 180.0,
+            "adaptiveStop": True,
         },
     }
     if assessment is not None:

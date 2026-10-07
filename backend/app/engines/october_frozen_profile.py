@@ -35,6 +35,10 @@ def october_frozen_profile_summary(settings: Any | None = None) -> dict[str, Any
         "padEntryGuardEnabled": bool(
             getattr(s, "live_paper_parity_pad_entry_guard_enabled", True)
         ),
+        "adaptiveExitsEnabled": bool(getattr(s, "adaptive_exits_enabled", True)),
+        "executedEntrySlOnlyLossExits": bool(
+            getattr(s, "executed_entry_sl_only_loss_exits", True)
+        ),
         "liveBestTradesOnlyEnabled": bool(getattr(s, "live_best_trades_only_enabled", True)),
         "worstDayBlocksLive": bool(getattr(s, "worst_day_blocks_live", True)),
         "chopLiveWaiveNearBaseSep917Shape": bool(

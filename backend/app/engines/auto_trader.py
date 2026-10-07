@@ -24,10 +24,13 @@ from app.engines.explosion_profit import evaluate_explosion_exit, record_explosi
 from app.engines.swing_profit import evaluate_swing_exit
 from app.engines.adaptive_exits import (
     AdaptiveExitPlan,
+    build_merged_adaptive_exit_plan,
     compute_adaptive_exit_plan,
+    ensure_open_trade_exit_plan,
     evaluate_adaptive_explosion_exit,
     evaluate_adaptive_scalp_exit,
     evaluate_adaptive_swing_exit,
+    should_trade_use_adaptive_stop,
 )
 from app.engines.chart_exit_levels import refresh_open_trade_chart_plan, update_live_chart_trail
 from app.engines.capital_allocator import (
@@ -320,53 +323,16 @@ def _attach_exit_plan(
     local_base_premium: Optional[float] = None,
 ) -> dict[str, Any]:
     """Build ML + psychology adaptive SL/TP plan for a new trade."""
-    settings = get_settings()
-    if not settings.adaptive_exits_enabled:
-        return {}
-
-    from app.engines.psychology_engine import PsychologyState, analyze_psychology
-
-    ps_data = snap.psychology or {}
-    if ps_data:
-        psychology = PsychologyState(
-            score=ps_data.get("score", 0),
-            label=ps_data.get("label", "NEUTRAL"),
-            exit_bias=ps_data.get("exitBias", "BALANCED"),
-            news_bias=ps_data.get("newsBias", "NEUTRAL"),
-            breadth_bias=ps_data.get("breadthBias", "NEUTRAL"),
-        )
-    else:
-        psychology = analyze_psychology(snap, news)
-
-    profile = snap.optimizedProfile or get_session_targets()
-    plan = compute_adaptive_exit_plan(
+    return build_merged_adaptive_exit_plan(
         snap,
         strategy_type,
-        psychology,
-        profile,
-        side=side,
-        confidence=confidence,
-        news=news,
+        side,
+        confidence,
+        news,
         entry_premium=entry_premium,
         entry_velocity_3s=entry_velocity_3s,
         explosion_tier=explosion_tier,
-    )
-    from app.engines.chart_exit_levels import merge_chart_into_exit_plan
-
-    # Prefer explicit ICT base; else snap topExplosion ictBasePremium.
-    base_prem = float(local_base_premium or 0)
-    if base_prem <= 0:
-        top = snap.topExplosion or {}
-        base_prem = float(top.get("ictBasePremium") or 0)
-
-    # Return full merged dict (not AdaptiveExitPlan) so localSupportStopPoints /
-    # chartExitSources / naturalStopPoints survive into the trade exit plan.
-    return merge_chart_into_exit_plan(
-        plan.to_dict(),
-        snap,
-        side,
-        float(entry_premium or snap.spot or 50),
-        local_base_premium=base_prem if base_prem > 0 else None,
+        local_base_premium=local_base_premium,
     )
 
 
@@ -519,25 +485,7 @@ def _exit_plan_for_trade(
     news: Optional[list[dict]] = None,
 ) -> dict[str, Any]:
     """Resolve or rebuild per-trade adaptive exit plan."""
-    ctx = trade.entryContext or {}
-    plan_dict = ctx.get("exitPlan")
-    if plan_dict:
-        return plan_dict
-    if not get_settings().adaptive_exits_enabled:
-        return {}
-    confidence = float(
-        ctx.get("explosionScore") or ctx.get("confidence") or ctx.get("selectionScore") or 70,
-    )
-    return _attach_exit_plan(
-        snap,
-        trade.strategyType,
-        trade.side.value,
-        confidence,
-        news,
-        entry_premium=trade.entryPremium,
-        entry_velocity_3s=float(ctx.get("velocity3s") or 0) or None,
-        explosion_tier=ctx.get("explosionTier"),
-    )
+    return ensure_open_trade_exit_plan(trade, snap, news=news)
 
 
 def _execution_mode(settings) -> str:
@@ -3458,9 +3406,9 @@ async def _process_open_trades(
         profile = snap.optimizedProfile or get_session_targets()
         is_explosion = trade.strategyType == StrategyType.EXPLOSIVE
         is_swing = trade.strategyType == StrategyType.SWING
-        plan_dict = (trade.entryContext or {}).get("exitPlan")
-        use_adaptive = settings.adaptive_exits_enabled and (
-            plan_dict or trade.strategyType == StrategyType.EXPLOSIVE
+        plan_dict = ensure_open_trade_exit_plan(trade, snap)
+        use_adaptive = should_trade_use_adaptive_stop(trade, settings) and (
+            trade.strategyType == StrategyType.EXPLOSIVE or bool(plan_dict)
         )
 
         live_vel = _trade_premium_velocity_points(snap, trade)

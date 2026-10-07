@@ -609,6 +609,15 @@ async def adopt_untracked_broker_legs(
 
         from app.models.schemas import PaperTrade, StrategyType
 
+        entry_ctx: dict[str, Any] = {
+            "instrumentKey": instrument_key,
+            "executionMode": "LIVE",
+            "brokerAdopted": True,
+            "brokerQuantity": qty,
+            "lotSize": lot_size,
+            "chopLiveGuard": chop_flag,
+            "tradingSymbol": trading_symbol,
+        }
         trade = PaperTrade(
             id=str(uuid.uuid4())[:8],
             symbol=symbol,
@@ -620,16 +629,12 @@ async def adopt_untracked_broker_legs(
             openedAt=datetime.now(IST),
             strategyType=StrategyType.EXPLOSIVE,
             sessionDate=datetime.now(IST).strftime("%Y-%m-%d"),
-            entryContext={
-                "instrumentKey": instrument_key,
-                "executionMode": "LIVE",
-                "brokerAdopted": True,
-                "brokerQuantity": qty,
-                "lotSize": lot_size,
-                "chopLiveGuard": chop_flag,
-                "tradingSymbol": trading_symbol,
-            },
+            entryContext=entry_ctx,
         )
+        if snap is not None:
+            from app.engines.adaptive_exits import ensure_open_trade_exit_plan
+
+            ensure_open_trade_exit_plan(trade, snap)
         state.openPaperTrades.append(trade)
         tracked_keys.add(instrument_key)
         _adopted_instrument_keys_session.add(instrument_key)

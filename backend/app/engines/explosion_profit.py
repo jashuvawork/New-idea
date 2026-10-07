@@ -469,6 +469,14 @@ def default_explosion_exit_params(event_tier: str = "EXPLODING") -> ExplosionExi
     )
 
 
+def _plan_uses_adaptive_stop(plan) -> bool:
+    if hasattr(plan, "adaptiveStop"):
+        return bool(getattr(plan, "adaptiveStop", True))
+    if isinstance(plan, dict):
+        return bool(plan.get("adaptiveStop", True))
+    return True
+
+
 def explosion_exit_params_from_plan(plan, event_tier: str = "EXPLODING") -> ExplosionExitParams:
     """Map adaptive exit plan onto explosion exit knobs — per-trade SL, no fixed stop."""
     base = default_explosion_exit_params(event_tier)
@@ -478,7 +486,7 @@ def explosion_exit_params_from_plan(plan, event_tier: str = "EXPLODING") -> Expl
         trail_arm_points=plan.trailArmPoints or base.trail_arm_points,
         trail_keep_ratio=plan.trailKeepRatio or base.trail_keep_ratio,
         micro_target_points=plan.microTargetPoints or base.micro_target_points,
-        adaptive_stop=True,
+        adaptive_stop=_plan_uses_adaptive_stop(plan),
     )
 
 
@@ -2192,8 +2200,24 @@ def evaluate_explosion_exit(
     from app.engines.risk_stops import live_hold_to_structural_sl
 
     hold_to_sl = live_hold_to_structural_sl(settings)
-    exit_params = params or default_explosion_exit_params(event_tier)
     ctx = trade.entryContext or {}
+    exit_params = params
+    if exit_params is None:
+        from app.engines.adaptive_exits import AdaptiveExitPlan, should_trade_use_adaptive_stop
+
+        plan_raw = ctx.get("exitPlan") or {}
+        plan_stop = float(plan_raw.get("stopPoints") or 0) if isinstance(plan_raw, dict) else 0.0
+        if (
+            should_trade_use_adaptive_stop(trade, settings)
+            and isinstance(plan_raw, dict)
+            and plan_stop > 0
+        ):
+            exit_params = explosion_exit_params_from_plan(
+                AdaptiveExitPlan.from_dict(plan_raw),
+                event_tier,
+            )
+        else:
+            exit_params = default_explosion_exit_params(event_tier)
     if ctx.get("afternoonCapture"):
         from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
 
