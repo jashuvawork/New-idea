@@ -214,9 +214,9 @@ def live_early_fail_exit_reason(
 ) -> Optional[str]:
     """Scratch live entries that never go green — even under structural hold."""
     settings = get_settings()
-    from app.engines.live_paper_parity import live_paper_parity_active
+    from app.engines.live_paper_parity import trading_rules_match_paper
 
-    if live_paper_parity_active(settings):
+    if trading_rules_match_paper(settings):
         return None
     if not getattr(settings, "live_early_fail_exit_enabled", True):
         return None

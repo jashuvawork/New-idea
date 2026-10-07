@@ -849,9 +849,9 @@ def should_use_live_broker_capital() -> bool:
     sizes from the same ₹2L book cap as paper — not broker margin.
     """
     settings = get_settings()
-    from app.engines.live_paper_parity import live_paper_parity_active
+    from app.engines.live_paper_parity import entry_gates_match_paper
 
-    if live_paper_parity_active(settings):
+    if entry_gates_match_paper(settings):
         return False
     return bool(
         getattr(settings, "use_upstox_capital_for_sizing", False)

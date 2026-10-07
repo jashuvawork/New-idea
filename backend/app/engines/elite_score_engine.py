@@ -768,9 +768,9 @@ def elite_side_local_base_cap(
             effective_near_base_max_local_pct,
             symmetric_best_trade_at_base_capture,
         )
-        from app.engines.live_paper_parity import live_paper_parity_active
+        from app.engines.live_paper_parity import trading_rules_match_paper
 
-        if live_paper_parity_active(settings):
+        if trading_rules_match_paper(settings):
             ok, _ = symmetric_best_trade_at_base_capture(
                 evidence,
                 evidence,
