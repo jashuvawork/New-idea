@@ -170,6 +170,9 @@ class Settings(BaseSettings):
     live_paper_parity_pad_entry_guard_enabled: bool = True
     live_paper_parity_max_session_range_position: float = 0.52
     live_paper_parity_min_off_session_high_pct: float = 6.0
+    # Old ₹10k live-only narrow stack (grade-S gate, structural hold, chop-live wire).
+    # Ignored when Frozen October or live↔paper mirror is active — see legacy_live_narrow_stack_active().
+    legacy_live_narrow_stack_enabled: bool = False
 
     # Latency profile — normal uses field defaults; low/aggressive apply cadence presets
     latency_mode: Literal["normal", "low", "aggressive"] = "low"

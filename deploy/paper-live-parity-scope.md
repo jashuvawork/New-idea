@@ -9,6 +9,12 @@
 - Session force-flat at power-hour end (live + paper parity / frozen stack)
 - Adaptive exit plans on open legs (shared path)
 
+## Legacy live-only stack (hard-disabled on Frozen Oct)
+
+The old ₹10k narrow profile (`env.live-10k.overlay`: grade-S gate, structural hold, chop-live wire, Upstox margin sizing) runs **only** when `LEGACY_LIVE_NARROW_STACK_ENABLED=true` **and** Frozen October is off. It cannot be combined with `env.october-frozen.overlay` (go-live script and env audit refuse).
+
+HUD: `livePaperProfile.legacyLiveNarrowStackActive`.
+
 ## Still different (cannot fully clone)
 
 - **Broker fill price & latency** — live uses Upstox; paper uses LTP ± optional slippage sim

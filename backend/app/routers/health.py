@@ -34,6 +34,12 @@ def __trading_rules_match_paper(settings) -> bool:
     return trading_rules_match_paper(settings)
 
 
+def __legacy_live_narrow_stack_active(settings) -> bool:
+    from app.engines.live_paper_parity import legacy_live_narrow_stack_active
+
+    return legacy_live_narrow_stack_active(settings)
+
+
 def __live_paper_profile_flags(settings) -> dict:
     from app.engines.live_paper_parity import live_paper_profile_ok, live_paper_profile_summary
 
@@ -102,6 +108,7 @@ async def deployment_status():
             ),
             "entryGatesMatchPaper": __entry_gates_match_paper(settings),
             "tradingRulesMatchPaper": __trading_rules_match_paper(settings),
+            "legacyLiveNarrowStackActive": __legacy_live_narrow_stack_active(settings),
             "livePaperProfile": __live_paper_profile_flags(settings),
             "liveBestTradesOnlyEnabled": bool(
                 getattr(settings, "live_best_trades_only_enabled", True)

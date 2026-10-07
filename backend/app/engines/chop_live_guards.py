@@ -388,13 +388,9 @@ def chop_live_entry_blocked(
         from app.engines.worst_day_guard import identify_worst_day
 
         verdict = identify_worst_day(state, snapshots)
-        from app.engines.live_paper_parity import entry_gates_match_paper
+        from app.engines.live_paper_parity import legacy_live_narrow_stack_active
 
-        if (
-            verdict.is_worst
-            and settings.enable_live_trading
-            and not entry_gates_match_paper(settings)
-        ):
+        if verdict.is_worst and legacy_live_narrow_stack_active(settings):
             meta["worstDayHardBlock"] = True
             meta["worstDayReasons"] = verdict.reasons
             return True, "chop_live_worst_day_hard_block", meta

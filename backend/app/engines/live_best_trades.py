@@ -71,9 +71,9 @@ def live_best_trade_entry_blocked(
     """
     settings = get_settings()
     meta: dict[str, Any] = {"liveBestTradeGate": True}
-    from app.engines.live_paper_parity import entry_gates_match_paper
+    from app.engines.live_paper_parity import legacy_live_narrow_stack_active
 
-    if entry_gates_match_paper(settings):
+    if not legacy_live_narrow_stack_active(settings):
         return False, "ok", meta
     if not getattr(settings, "live_best_trades_only_enabled", True):
         return False, "ok", meta
@@ -214,9 +214,9 @@ def live_early_fail_exit_reason(
 ) -> Optional[str]:
     """Scratch live entries that never go green — even under structural hold."""
     settings = get_settings()
-    from app.engines.live_paper_parity import trading_rules_match_paper
+    from app.engines.live_paper_parity import legacy_live_narrow_stack_active
 
-    if trading_rules_match_paper(settings):
+    if not legacy_live_narrow_stack_active(settings):
         return None
     if not getattr(settings, "live_early_fail_exit_enabled", True):
         return None

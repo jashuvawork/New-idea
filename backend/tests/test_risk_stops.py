@@ -17,6 +17,8 @@ def test_live_hold_when_explicitly_enabled():
     s.live_hold_to_structural_sl = True
     s.live_paper_parity_enabled = False
     s.live_trade_selection_parity_with_paper = False
+    s.october_frozen_profile_enabled = False
+    s.legacy_live_narrow_stack_enabled = True
     assert live_hold_to_structural_sl(s) is True
 
 
