@@ -1639,6 +1639,9 @@ class Settings(BaseSettings):
     # Also arm %-keep when best gain hits this many points on max-profit legs — ITM
     # premiums (Sep2 SENSEX PUT 76300 +31pt = +11.7%) never reach 25% arm otherwise.
     ftv_runner_pct_trail_arm_min_best_points: float = 20.0
+    # Point-arm on max-profit legs still needs this min % off entry (Oct7 72600 CE +20pt
+    # but +5% scratched; Sep2 +31pt at +11.7% still arms).
+    ftv_runner_pct_trail_max_profit_min_gain_pct: float = 8.0
     ftv_runner_pct_trail_keep_ratio: float = 0.75
     ftv_runner_pct_trail_min_best_points: float = 6.0
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
