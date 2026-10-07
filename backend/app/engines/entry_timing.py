@@ -375,6 +375,35 @@ def timing_blocks_entry(timing: dict[str, Any]) -> tuple[bool, str]:
     return True, f"entry_timing_{label.lower()}_{why}"
 
 
+def failed_launch_live_hard_block(
+    timing: dict[str, Any],
+    *,
+    settings: Any = None,
+    live: bool = False,
+) -> bool:
+    """True when LIVE must reject entry — FAILED_LAUNCH block is not waivable.
+
+    Oct 7 SENSEX 72600 CE: timing said wait_for_positive_reacceleration but
+    first_lift_bypasses_cold_timing + pad-lane waived the block and max-sized live.
+    """
+    s = settings or get_settings()
+    if not live:
+        return False
+    if not bool(getattr(s, "live_failed_launch_timing_hard_block_enabled", True)):
+        return False
+    if not bool(getattr(s, "entry_timing_assessment_enabled", True)):
+        return False
+    if str(timing.get("assessment") or "").upper() != "FAILED_LAUNCH":
+        return False
+    if str(timing.get("action") or "") != "block":
+        return False
+    min_v = float(
+        getattr(s, "live_failed_launch_reacceleration_min_velocity_3s", 0.0) or 0.0
+    )
+    live_v = float(timing.get("liveVelocity3s") or 0)
+    return live_v + 1e-9 < min_v
+
+
 def cap_lots_for_timing(lots: int, timing: dict[str, Any]) -> int:
     """Apply lot cap when timing says lot_cap (COLD soft path)."""
     settings = get_settings()
