@@ -161,6 +161,9 @@ class Settings(BaseSettings):
     # Full paper parity: same entries, exits, sizing guards, and chop rules as paper; only
     # order routing uses the live broker. Alias: LIVE_TRADE_SELECTION_PARITY_WITH_PAPER also enables.
     live_paper_parity_enabled: bool = False
+    # Oct 1 / Sep917 paper stack on live: ATM/ITM near-base (v_rip / pad-lane) may fill through
+    # chop deep-ITM chase guard — same as paper parity sessions.
+    live_paper_parity_near_base_waives_chop_deep_chase: bool = True
 
     # Latency profile — normal uses field defaults; low/aggressive apply cadence presets
     latency_mode: Literal["normal", "low", "aggressive"] = "low"
