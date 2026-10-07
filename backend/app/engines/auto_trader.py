@@ -2074,13 +2074,13 @@ async def _open_from_candidate(
         getattr(settings, "elite_full_lot_preserve_lots_over_sl_budget", True)
     ):
         top_rank_full_budget_lots = True
-    from app.engines.live_paper_parity import live_paper_parity_active
+    from app.engines.live_paper_parity import entry_gates_match_paper
 
     live_structural_hold = (
         bool(getattr(settings, "enable_live_trading", False))
         and bool(getattr(settings, "live_hold_to_structural_sl", False))
         and candidate.mode == "explosion"
-        and not live_paper_parity_active(settings)
+        and not entry_gates_match_paper(settings)
     )
     if live_structural_hold:
         top_rank_full_budget_lots = True
@@ -2285,9 +2285,13 @@ async def _open_from_candidate(
         from app.engines.chart_exit_levels import chart_trade_confidence
         entry_chart_conf, _ = chart_trade_confidence(snap, candidate.side)
 
-    from app.engines.live_paper_parity import live_paper_parity_active
+    from app.engines.live_paper_parity import (
+        entry_gates_match_paper,
+        live_paper_parity_active,
+    )
 
     live_parity_profile = live_paper_parity_active(settings)
+    gates_match_paper = entry_gates_match_paper(settings)
 
     ctx_extra: dict[str, Any] = {
         "selectionScore": round(candidate.score, 2),
@@ -2310,7 +2314,8 @@ async def _open_from_candidate(
         "optionExpiry": snap.optionExpiry,
         "slippage": slip_meta,
         "signalPremium": signal_premium,
-        "paperLiveParity": use_parity or (is_live and live_parity_profile),
+        "paperLiveParity": use_parity or (is_live and gates_match_paper),
+        "entryGatesMatchPaper": gates_match_paper,
         "livePaperParityProfile": live_parity_profile,
         "executionChart": chart_meta,
         "highConviction": bool(high_conviction),
@@ -2976,7 +2981,7 @@ async def _open_from_candidate(
         ctx_extra["ftvAuthorizationReason"] = final_policy.reason
         ctx_extra["ftvMaxCapitalPct"] = final_policy.max_capital_pct
 
-    from app.engines.live_paper_parity import live_paper_parity_active
+    from app.engines.live_paper_parity import entry_gates_match_paper
 
     from app.engines.live_oct1_pad_entry_guard import live_oct1_pad_entry_order_gate
 
@@ -2990,7 +2995,7 @@ async def _open_from_candidate(
 
     if (
         is_live
-        and not live_paper_parity_active(settings)
+        and not entry_gates_match_paper(settings)
         and candidate.mode == "explosion"
     ):
         from app.engines.live_best_trades import live_best_trade_entry_blocked
@@ -3015,7 +3020,7 @@ async def _open_from_candidate(
     )
 
     chop_live_wire = chop_live_guard_day_active(state, snap, snapshots) or (
-        is_live and not live_paper_parity_active(settings)
+        is_live and not entry_gates_match_paper(settings)
     )
     if candidate.mode == "explosion" and chop_live_wire:
         chop_blocked, chop_reason, chop_meta = chop_live_entry_blocked(
@@ -4513,13 +4518,13 @@ async def process(
             policy_meta["severePauseDeepItmLift"] = True
         if daily_loss_expiry_bypass:
             policy_meta["dailyLossStopExpiryTopBypass"] = True
-        from app.engines.live_paper_parity import live_paper_parity_active
+        from app.engines.live_paper_parity import entry_gates_match_paper
 
         if (
             settings.enable_live_trading
             and extreme_session
             and snapshots
-            and not live_paper_parity_active(settings)
+            and not entry_gates_match_paper(settings)
         ):
             from app.engines.chop_live_guards import chop_live_session_lift_allowed
 

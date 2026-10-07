@@ -105,13 +105,13 @@ class RiskEngine:
         # ELITE / live structural-SL sleeves size to the cash budget with a wide stop;
         # theoretical stop×lots may exceed max_risk_per_trade_inr. Daily loss stop is
         # the session backstop — do not pre-reject those entries here.
-        from app.engines.live_paper_parity import live_paper_parity_active
+        from app.engines.live_paper_parity import entry_gates_match_paper
 
         live_structural_hold = (
             bool(getattr(settings, "enable_live_trading", False))
             and bool(getattr(settings, "live_hold_to_structural_sl", False))
             and not is_swing
-            and not live_paper_parity_active(settings)
+            and not entry_gates_match_paper(settings)
         )
         if not ignore_per_trade_risk_cap and not live_structural_hold:
             max_loss = settings.swing_max_loss_inr if is_swing else settings.max_risk_per_trade_inr

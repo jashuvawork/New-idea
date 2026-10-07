@@ -13,7 +13,8 @@ Operational checklists for **live and paper** when [`env.october-frozen.overlay`
 | # | Check | Pass when |
 |---|--------|-----------|
 | 0.1 | Backend healthy | `/health` → `status: ok`, loop watchdog age &lt; 20s |
-| 0.2 | Rules deployed | `commit` on `/api/deployment/status` = merged `main` (includes Oct 1 **pad guard on live+frozen**, #707+) |
+| 0.2 | Rules deployed | `commit` on `/api/deployment/status` = merged `main` (includes Oct 1 **pad guard on live+frozen**, #707+). **Do not arm live** if commit is behind `main` or pad/timing parity fixes are missing. |
+| 0.2b | Entry gate parity | When live armed: `flags.entryGatesMatchPaper: true` (paper entry rules on live — Frozen Oct + auto, or explicit parity flags) |
 | 0.3 | Frozen October | `frozenOctoberProfile.profileOk: true`, `cePeSymmetricOk: true` |
 | 0.4 | Parity book | `livePaperProfile.profileOk: true`, `fallbackCapitalInr` = intended (e.g. 150000), `sizesFromPaperBook: true` |
 | 0.5 | Pad guard | `padEntryGuardEnabled: true` |

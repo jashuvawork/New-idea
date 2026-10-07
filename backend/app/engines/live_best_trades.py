@@ -71,9 +71,9 @@ def live_best_trade_entry_blocked(
     """
     settings = get_settings()
     meta: dict[str, Any] = {"liveBestTradeGate": True}
-    from app.engines.live_paper_parity import live_paper_parity_active
+    from app.engines.live_paper_parity import entry_gates_match_paper
 
-    if live_paper_parity_active(settings):
+    if entry_gates_match_paper(settings):
         return False, "ok", meta
     if not getattr(settings, "live_best_trades_only_enabled", True):
         return False, "ok", meta

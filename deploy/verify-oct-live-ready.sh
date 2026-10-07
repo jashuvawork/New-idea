@@ -109,6 +109,9 @@ if expect_live:
     if ready.get("readyForLive") is not True:
         print("readyForLive false; steps:", ready.get("armLiveSteps"), file=sys.stderr)
         sys.exit(1)
+    if f.get("entryGatesMatchPaper") is not True:
+        print("entryGatesMatchPaper false — live must use paper entry gates", file=sys.stderr)
+        sys.exit(1)
 else:
     if live and not paper:
         print("WARN: live is armed; set EXPECT_LIVE=true to validate live session", file=sys.stderr)
