@@ -80,6 +80,8 @@ def should_use_live_broker_capital_for_summary(settings: Any) -> bool:
 
 # Minimum sizing book for parity go-live (deploy/env.live-150k.overlay and env.live-200k.overlay).
 _LIVE_PAPER_PROFILE_MIN_CAPITAL_INR = 149_000.0
+# Frozen October small live book (deploy/env.live-50k.overlay).
+_FROZEN_OCT_SMALL_BOOK_MIN_CAPITAL_INR = 45_000.0
 
 
 def live_paper_profile_ok(settings: Any | None = None) -> tuple[bool, list[str]]:
@@ -101,7 +103,10 @@ def live_paper_profile_ok(settings: Any | None = None) -> tuple[bool, list[str]]
     if not bool(getattr(s, "sep917_legacy_profile_enabled", True)):
         issues.append("sep917_legacy_profile_disabled")
     cap = float(getattr(s, "fallback_capital_inr", 0) or 0)
-    if cap < _LIVE_PAPER_PROFILE_MIN_CAPITAL_INR:
+    min_cap = _LIVE_PAPER_PROFILE_MIN_CAPITAL_INR
+    if _strict_bool(getattr(s, "october_frozen_profile_enabled", False)):
+        min_cap = _FROZEN_OCT_SMALL_BOOK_MIN_CAPITAL_INR
+    if cap < min_cap:
         issues.append("fallback_capital_below_parity_min")
     if should_use_live_broker_capital_for_summary(s):
         issues.append("sizing_from_upstox_margin_not_paper_book")
