@@ -42,7 +42,6 @@ jobs:
               \"git pull --ff-only origin main || git reset --hard origin/main\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/execution/stop || true\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/auto-trader/reset || true\",
-              \"curl -sf -X POST http://127.0.0.1:8000/api/auto-trader/purge-logs || true\",
               \"sudo LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=${CAP} bash deploy/go-live-10k-monday.sh --arm-live\",
               \"curl -sf http://127.0.0.1:8000/api/deployment/status | python3 -m json.tool | head -40\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/execution/resume || true\"
