@@ -56,6 +56,34 @@ def _side_val(side: Any) -> str:
     return str(side or "").upper()
 
 
+def mirror_win_min_pnl_inr(side: str, *, settings: Any = None) -> float:
+    """Smallest trail-exit win that counts as a proved CE/PE capture for the mirror leg.
+
+    Capital-scaled so a real but modest win (Oct 7 SENSEX 72600 CE +₹542 on a ₹2L book)
+    still arms the opposite-side mirror and the post-win chase block. The fixed INR
+    setting stays an upper bound; the floor keeps scratch exits out.
+    """
+    settings = settings or get_settings()
+    key = (
+        "pe_win_ce_mirror_min_put_win_inr"
+        if str(side).upper() == "PUT"
+        else "ce_win_pe_mirror_min_call_win_inr"
+    )
+    fixed = float(getattr(settings, key, 1000.0) or 1000.0)
+    pct = float(getattr(settings, "mirror_win_min_capital_pct", 0.0) or 0.0)
+    if pct <= 0:
+        return fixed
+    capital = float(
+        getattr(settings, "max_sizing_capital_inr", 0)
+        or getattr(settings, "fallback_capital_inr", 0)
+        or 0
+    )
+    if capital <= 0:
+        return fixed
+    floor = float(getattr(settings, "mirror_win_min_floor_inr", 250.0) or 0.0)
+    return min(fixed, max(floor, capital * pct))
+
+
 def session_put_win_meta(
     state: Any = None,
     *,
@@ -66,9 +94,7 @@ def session_put_win_meta(
     if not bool(getattr(settings, "pe_win_ce_mirror_enabled", True)):
         return False, {}
 
-    min_pnl = float(
-        getattr(settings, "pe_win_ce_mirror_min_put_win_inr", 1000.0) or 1000.0
-    )
+    min_pnl = mirror_win_min_pnl_inr("PUT", settings=settings)
     trades = _collect_session_trades(state)
     put_wins: list[Any] = []
     for trade in trades:
@@ -129,9 +155,7 @@ def _seconds_since_last_put_win(state: Any, *, settings: Any = None) -> float | 
     if not pe_win:
         return None
     trades = _collect_session_trades(state)
-    min_pnl = float(
-        getattr(settings, "pe_win_ce_mirror_min_put_win_inr", 1000.0) or 1000.0
-    )
+    min_pnl = mirror_win_min_pnl_inr("PUT", settings=settings)
     latest: datetime | None = None
     for trade in trades:
         if str(
