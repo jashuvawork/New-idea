@@ -228,6 +228,24 @@ def test_pad_lane_ftv_waives_timing_block_on_v_rip(mock_settings):
 
 
 @patch("app.engines.pad_lane_capture.get_settings")
+def test_pad_lane_does_not_waive_failed_launch_negative_v3(mock_settings):
+    from app.engines.pad_lane_capture import pad_lane_ftv_waives_timing_block
+
+    mock_settings.return_value = _settings()
+    evidence = {
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "flatThenVertical": True,
+        "activeBreakout": True,
+        "localBaseMovePct": 21.0,
+        "timingAssessment": "FAILED_LAUNCH",
+        "velocity3s": -0.36,
+        "velocity9s": -0.36,
+    }
+    assert pad_lane_ftv_waives_timing_block(evidence) is False
+
+
+@patch("app.engines.pad_lane_capture.get_settings")
 def test_pad_lane_grade_floor_applies_for_elite_ftv(mock_settings):
     from app.engines.pad_lane_capture import pad_lane_grade_floor_applies
 

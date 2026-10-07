@@ -923,6 +923,13 @@ async def _open_from_candidate(
             ),
         )
         timing_blocked, timing_reason = timing_blocks_entry(timing_meta)
+        is_live_entry = settings.enable_live_trading and settings.auto_trading_enabled
+        from app.engines.entry_timing import failed_launch_live_hard_block
+
+        if timing_blocked and failed_launch_live_hard_block(
+            timing_meta, settings=settings, live=is_live_entry,
+        ):
+            return False, timing_reason
         coil_blocked, coil_reason = (False, "")
         if not timing_blocked:
             from app.engines.explosion_entry_guards import coil_top_entry_blocked

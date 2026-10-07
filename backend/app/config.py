@@ -2785,6 +2785,9 @@ class Settings(BaseSettings):
     pad_lane_first_lift_local_base_chart_bypass_enabled: bool = True
     # Pad-lane FTV may waive cold-velocity / FAILED_LAUNCH timing blocks at execution.
     pad_lane_ftv_waives_timing_block_enabled: bool = True
+    # LIVE: do not waive FAILED_LAUNCH (action block, v3 still negative) via first-lift / pad-lane.
+    live_failed_launch_timing_hard_block_enabled: bool = True
+    live_failed_launch_reacceleration_min_velocity_3s: float = 0.0
     # Floor rank grade to A for stamped pad-lane FTV (fixes replay top_moment_grade_reject).
     pad_lane_grade_floor_enabled: bool = True
     # Pad-lane FTV may authorize on rank 2+ sleeves — the moment is contract-specific

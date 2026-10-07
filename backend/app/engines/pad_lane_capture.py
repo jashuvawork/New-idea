@@ -139,6 +139,14 @@ def pad_lane_ftv_waives_timing_block(evidence: Mapping[str, Any]) -> bool:
     if evidence.get("faded") or evidence.get("exhaustedReentry"):
         return False
     timing = str(evidence.get("timingAssessment") or "").upper()
+    if timing == "FAILED_LAUNCH":
+        min_v = float(
+            getattr(settings, "live_failed_launch_reacceleration_min_velocity_3s", 0.0)
+            or 0.0
+        )
+        v3 = float(evidence.get("velocity3s") or 0)
+        if v3 + 1e-9 < min_v:
+            return False
     if timing in ("FADED", "FADING", "EXHAUSTED", "NEGATIVE", "REJECT", "BLOCKED"):
         return False
     from app.engines.index_confirmed_local_base import index_confirmed_waives_timing_block
