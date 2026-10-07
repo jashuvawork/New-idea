@@ -797,7 +797,7 @@ fi
 
 # Oct 1/5 paper go-live keys — template sync must not leave WORST_DAY_BLOCKS_LIVE=true etc.
 if [ -f "$REPO_DIR/deploy/apply-live-paper-parity-env.sh" ] && [ -f "$REPO_DIR/deploy/env.live-200k.overlay" ]; then
-  echo "Applying live ₹2L paper-parity env (preserving execution mode) ..."
+  echo "Applying Frozen October rules + paper-150k capital (preserving execution mode) ..."
   ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" bash "$REPO_DIR/deploy/apply-live-paper-parity-env.sh"
   if [ -f "$REPO_DIR/deploy/audit-live-paper-env.sh" ]; then
     ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" bash "$REPO_DIR/deploy/audit-live-paper-env.sh" || {

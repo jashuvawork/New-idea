@@ -145,11 +145,14 @@ if [ "$MODE" = "paper" ]; then
   echo "Restoring paper capital to ₹${PAPER_CAPITAL_INR}..."
   _set_env_key FALLBACK_CAPITAL_INR "$PAPER_CAPITAL_INR"
   _set_env_key MAX_SIZING_CAPITAL_INR "$PAPER_CAPITAL_INR"
+  echo "Clearing session calibration after disarm..."
+  curl -sf -X POST "http://127.0.0.1:8000/api/auto-trader/reset" >/dev/null 2>&1 || true
 fi
 
 if [ "$MODE" = "arm-live" ]; then
-  echo "Stopping auto-trader and clearing paper session before live arm..."
+  echo "Stopping auto-trader and clearing session before live arm..."
   curl -sf -X POST "http://127.0.0.1:8000/api/execution/stop" >/dev/null 2>&1 || true
+  curl -sf -X POST "http://127.0.0.1:8000/api/auto-trader/reset" >/dev/null 2>&1 || true
   curl -sf -X POST "http://127.0.0.1:8000/api/auto-trader/purge-logs" >/dev/null 2>&1 || true
   echo "Arming live execution..."
   _set_env_key ENABLE_LIVE_TRADING true
@@ -216,27 +219,56 @@ if d.get('armLiveSteps'):
 
 if [ "$MODE" = "arm-live" ]; then
   echo "Deployment flags:"
+  EXPECT_CAPITAL="${LIVE_CAPITAL_INR}" \
   curl -sf "$STATUS_URL" | python3 -c "
-import json, sys
+import json, os, sys
 d = json.load(sys.stdin)
 f = d.get('flags') or {}
+expect_cap = float(os.environ.get('EXPECT_CAPITAL', '150000') or 150000)
+expect_loss = expect_cap * 0.10
 print('  commit:', d.get('commit'))
+if not d.get('commit'):
+    raise SystemExit('ERROR: deployment status missing commit — backend not ready')
 print('  enableLiveTrading:', f.get('enableLiveTrading'))
 print('  paperTrading:', f.get('paperTrading'))
 print('  livePaperParityEnabled:', f.get('livePaperParityEnabled'))
 print('  liveBestTradesOnlyEnabled:', f.get('liveBestTradesOnlyEnabled'))
 print('  fallbackCapitalInr:', f.get('fallbackCapitalInr'))
+print('  dailyLossStopInr:', f.get('dailyLossStopInr'))
 if not f.get('enableLiveTrading') or f.get('paperTrading'):
     raise SystemExit('ERROR: live arm failed — still on paper')
 if f.get('livePaperParityEnabled') is not True:
-    print('  WARN: livePaperParityEnabled is not true — check env.live-200k.overlay merge')
+    raise SystemExit('ERROR: livePaperParityEnabled is not true — apply env.october-frozen.overlay')
+frozen = d.get('frozenOctoberProfile') or {}
+print('  frozenOctoberProfileOk:', frozen.get('profileOk'))
+if frozen.get('profileIssues'):
+    print('  frozenOctoberIssues:', frozen.get('profileIssues'))
+if frozen.get('profileOk') is not True:
+    raise SystemExit('ERROR: Frozen October profile not OK — run --prepare with october-frozen overlay')
 prof = f.get('livePaperProfile') or {}
 print('  livePaperProfileOk:', prof.get('profileOk'))
 if prof.get('profileIssues'):
     print('  profileIssues:', prof.get('profileIssues'))
 if prof.get('profileOk') is not True:
     raise SystemExit('ERROR: live env is not Oct paper profile — run --prepare and restart')
+cap = float(f.get('fallbackCapitalInr') or 0)
+loss = float(f.get('dailyLossStopInr') or 0)
+if abs(cap - expect_cap) > 1.0:
+    raise SystemExit(f'ERROR: fallbackCapitalInr {cap} != expected {expect_cap}')
+if abs(loss - expect_loss) > 1.0:
+    raise SystemExit(f'ERROR: dailyLossStopInr {loss} != expected {expect_loss}')
 " 2>/dev/null || echo "  (deployment status not ready yet)"
+  echo "Readiness gate:"
+  curl -sf "$READINESS_URL" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print('  readyForLive:', d.get('readyForLive'))
+if d.get('readyForLive') is not True:
+    steps = d.get('armLiveSteps') or []
+    for s in steps[:6]:
+        print('   -', s)
+    raise SystemExit('ERROR: readyForLive is false — fix armLiveSteps before session')
+" 2>/dev/null || echo "  (readiness endpoint not ready yet)"
 fi
 
 echo ""

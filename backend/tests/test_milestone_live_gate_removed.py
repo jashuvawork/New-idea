@@ -82,6 +82,18 @@ def test_milestone_does_not_block_ready_for_live():
             return_value=(True, []),
         ),
         patch(
+            "app.engines.october_frozen_profile.october_frozen_profile_ok",
+            return_value=(True, []),
+        ),
+        patch(
+            "app.engines.october_frozen_profile.october_frozen_profile_summary",
+            return_value={
+                "active": True,
+                "padEntryGuardEnabled": True,
+                "symmetricBestTradeCaptureEnabled": True,
+            },
+        ),
+        patch(
             "app.routers.health.get_settings",
             return_value=SimpleNamespace(
                 symbols=["NIFTY", "SENSEX"],
