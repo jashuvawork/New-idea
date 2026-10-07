@@ -153,7 +153,14 @@ if [ "$MODE" = "arm-live" ]; then
   echo "Stopping auto-trader and clearing session before live arm..."
   curl -sf -X POST "http://127.0.0.1:8000/api/execution/stop" >/dev/null 2>&1 || true
   curl -sf -X POST "http://127.0.0.1:8000/api/auto-trader/reset" >/dev/null 2>&1 || true
-  curl -sf -X POST "http://127.0.0.1:8000/api/auto-trader/purge-logs" >/dev/null 2>&1 || true
+  echo "Auditing env against Frozen October + capital overlay before arming..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "[dry-run] audit $ENV_FILE vs $RULES_OVERLAY + $OVERLAY"
+  elif ! ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" RULES_OVERLAY="$RULES_OVERLAY" \
+      CAPITAL_OVERLAY="$OVERLAY" bash "$REPO_DIR/deploy/audit-live-paper-env.sh"; then
+    echo "ERROR: env drifted from paper rules — refusing to arm live (still paper)" >&2
+    exit 1
+  fi
   echo "Arming live execution..."
   _set_env_key ENABLE_LIVE_TRADING true
   _set_env_key PAPER_TRADING false
