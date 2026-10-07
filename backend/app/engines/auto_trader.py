@@ -922,6 +922,11 @@ async def _open_from_candidate(
                 candidate.explosion_event, chart=snap.spotChart,
             ),
         )
+        from app.engines.live_oct1_pad_entry_guard import apply_oct1_pad_timing_block
+
+        timing_meta = apply_oct1_pad_timing_block(
+            timing_meta, candidate, snap, settings=settings,
+        )
         timing_blocked, timing_reason = timing_blocks_entry(timing_meta)
         coil_blocked, coil_reason = (False, "")
         if not timing_blocked:

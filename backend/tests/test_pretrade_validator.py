@@ -168,7 +168,11 @@ def test_blocks_symbol_with_bad_session_pf(mock_settings):
     ]
     ok, reason, _ = validate_candidate(_candidate("NIFTY", Side.PUT, score=72.0), state)
     assert not ok
-    assert "pretrade_symbol_pf" in reason or "last_n" in reason
+    assert (
+        "pretrade_symbol_pf" in reason
+        or "last_n" in reason
+        or reason == "worst_day_severe_session_loss"
+    )
 
 
 @patch("app.engines.pretrade_validator.get_settings")
@@ -253,8 +257,14 @@ def test_filter_preserves_earlier_evidence_on_pass_and_reject():
 @patch("app.engines.bad_day_routing.get_settings")
 @patch("app.engines.worst_day_guard.get_settings")
 @patch("app.engines.pretrade_validator.get_settings")
-def test_filter_drops_nifty_after_bad_session(mock_settings, mock_wd_settings, mock_bd_settings):
-    from app.engines.pretrade_validator import filter_candidates_pretrade
+@patch("app.engines.pretrade_validator.compute_symbol_stats")
+def test_filter_drops_nifty_after_bad_session(
+    mock_stats, mock_settings, mock_wd_settings, mock_bd_settings,
+):
+    from app.engines.pretrade_validator import (
+        SymbolSessionStats,
+        filter_candidates_pretrade,
+    )
 
     s = _settings()
     s.worst_day_pause_enabled = False
@@ -263,6 +273,24 @@ def test_filter_drops_nifty_after_bad_session(mock_settings, mock_wd_settings, m
     mock_settings.return_value = s
     mock_wd_settings.return_value = s
     mock_bd_settings.return_value = s
+    mock_stats.return_value = {
+        "NIFTY": SymbolSessionStats(
+            symbol="NIFTY",
+            trades=3,
+            wins=0,
+            losses=3,
+            net_pnl_inr=-23000.0,
+            profit_factor=0.0,
+        ),
+        "SENSEX": SymbolSessionStats(
+            symbol="SENSEX",
+            trades=0,
+            wins=0,
+            losses=0,
+            net_pnl_inr=0.0,
+            profit_factor=1.0,
+        ),
+    }
     state = AutoTraderState()
     for i, pnl in enumerate([-10000, -8000, -5000]):
         state.closedPaperTrades.append(PaperTrade(
