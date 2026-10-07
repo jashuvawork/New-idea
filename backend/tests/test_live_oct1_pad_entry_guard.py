@@ -46,6 +46,40 @@ def test_blocks_oct7_style_chase_at_session_high():
     assert meta.get("nearBaseShape") is True
 
 
+def test_blocks_pe_chase_at_session_high_symmetric():
+    s = settings_mock(
+        live_paper_parity_enabled=True,
+        sep917_legacy_profile_enabled=True,
+        symmetric_best_trade_capture_enabled=True,
+        best_trade_sep917_base_shape_align_enabled=True,
+        best_trade_base_first_enabled=True,
+    )
+    cand = SimpleNamespace(
+        mode="explosion",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=22650.0,
+        premium=142.0,
+        alert={
+            "tier": "ELITE",
+            "momentType": "v_rip_session_low",
+            "localBaseMovePct": 7.2,
+            "premium": 142.0,
+            "sessionLowPremium": 98.0,
+            "sessionPeakPremium": 142.5,
+            "side": "PUT",
+        },
+        pretrade_meta={},
+        liveEntryScoreMeta={
+            "sessionRangePosition": 0.99,
+            "drawdownFromHighPct": -0.3,
+        },
+    )
+    blocked, reason, _ = live_oct1_pad_entry_blocked(cand, settings=s)
+    assert blocked is True
+    assert "live_oct1_chase" in reason
+
+
 def test_allows_pad_fill_off_session_high():
     s = settings_mock(
         live_paper_parity_enabled=True,
