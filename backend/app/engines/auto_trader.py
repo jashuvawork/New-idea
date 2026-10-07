@@ -2332,6 +2332,10 @@ async def _open_from_candidate(
         from app.engines.chart_exit_levels import chart_trade_confidence
         entry_chart_conf, _ = chart_trade_confidence(snap, candidate.side)
 
+    from app.engines.live_paper_parity import live_paper_parity_active
+
+    live_parity_profile = live_paper_parity_active(settings)
+
     ctx_extra: dict[str, Any] = {
         "selectionScore": round(candidate.score, 2),
         "radarScoreAtEntry": round(
@@ -2353,7 +2357,8 @@ async def _open_from_candidate(
         "optionExpiry": snap.optionExpiry,
         "slippage": slip_meta,
         "signalPremium": signal_premium,
-        "paperLiveParity": use_parity,
+        "paperLiveParity": use_parity or (is_live and live_parity_profile),
+        "livePaperParityProfile": live_parity_profile,
         "executionChart": chart_meta,
         "highConviction": bool(high_conviction),
         "elevatedSize": bool(elevated_size),

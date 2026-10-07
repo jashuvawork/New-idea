@@ -754,15 +754,33 @@ def elite_side_local_base_cap(
             getattr(settings, "pe_win_ce_mirror_local_cap_pct", 15.0) or 15.0
         )
         return min(general, mirror_cap)
+    cap = general
     if side_u == "CALL":
         call_cap = float(getattr(settings, "elite_call_max_local_base_pct", 0.0) or 0.0)
         if call_cap > 0:
-            return min(general, call_cap)
+            cap = min(general, call_cap)
     elif side_u == "PUT":
         put_cap = float(getattr(settings, "elite_put_max_local_base_pct", 0.0) or 0.0)
         if put_cap > 0:
-            return min(general, put_cap)
-    return general
+            cap = min(general, put_cap)
+    if evidence is not None:
+        from app.engines.best_trade_policy import (
+            effective_near_base_max_local_pct,
+            symmetric_best_trade_at_base_capture,
+        )
+        from app.engines.live_paper_parity import live_paper_parity_active
+
+        if live_paper_parity_active(settings):
+            ok, _ = symmetric_best_trade_at_base_capture(
+                evidence,
+                ranking if isinstance(ranking, Mapping) else None,
+                evidence,
+                settings=settings,
+            )
+            if ok:
+                cap = max(cap, effective_near_base_max_local_pct(settings))
+                cap = min(cap, general)
+    return cap
 
 
 def elite_side_day_mode_blocked(
