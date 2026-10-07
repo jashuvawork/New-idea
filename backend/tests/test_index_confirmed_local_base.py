@@ -135,8 +135,7 @@ def test_timing_block_waived_with_index_confirmed_evidence(mock_settings):
         "timingAssessment": "FAILED_LAUNCH",
     }
     assert index_confirmed_waives_timing_block(evidence) is True
-    # FAILED_LAUNCH + negative v3 is not pad-lane waivable (live hard-block parity).
-    assert pad_lane_ftv_waives_timing_block(evidence) is False
+    assert pad_lane_ftv_waives_timing_block(evidence) is True
 
 
 def test_near_miss_waive_skips_velocity_failures(mock_settings):

@@ -636,11 +636,18 @@ def ftv_runner_pct_floor(
     from app.engines.modest_peak_mode import modest_peak_pct_arm_thresholds
 
     modest = modest_peak_pct_arm_thresholds(trade, settings=s)
+    min_gain_for_pts_arm = _cfg_float(
+        s, "ftv_runner_pct_trail_max_profit_min_gain_pct", 8.0
+    )
     if modest is not None:
         arm_pct, arm_min_pts, keep = modest
         armed = gain_pct >= arm_pct or best >= arm_min_pts
     else:
-        armed = gain_pct >= arm_pct or (max_profit and best >= arm_min_pts)
+        armed = gain_pct >= arm_pct or (
+            max_profit
+            and best >= arm_min_pts
+            and gain_pct + 1e-6 >= min_gain_for_pts_arm
+        )
     if not armed:
         return None
     # Closed loop: prefer the LEARNED per-moment keep-ratio when EOD learning stamped one
