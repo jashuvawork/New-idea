@@ -21,6 +21,7 @@
 #   LIVE_OVERLAY= Path to overlay (default deploy/env.live-200k.overlay)
 #   LIVE_CAPITAL_INR= Runtime capital ceiling when arming (default 200000)
 #   PAPER_CAPITAL_INR= Paper capital when disarming (default 200000)
+#   ₹1.5L live: LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000
 #   Small-cap legacy: LIVE_OVERLAY=deploy/env.live-10k.overlay LIVE_CAPITAL_INR=10000
 #
 set -euo pipefail

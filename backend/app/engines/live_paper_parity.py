@@ -1,4 +1,4 @@
-"""When armed for ₹2L live, match paper trading rules — only execution differs (real broker)."""
+"""When armed for live paper parity (₹1.5L / ₹2L book), match paper rules — only execution differs."""
 
 from __future__ import annotations
 
@@ -60,8 +60,12 @@ def should_use_live_broker_capital_for_summary(settings: Any) -> bool:
     return should_use_live_broker_capital()
 
 
+# Minimum sizing book for parity go-live (deploy/env.live-150k.overlay and env.live-200k.overlay).
+_LIVE_PAPER_PROFILE_MIN_CAPITAL_INR = 149_000.0
+
+
 def live_paper_profile_ok(settings: Any | None = None) -> tuple[bool, list[str]]:
-    """True when env matches deploy/env.live-200k.overlay (Oct paper go-live profile)."""
+    """True when env matches deploy/env.live-150k or env.live-200k overlay (Oct paper profile)."""
     from app.config import get_settings
 
     s = settings or get_settings()
@@ -79,8 +83,8 @@ def live_paper_profile_ok(settings: Any | None = None) -> tuple[bool, list[str]]
     if not bool(getattr(s, "sep917_legacy_profile_enabled", True)):
         issues.append("sep917_legacy_profile_disabled")
     cap = float(getattr(s, "fallback_capital_inr", 0) or 0)
-    if cap < 199_000:
-        issues.append("fallback_capital_below_200k")
+    if cap < _LIVE_PAPER_PROFILE_MIN_CAPITAL_INR:
+        issues.append("fallback_capital_below_parity_min")
     if should_use_live_broker_capital_for_summary(s):
         issues.append("sizing_from_upstox_margin_not_paper_book")
     return (len(issues) == 0, issues)
