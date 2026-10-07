@@ -79,6 +79,7 @@ def test_worst_day_blocks_live_off_when_selection_parity():
 
 def test_live_10k_overlay_scales_capital_and_risk():
     env = _overlay_values("env.live-10k.overlay")
+    assert env["LEGACY_LIVE_NARROW_STACK_ENABLED"] == "true"
     assert env["FALLBACK_CAPITAL_INR"] == "10000"
     assert env["MAX_SIZING_CAPITAL_INR"] == "10000"
     assert env["USE_UPSTOX_CAPITAL_FOR_SIZING"] == "true"
@@ -265,7 +266,10 @@ def test_live_structural_hold_bypasses_entry_per_trade_risk_cap():
     with (
         patch("app.engines.risk_engine.get_settings", return_value=settings),
         patch("app.engines.risk_engine.get_capital_snapshot", return_value=cap),
-        patch("app.engines.live_paper_parity.live_paper_parity_active", return_value=False),
+        patch(
+            "app.engines.live_paper_parity.legacy_live_narrow_stack_active",
+            return_value=True,
+        ),
     ):
         ok, reason = engine.check_new_entry(
             state,

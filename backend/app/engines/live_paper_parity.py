@@ -52,6 +52,25 @@ def trading_rules_match_paper(settings: Any | None = None) -> bool:
     return entry_gates_match_paper(s)
 
 
+def legacy_live_narrow_stack_active(settings: Any | None = None) -> bool:
+    """
+    Old ₹10k-style live-only stack (best-trades-only, structural hold, chop-live wire).
+
+    Hard-disabled when Frozen October or paper-mirror rules are active. Opt-in only via
+    legacy_live_narrow_stack_enabled (deploy/env.live-10k.overlay).
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not _strict_bool(getattr(s, "enable_live_trading", False)):
+        return False
+    if trading_rules_match_paper(s):
+        return False
+    if _strict_bool(getattr(s, "october_frozen_profile_enabled", False)):
+        return False
+    return _strict_bool(getattr(s, "legacy_live_narrow_stack_enabled", False))
+
+
 def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
     """HUD / readiness: Oct 1 / 5 paper stack when live is armed with parity."""
     from app.config import get_settings
@@ -63,6 +82,7 @@ def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
         "active": parity,
         "entryGatesMatchPaper": gates,
         "tradingRulesMatchPaper": trading_rules_match_paper(s),
+        "legacyLiveNarrowStackActive": legacy_live_narrow_stack_active(s),
         "liveBestTradesOnlyEnabled": bool(getattr(s, "live_best_trades_only_enabled", True)),
         "worstDayBlocksLive": bool(getattr(s, "worst_day_blocks_live", True)),
         "liveHoldToStructuralSl": bool(getattr(s, "live_hold_to_structural_sl", False)),

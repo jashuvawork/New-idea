@@ -152,6 +152,12 @@ if [ "$MODE" = "paper" ]; then
 fi
 
 if [ "$MODE" = "arm-live" ]; then
+  if grep -q '^OCTOBER_FROZEN_PROFILE_ENABLED=true' "$RULES_OVERLAY" 2>/dev/null \
+    && [[ "$OVERLAY" == *live-10k* ]]; then
+    echo "ERROR: env.live-10k overlay is incompatible with Frozen October rules overlay" >&2
+    echo "Use env.live-50k.overlay or env.live-150k.overlay with Oct frozen stack." >&2
+    exit 1
+  fi
   echo "Stopping auto-trader and clearing session before live arm..."
   curl -sf -X POST "http://127.0.0.1:8000/api/execution/stop" >/dev/null 2>&1 || true
   curl -sf -X POST "http://127.0.0.1:8000/api/auto-trader/reset" >/dev/null 2>&1 || true

@@ -80,6 +80,12 @@ FORBIDDEN_WHEN_PARITY=(
 )
 parity_on="$(env_val LIVE_PAPER_PARITY_ENABLED)"
 oct_frozen="$(env_val OCTOBER_FROZEN_PROFILE_ENABLED)"
+legacy_narrow="$(env_val LEGACY_LIVE_NARROW_STACK_ENABLED)"
+if [ "$oct_frozen" = "true" ] && [ "$legacy_narrow" = "true" ]; then
+  echo "FORBIDDEN: LEGACY_LIVE_NARROW_STACK_ENABLED with OCTOBER_FROZEN_PROFILE_ENABLED"
+  mismatch=1
+fi
+
 live_on="$(env_val ENABLE_LIVE_TRADING)"
 expect_live="${EXPECT_LIVE:-false}"
 if [ "$expect_live" = "true" ] || [ "$live_on" = "true" ]; then
