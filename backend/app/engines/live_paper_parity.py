@@ -40,6 +40,8 @@ def trading_rules_match_paper(settings: Any | None = None) -> bool:
     Frozen Oct / parity rule stack — live with entry_gates_match_paper, or paper with same profile.
 
     Use for sizing book, selection helpers, and live-only exit narrowings that paper skips.
+    Also skips live-only entry/session narrowings (chop-live wire, whipsaw pause, power-hour
+    top-only session block, expiry worst-day declining halt) so live matches Oct 1 paper.
     Does not simulate broker fills (execution still differs on live).
     """
     from app.config import get_settings

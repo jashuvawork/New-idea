@@ -103,3 +103,57 @@ def test_oct_paper_skips_expiry_declining_halt(
     ok, reason, _meta = check_expiry_entry_allowed(state, {"SENSEX": snap})
     assert ok is True
     assert reason == "ok"
+
+
+@patch("app.engines.whipsaw_guards.get_settings")
+def test_oct_paper_skips_whipsaw_pause(mock_settings):
+    from app.engines.whipsaw_guards import check_session_whipsaw_pause
+
+    mock_settings.return_value = _frozen_paper_settings(whipsaw_guards_enabled=True)
+    paused, reason, meta = check_session_whipsaw_pause(AutoTraderState(), {})
+    assert paused is False
+    assert meta.get("octPaperWhipsawSkipped") is True
+
+
+@patch("app.config.get_settings")
+@patch("app.engines.power_hour_guards.in_power_hour_window", return_value=True)
+def test_oct_paper_skips_power_hour_top_only(_window, mock_settings):
+    from app.engines.power_hour_guards import check_power_hour_session_allowed
+
+    mock_settings.return_value = _frozen_paper_settings()
+    ok, reason, meta = check_power_hour_session_allowed(AutoTraderState(), {})
+    assert ok is True
+    assert reason == "ok"
+    assert meta.get("octPaperPowerHourSkipped") is True
+
+
+@patch("app.engines.chop_live_guards.get_settings")
+@patch("app.engines.chop_live_guards.chop_live_guard_day_active", return_value=True)
+def test_oct_paper_skips_chop_live_entry_block(_day, mock_settings):
+    from app.engines.chop_live_guards import chop_live_entry_blocked
+    from types import SimpleNamespace
+
+    mock_settings.return_value = _frozen_paper_settings()
+    candidate = SimpleNamespace(mode="explosion", side="PUT", symbol="SENSEX")
+    snap = SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=72000.0,
+    )
+    blocked, reason, meta = chop_live_entry_blocked(
+        candidate, snap, AutoTraderState(), snapshots={"SENSEX": snap},
+    )
+    assert blocked is False
+    assert meta.get("octPaperChopWireSkipped") is True
+
+
+def test_oct_paper_waives_explosion_score_near_miss():
+    s = _frozen_paper_settings()
+    alert = {"tier": "ELITE", "explosionScore": 88.0, "side": "PUT", "strike": 72200.0}
+    assert explosion_near_miss_waive(
+        alert,
+        readiness_reason="explosion_score_below_min",
+        settings=s,
+    )

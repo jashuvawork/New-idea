@@ -115,6 +115,13 @@ def check_power_hour_session_allowed(
     """Session gate after 15:00 — block unless top radar is live."""
     _ = state
     meta: dict[str, Any] = {}
+    from app.config import get_settings
+    from app.engines.live_paper_parity import trading_rules_match_paper
+
+    settings = get_settings()
+    if trading_rules_match_paper(settings):
+        meta["octPaperPowerHourSkipped"] = True
+        return True, "ok", meta
     if not in_power_hour_window():
         return True, "ok", meta
     if snapshots_have_power_hour_top_signal(snapshots):

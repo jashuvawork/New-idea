@@ -360,6 +360,12 @@ def chop_live_entry_blocked(
     """
     settings = get_settings()
     meta: dict[str, Any] = {"chopLiveGuard": True}
+    from app.engines.live_paper_parity import trading_rules_match_paper
+
+    if trading_rules_match_paper(settings):
+        meta["chopLiveGuard"] = False
+        meta["octPaperChopWireSkipped"] = True
+        return False, "ok", meta
     if not getattr(settings, "chop_live_guards_enabled", True):
         return False, "ok", meta
     if str(getattr(candidate, "mode", "") or "") != "explosion":
@@ -438,6 +444,10 @@ def chop_second_same_side_leg_blocked(
     """Block stacking a second explosion leg on the same side during chop/worst days."""
     settings = get_settings()
     meta: dict[str, Any] = {}
+    from app.engines.live_paper_parity import trading_rules_match_paper
+
+    if trading_rules_match_paper(settings):
+        return False, "ok", meta
     if not getattr(settings, "chop_live_second_leg_block_enabled", True):
         return False, "ok", meta
     if str(getattr(candidate, "mode", "") or "") != "explosion":
