@@ -13,6 +13,8 @@ from app.models.schemas import Side
 
 def _settings(*, atm_itm_only: bool = True) -> MagicMock:
     s = MagicMock()
+    s.sep917_legacy_profile_enabled = False
+    s.symmetric_best_trade_capture_enabled = True
     s.explosion_scan_range = 800
     s.explosion_sensex_scan_range = 1500
     s.explosion_sensex_worst_day_scan_range = 500

@@ -2820,7 +2820,43 @@ def diagnose_missed_entries(
                     ):
                         blockers.append("chart_not_aligned")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):
-                blockers.append("premium_out_of_band")
+                oob_near_miss = True
+                try:
+                    from app.engines.sep917_legacy_profile import (
+                        atm_itm_fixed_premium_band_only,
+                    )
+
+                    if atm_itm_fixed_premium_band_only(settings):
+                        side_raw = str(alert.get("side") or "").upper()
+                        strike_v = float(alert.get("strike") or 0)
+                        spot_v = float(snap.spot or 0)
+                        atm_v = float(snap.atmStrike or 0)
+                        if side_raw in ("CALL", "PUT") and strike_v > 0 and spot_v > 0:
+                            from app.engines.moneyness import _depth_steps
+
+                            money = classify_moneyness(
+                                Side(side_raw),
+                                strike_v,
+                                spot_v,
+                                symbol=symbol,
+                                atm=atm_v if atm_v > 0 else None,
+                            )
+                            depth = _depth_steps(
+                                Side(side_raw),
+                                strike_v,
+                                spot_v,
+                                symbol,
+                                atm_v if atm_v > 0 else spot_v,
+                            )
+                            max_itm = int(
+                                getattr(settings, "moneyness_max_itm_steps", 2) or 2
+                            )
+                            if money == "ITM" and depth > max_itm:
+                                oob_near_miss = False
+                except Exception:
+                    pass
+                if oob_near_miss:
+                    blockers.append("premium_out_of_band")
             if score < min_score:
                 blockers.append(f"explosion_score<{min_score:.0f}")
             if snap.tradeQualityScore < 25 and score < settings.aggressive_min_explosion_score + 10:

@@ -1943,6 +1943,14 @@ def _premium_ok_for_scan(
         )
         if premium >= floor and lift >= relax_peak and premium <= max_prem:
             return True
+    # Sep 9–17 / Frozen Oct book: ATM+ITM only in ₹18–350 — skip deep ITM intrinsic.
+    try:
+        from app.engines.sep917_legacy_profile import atm_itm_fixed_premium_band_only
+
+        if atm_itm_fixed_premium_band_only(settings):
+            return False
+    except Exception:
+        pass
     # Expiry deep ITM — intrinsic premium exceeds ₹650 before the vertical prints.
     if expiry_day and str(moneyness or "").upper() == "ITM":
         itm_ceil = float(
@@ -2264,6 +2272,32 @@ def scan_chain_explosions(
                     settings,
                 ):
                     continue
+                try:
+                    from app.engines.sep917_legacy_profile import (
+                        atm_itm_fixed_premium_band_only,
+                    )
+                    from app.engines.moneyness import _depth_steps
+
+                    if atm_itm_fixed_premium_band_only(settings) and money in (
+                        "ATM",
+                        "ITM",
+                    ):
+                        max_itm = int(
+                            getattr(settings, "moneyness_max_itm_steps", 2) or 2
+                        )
+                        depth = _depth_steps(
+                            side, float(strike), float(spot), symbol, float(atm),
+                        )
+                        if money == "ITM" and depth > max_itm:
+                            continue
+                        if not premium_in_band(
+                            float(premium),
+                            mode="explosion",
+                            peak_move_pct=0.0,
+                        ):
+                            continue
+                except Exception:
+                    pass
 
             prior_close = prior_close_from_option_leg(opt)
             day_low, day_high = day_extremes_from_option_leg(opt)
