@@ -409,6 +409,29 @@ def session_low_relative_move_pct(
     return ((float(premium) - low) / low) * 100.0
 
 
+def session_high_relative_move_pct(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    premium: float,
+) -> float:
+    """% below today's session peak premium — PUT slide / peak-turn pad metric (CE symmetric: off-low)."""
+    _roll_session()
+    if not _is_meaningful_premium(premium):
+        return 0.0
+    if side is None or not symbol:
+        return 0.0
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    key = _open_key(symbol, strike, side_val)
+    peak = float(_session_peak.get(key) or 0)
+    if not _is_meaningful_premium(peak):
+        return 0.0
+    live = float(premium)
+    if live >= peak:
+        return 0.0
+    return ((peak - live) / peak) * 100.0
+
+
 def get_session_low_premium(symbol: str, strike: float, side: Side | str) -> float:
     _roll_session()
     if side is None or not symbol:
@@ -3181,6 +3204,10 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         "openPremiumMove": e.daily_move_pct,
         "offLowMovePct": round(
             session_low_relative_move_pct(e.symbol, e.strike, e.side, e.premium),
+            1,
+        ),
+        "offHighMovePct": round(
+            session_high_relative_move_pct(e.symbol, e.strike, e.side, e.premium),
             1,
         ),
         "localBaseMovePct": round(float(pad_move or 0), 1),

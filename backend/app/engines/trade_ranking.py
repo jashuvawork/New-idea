@@ -2147,6 +2147,27 @@ def rank_entry_candidate(
             entry_hour_ist = live_snapshot.timestamp.astimezone(ZoneInfo("Asia/Kolkata")).hour
         except Exception:
             entry_hour_ist = None
+    off_high_move = alert.get("offHighMovePct") or pretrade.get("offHighMovePct")
+    if off_high_move is None:
+        sym = str(getattr(candidate, "symbol", "") or alert.get("symbol") or "")
+        if sym:
+            try:
+                from app.engines.explosion_detector import session_high_relative_move_pct
+
+                off_high_move = session_high_relative_move_pct(
+                    sym,
+                    float(getattr(candidate, "strike", 0) or alert.get("strike") or 0),
+                    getattr(candidate, "side", None) or alert.get("side"),
+                    float(
+                        getattr(event, "premium", 0)
+                        if event
+                        else alert.get("premium") or 0
+                    ),
+                )
+            except Exception:
+                off_high_move = 0
+        else:
+            off_high_move = 0
     evidence = {
         "mode": getattr(candidate, "mode", "") or ("explosion" if event else ""),
         "side": (
@@ -2215,6 +2236,7 @@ def rank_entry_candidate(
             alert.get("offLowMovePct")
             or pretrade.get("offLowMovePct")
         ),
+        "offHighMovePct": off_high_move,
         "firstLift": alert.get("ictFirstLift"),
         "eliteBaseReady": alert.get("ictEliteBaseReady"),
         "vRipReady": bool(

@@ -435,6 +435,11 @@ class Settings(BaseSettings):
     put_premium_local_base_max_local_pct: float = 18.0
     put_premium_local_base_require_index_peak: bool = True
     put_premium_local_base_min_off_high_pct: float = 2.0
+    put_slide_cold_velocity_enabled: bool = True
+    put_slide_cold_velocity_min_v3: float = -2.5
+    put_slide_cold_velocity_max_v3: float = 1.5
+    put_slide_cold_velocity_min_v9: float = -1.2
+    put_slide_cold_velocity_max_local_pct: float = 22.0
     put_at_base_best_trade_enabled: bool = True
     put_at_base_best_trade_min_grade: str = "A"
     call_rally_unlock_waive_mtf_premium_fade: bool = True

@@ -128,6 +128,10 @@ def pad_lane_cold_velocity_ok(
         and (v9 >= -1.0 if peak_confirmed_pad else v9 >= -0.8)
     ):
         return True
+    from app.engines.put_slide_ce_mirror import put_slide_cold_velocity_ok
+
+    if put_slide_cold_velocity_ok(evidence, v3, v9):
+        return True
     return False
 
 
