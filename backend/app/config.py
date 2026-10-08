@@ -3240,6 +3240,9 @@ class Settings(BaseSettings):
     max_option_premium_inr: float = 350.0
     explosion_max_premium_inr: float = 350.0
     explosion_ict_max_premium_inr: float = 350.0
+    # Frozen Oct slide/rally: ITM rip may exceed ₹350 cap while still Oct 1 ATM/ITM capture.
+    oct_paper_slide_explosion_max_premium_inr: float = 650.0
+    oct_paper_slide_premium_waiver_enabled: bool = True
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0

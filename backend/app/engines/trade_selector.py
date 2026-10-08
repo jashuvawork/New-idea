@@ -332,7 +332,10 @@ def _explosion_candidates(
 
             pad_lane_waive = explosion_near_miss_waive(
                 alert if isinstance(alert, dict) else None,
+                snap=snap,
                 readiness_reason=first_lift_readiness_reason,
+                state=state,
+                settings=settings,
             )
         if not pad_lane_waive:
             from app.engines.best_trade_policy import symmetric_structural_near_miss_waive
@@ -385,11 +388,15 @@ def _explosion_candidates(
             )
         if not alert.get("tradeable") and not lift_ready and not chop_rally_capture:
             continue
-        if not premium_in_band(
+        from app.engines.premium_filter import explosion_alert_premium_tradeable
+
+        if not explosion_alert_premium_tradeable(
             alert.get("premium"),
-            mode="explosion",
             peak_move_pct=float(alert.get("peakMovePct") or 0),
             snap=snap,
+            alert=alert if isinstance(alert, dict) else None,
+            state=state,
+            settings=settings,
         ):
             continue
         side_v = str(alert.get("side") or "").upper()

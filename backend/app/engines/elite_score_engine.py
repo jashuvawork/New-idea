@@ -1078,6 +1078,29 @@ def elite_fvq_chase_blocked(
     if must_take:
         return False, ""
     from app.engines.live_entry_score import live_entry_best_trade_capture_active
+    from app.engines.live_paper_parity import trading_rules_match_paper
+
+    if trading_rules_match_paper(settings):
+        tier_u = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
+        score = float(
+            evidence.get("explosionScore") or evidence.get("explosion_score") or 0
+        )
+        min_score = float(getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0)
+        if tier_u in ("ELITE", "EXPLODING") and score >= min_score:
+            side_u = str(evidence.get("side") or side or "").upper()
+            if side_u == "PUT":
+                from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+                if put_slide_pad_context(evidence, settings=settings):
+                    return False, ""
+            if side_u == "CALL":
+                off_low = float(evidence.get("offLowMovePct") or 0)
+                min_off = float(
+                    getattr(settings, "live_paper_parity_min_off_session_low_pct", 6.0)
+                    or 6.0
+                )
+                if off_low >= min_off - 1e-6:
+                    return False, ""
 
     if (
         bool(getattr(settings, "live_entry_best_trade_capture_waives_fvq_chase", True))
