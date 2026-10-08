@@ -716,7 +716,7 @@ async def _open_from_candidate(
                 return False, sep917_reason or "sep917_checklist_blocked"
 
         elite_engine = bool(getattr(settings, "elite_trade_engine_enabled", False))
-        if elite_engine or bool(getattr(settings, "top_moments_only_enabled", True)):
+        if elite_engine or bool(getattr(settings, "top_moments_only_enabled", False)):
             from app.engines.top_moment_gate import top_moment_entry_allowed
 
             top_ok, top_reason, _ = top_moment_entry_allowed(
@@ -2886,7 +2886,7 @@ async def _open_from_candidate(
         if not final_policy.allowed:
             return False, final_policy.reason
         elite_engine = bool(getattr(settings, "elite_trade_engine_enabled", False))
-        if elite_engine or bool(getattr(settings, "top_moments_only_enabled", True)):
+        if elite_engine or bool(getattr(settings, "top_moments_only_enabled", False)):
             from app.engines.top_moment_gate import top_moment_entry_allowed
 
             top_ok, top_reason, _ = top_moment_entry_allowed(
@@ -3017,8 +3017,14 @@ async def _open_from_candidate(
         chop_second_same_side_leg_blocked,
     )
 
-    chop_live_wire = chop_live_guard_day_active(state, snap, snapshots) or (
-        legacy_live_narrow_stack_active(settings)
+    from app.engines.live_paper_parity import trading_rules_match_paper
+
+    chop_live_wire = (
+        not trading_rules_match_paper(settings)
+        and (
+            chop_live_guard_day_active(state, snap, snapshots)
+            or legacy_live_narrow_stack_active(settings)
+        )
     )
     if candidate.mode == "explosion" and chop_live_wire:
         chop_blocked, chop_reason, chop_meta = chop_live_entry_blocked(

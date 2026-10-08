@@ -552,7 +552,7 @@ def explosion_near_miss_waive(
     """Unified near-miss waiver for explosion first-lift / quality / tier lag."""
     s = settings or get_settings()
     rr = str(readiness_reason or "").lower()
-    if isinstance(alert, dict) and rr.startswith("first_lift_quality"):
+    if isinstance(alert, dict):
         from app.engines.live_paper_parity import trading_rules_match_paper
 
         if trading_rules_match_paper(s):
@@ -560,7 +560,16 @@ def explosion_near_miss_waive(
             score = float(alert.get("explosionScore") or alert.get("score") or 0)
             min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
             if tier in ("ELITE", "EXPLODING") and score >= min_score:
-                return True
+                oct_near_miss_prefixes = (
+                    "first_lift_quality",
+                    "explosion_score",
+                    "tier_not_elite",
+                    "symbol_tqs_low",
+                )
+                if rr.startswith(oct_near_miss_prefixes):
+                    return True
+                if "chart_not_aligned" in rr and score >= 70.0:
+                    return True
     if rr.startswith(
         (
             "first_lift_live_velocity_negative",

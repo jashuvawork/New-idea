@@ -478,7 +478,7 @@ def _explosion_candidates(
             continue
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
-        top_only = bool(getattr(settings, "top_moments_only_enabled", True))
+        top_only = bool(getattr(settings, "top_moments_only_enabled", False))
         if elite_only:
             if tier_u not in ("ELITE", "EXPLODING"):
                 # Early BUILDING flat→vertical when chart-aligned — catch the base
@@ -2125,7 +2125,7 @@ def find_best_entry(
         day_mode = resolve_policy_day_mode(state)
 
     elite_engine = bool(getattr(settings, "elite_trade_engine_enabled", False))
-    if elite_engine or bool(getattr(settings, "top_moments_only_enabled", True)):
+    if elite_engine or bool(getattr(settings, "top_moments_only_enabled", False)):
         from app.engines.top_moment_gate import top_moment_entry_allowed
 
         min_grade = str(getattr(settings, "top_moments_min_grade", "A") or "A")
