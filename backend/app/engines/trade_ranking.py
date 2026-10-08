@@ -1897,7 +1897,24 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     if v3 < 0 and not micro_pullback and not _pad_lane_cold_velocity_ok(
         evidence, v3, v9
     ):
-        rejected = True
+        from app.engines.live_paper_parity import trading_rules_match_paper
+
+        oct_paper_elite_rip = (
+            trading_rules_match_paper(settings)
+            and tier in ("ELITE", "EXPLODING")
+            and explosion_score
+            >= float(getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0)
+            and (
+                armed_launch
+                or elite_base_ready
+                or v_rip_ready
+                or building_rip_ready
+                or flat_vertical
+                or first_lift
+            )
+        )
+        if not oct_paper_elite_rip:
+            rejected = True
     if exhausted:
         rejected = True
         penalties.append({"code": "exhausted_post_peak_reentry", "points": 60.0})

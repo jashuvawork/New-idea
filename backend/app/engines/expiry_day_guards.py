@@ -1233,7 +1233,14 @@ def check_expiry_entry_allowed(
             return True, "ok", meta
         return False, "expiry_evening_block", meta
 
-    if not in_expiry_morning_window() and settings.expiry_morning_only and has_expiry_today:
+    from app.engines.live_paper_parity import trading_rules_match_paper
+
+    if (
+        not trading_rules_match_paper(settings)
+        and not in_expiry_morning_window()
+        and settings.expiry_morning_only
+        and has_expiry_today
+    ):
         if pm_itm:
             return True, "ok", meta
         from app.engines.morning_premium_capture import (
@@ -1285,7 +1292,11 @@ def check_expiry_entry_allowed(
                 return True, "ok", meta
             return False, cap_reason, meta
 
-        if is_worst and settings.expiry_worst_day_halt_entries:
+        if (
+            is_worst
+            and settings.expiry_worst_day_halt_entries
+            and not trading_rules_match_paper(settings)
+        ):
             if _session_declining(state, snapshots):
                 if (
                     getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True)
