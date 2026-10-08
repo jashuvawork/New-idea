@@ -649,7 +649,7 @@ def validate_candidate(
         policy_meta["dailyLossStopExpiryTopOnly"] = True
         return False, "daily_loss_stop_expiry_top_only", policy_meta
 
-    if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+    if bool(getattr(settings, "ftv_elite_top_only_enabled", False)):
         from app.engines.moneyness import atm_itm_entry_allows
         from app.engines.session_mode_feedback import (
             exhausted_ftv_reentry_blocked,

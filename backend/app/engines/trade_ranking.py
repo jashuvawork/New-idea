@@ -28,6 +28,34 @@ class FtvAuthorization:
         return self.mode is not None
 
 
+def selector_rejection_reason(ranking: Mapping[str, Any]) -> str:
+    """Best funnel/selector label when causal grade is REJECT (not a score tag)."""
+    penalties = list(ranking.get("penalties") or [])
+    for entry in reversed(penalties):
+        code = str(entry.get("code") or "").strip()
+        if code:
+            return code
+    for tag in reversed(list(ranking.get("reasons") or [])):
+        text = str(tag or "")
+        if any(
+            text.startswith(prefix)
+            for prefix in (
+                "negative_",
+                "extended_",
+                "failed_",
+                "exhausted_",
+                "mid_rip",
+                "pad_lane",
+                "first_lift",
+            )
+        ):
+            return text
+    reasons = list(ranking.get("reasons") or [])
+    if reasons:
+        return str(reasons[-1])
+    return "selector_rejected"
+
+
 def _allocation_rank_blocks_ftv(
     *,
     require_allocation_rank_one: bool,
@@ -452,6 +480,9 @@ def ftv_authorization_policy(
     if str(evidence.get("mode") or "").lower() != "explosion":
         return blocked("ftv_elite_top_only_requires_explosion")
 
+    first_lift_lane = bool(
+        evidence.get("firstLift") or evidence.get("ictFirstLift")
+    )
     actual_ftv = bool(
         (
             evidence.get("flatThenVertical")
@@ -462,6 +493,16 @@ def ftv_authorization_policy(
         or evidence.get("vRipReady")
         or evidence.get("buildingRipReady")
         or _pad_lane_pre_lift(evidence)
+        or (
+            first_lift_lane
+            and (
+                evidence.get("flatThenVertical")
+                or evidence.get("armedBaseLaunch")
+                or evidence.get("eliteBaseReady")
+                or evidence.get("vRipReady")
+                or _pad_lane_pre_lift(evidence)
+            )
+        )
     )
     if not actual_ftv:
         return blocked("ftv_elite_top_only_requires_ftv")
