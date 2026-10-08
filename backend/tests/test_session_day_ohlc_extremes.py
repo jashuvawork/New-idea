@@ -20,6 +20,7 @@ from app.engines.explosion_detector import (
     day_extremes_from_option_leg,
     event_to_dict,
     reset_detector_state_for_tests,
+    session_high_relative_move_pct,
     session_low_relative_move_pct,
 )
 from app.models.schemas import Side
@@ -87,6 +88,8 @@ def test_session_move_sees_vbottom_from_day_ohlc():
     assert peak_move >= 90.0, peak_move
     off = session_low_relative_move_pct("SENSEX", 77800.0, Side.PUT, 198.55)
     assert off >= 55.0, off
+    off_high = session_high_relative_move_pct("SENSEX", 77800.0, Side.PUT, 198.55)
+    assert 15.0 <= off_high <= 20.0, off_high
 
 
 def test_building_volume_awaken_tradeable_in_pad():

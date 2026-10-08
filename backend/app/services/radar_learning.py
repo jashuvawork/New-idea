@@ -356,6 +356,11 @@ def _snapshot_contracts(snapshots: Mapping[str, Any]) -> list[dict[str, Any]]:
                             )
                             if peak > 0:
                                 contract["sessionPeak"] = round(peak, 4)
+                                if premium > 0 and premium < peak:
+                                    contract["offHighMovePct"] = round(
+                                        ((peak - premium) / peak) * 100.0,
+                                        2,
+                                    )
                     except Exception:
                         pass
                 alert = alert_by_key.get(key)
