@@ -366,6 +366,66 @@ def ce_win_pe_mirror_armed(
     return True, "ce_win_pe_mirror", call_meta
 
 
+def _put_slide_moment_blob(evidence: Mapping[str, Any]) -> str:
+    return " ".join(
+        str(evidence.get(key) or "")
+        for key in ("momentType", "reason", "liftReason", "readinessReason")
+    ).lower()
+
+
+def put_slide_pad_context(evidence: Mapping[str, Any], *, settings: Any = None) -> bool:
+    """True when PUT evidence is at/near a session-high pad (slide capture), not extended chase."""
+    settings = settings or get_settings()
+    if str(evidence.get("side") or "").upper() != "PUT":
+        return False
+    blob = _put_slide_moment_blob(evidence)
+    if "v_rip_session_high" in blob:
+        return True
+    min_off = float(
+        getattr(settings, "put_premium_local_base_min_off_high_pct", 2.0) or 2.0
+    )
+    off_high = _number(evidence.get("offHighMovePct"))
+    local = max(
+        _number(evidence.get("localBaseMovePct")),
+        _number(evidence.get("ictBaseRelativeMovePct")),
+    )
+    max_local = float(
+        getattr(settings, "put_slide_cold_velocity_max_local_pct", 22.0) or 22.0
+    )
+    if off_high >= min_off - 1e-6 and 2.0 <= local <= max_local + 1e-6:
+        return True
+    if evidence.get("putSlideUnlockArmed") or evidence.get("putSlideUnlock"):
+        return True
+    return False
+
+
+def put_slide_cold_velocity_ok(
+    evidence: Mapping[str, Any], v3: float, v9: float
+) -> bool:
+    """Mildly negative premium velocity on PUT slide pads (mirror v_rip_session_low for CE)."""
+    settings = get_settings()
+    if not bool(getattr(settings, "put_slide_cold_velocity_enabled", True)):
+        return False
+    if not put_slide_pad_context(evidence, settings=settings):
+        return False
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return False
+    local = max(
+        _number(evidence.get("localBaseMovePct")),
+        _number(evidence.get("ictBaseRelativeMovePct")),
+    )
+    max_local = float(
+        getattr(settings, "put_slide_cold_velocity_max_local_pct", 22.0) or 22.0
+    )
+    if local > max_local + 1e-6 or local < 2.0 - 1e-6:
+        return False
+    min_v3 = float(getattr(settings, "put_slide_cold_velocity_min_v3", -2.5) or -2.5)
+    max_v3 = float(getattr(settings, "put_slide_cold_velocity_max_v3", 1.5) or 1.5)
+    min_v9 = float(getattr(settings, "put_slide_cold_velocity_min_v9", -1.2) or -1.2)
+    return min_v3 <= v3 <= max_v3 and v9 >= min_v9
+
+
 def put_slide_unlock_armed(
     state: Any,
     snap: SymbolSnapshot,
