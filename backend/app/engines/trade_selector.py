@@ -2036,7 +2036,7 @@ def find_best_entry(
         causal_ranking = rank_entry_candidate(c, exhausted_reentry=exhausted)
         policy_ok = True
         policy_reason = "disabled"
-        if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+        if bool(getattr(settings, "ftv_elite_top_only_enabled", False)):
             from app.engines.moneyness import atm_itm_entry_allows
 
             money_ok, _, _ = atm_itm_entry_allows(c.side, c.strike, c.snap)
@@ -2063,7 +2063,7 @@ def find_best_entry(
             "causalRanking": causal_ranking,
             "ftvEliteTopPolicy": {
                 "enabled": bool(
-                    getattr(settings, "ftv_elite_top_only_enabled", True)
+                    getattr(settings, "ftv_elite_top_only_enabled", False)
                 ),
                 "passed": policy_ok,
                 "reason": policy_reason,
@@ -2073,21 +2073,25 @@ def find_best_entry(
         }
 
     kept_candidates: list[EntryCandidate] = []
+    ftv_elite_top = bool(getattr(settings, "ftv_elite_top_only_enabled", False))
     for c in candidates:
         meta = c.pretrade_meta or {}
         ranking = meta.get("causalRanking") or {}
-        if ranking.get("grade") == "REJECT":
-            reasons = ranking.get("reasons") or ["selector_rejected"]
-            _record_selector_gate_rejection(c, str(reasons[0]))
+        policy = meta.get("ftvEliteTopPolicy") or {}
+        if ftv_elite_top and policy.get("passed"):
+            kept_candidates.append(c)
             continue
-        if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
-            policy = meta.get("ftvEliteTopPolicy") or {}
-            if not policy.get("passed"):
-                _record_selector_gate_rejection(
-                    c,
-                    str(policy.get("reason") or "ftv_elite_top_policy"),
-                )
-                continue
+        if ranking.get("grade") == "REJECT":
+            from app.engines.trade_ranking import selector_rejection_reason
+
+            _record_selector_gate_rejection(c, selector_rejection_reason(ranking))
+            continue
+        if ftv_elite_top and not policy.get("passed"):
+            _record_selector_gate_rejection(
+                c,
+                str(policy.get("reason") or "ftv_elite_top_policy"),
+            )
+            continue
         kept_candidates.append(c)
     candidates = kept_candidates
     if not candidates:
