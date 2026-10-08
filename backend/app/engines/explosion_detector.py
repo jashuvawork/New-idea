@@ -1796,6 +1796,24 @@ def _volume_awakening(
     return v3 >= min_v3 or open_move >= settings.open_premium_min_move_pct
 
 
+def _settings_float(value: Any, default: float) -> float:
+    if isinstance(value, bool):
+        return float(default)
+    if isinstance(value, (int, float)):
+        return float(value)
+    return float(default)
+
+
+def _settings_int(value: Any, default: int) -> int:
+    if isinstance(value, bool):
+        return int(default)
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return int(value)
+    return int(default)
+
+
 def resolve_explosion_scan_range(
     symbol: str,
     settings=None,
@@ -1943,16 +1961,25 @@ def _premium_ok_for_scan(
         )
         if premium >= floor and lift >= relax_peak and premium <= max_prem:
             return True
-    # Sep 9–17 / Frozen Oct book: ATM+ITM only in ₹18–350 — skip deep ITM intrinsic.
-    try:
-        from app.engines.sep917_legacy_profile import atm_itm_fixed_premium_band_only
-
-        if atm_itm_fixed_premium_band_only(settings):
-            return False
-    except Exception:
-        pass
     # Expiry deep ITM — intrinsic premium exceeds ₹650 before the vertical prints.
     if expiry_day and str(moneyness or "").upper() == "ITM":
+        try:
+            from app.engines.sep917_legacy_profile import atm_itm_fixed_premium_band_only
+
+            if atm_itm_fixed_premium_band_only(settings):
+                floor = float(getattr(settings, "min_option_premium_inr", 18.0) or 18.0)
+                if open_window and near_atm:
+                    floor = min(
+                        floor,
+                        float(
+                            getattr(settings, "expiry_open_cheap_premium_min_inr", 10.0)
+                            or 10.0
+                        ),
+                    )
+                ceil = float(getattr(settings, "max_option_premium_inr", 350.0) or 350.0)
+                return floor <= premium <= ceil
+        except Exception:
+            pass
         itm_ceil = float(
             getattr(settings, "expiry_itm_explosion_scan_max_premium_inr", 900.0) or 900.0
         )
@@ -2282,19 +2309,19 @@ def scan_chain_explosions(
                         "ATM",
                         "ITM",
                     ):
-                        max_itm = int(
-                            getattr(settings, "moneyness_max_itm_steps", 2) or 2
+                        max_itm = _settings_int(
+                            getattr(settings, "moneyness_max_itm_steps", 2), 2
                         )
                         depth = _depth_steps(
                             side, float(strike), float(spot), symbol, float(atm),
                         )
+                        band_max = _settings_float(
+                            getattr(settings, "max_option_premium_inr", 350.0), 350.0
+                        )
                         if money == "ITM" and depth > max_itm:
-                            continue
-                        if not premium_in_band(
-                            float(premium),
-                            mode="explosion",
-                            peak_move_pct=0.0,
-                        ):
+                            if float(premium) > band_max:
+                                continue
+                        elif float(premium) > band_max:
                             continue
                 except Exception:
                     pass
