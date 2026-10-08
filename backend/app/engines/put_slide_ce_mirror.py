@@ -813,6 +813,13 @@ def put_slide_near_miss_waive(
     if tier not in ("ELITE", "EXPLODING", "BUILDING"):
         return False
     rr = str(readiness_reason or "").lower()
+    if tier in ("ELITE", "EXPLODING"):
+        if "premium_out_of_band" in rr or "premium_above" in rr:
+            return True
+        score = float(alert.get("explosionScore") or alert.get("score") or 0)
+        min_score = float(getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0)
+        if score >= min_score:
+            return True
     if "building" in rr or "rip" in rr:
         return True
     if alert.get("armedBaseLaunch") or alert.get("firstLift"):

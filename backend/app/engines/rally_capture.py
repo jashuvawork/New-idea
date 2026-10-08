@@ -548,6 +548,7 @@ def explosion_near_miss_waive(
     ranking: Optional[dict[str, Any]] = None,
     readiness_reason: str = "",
     settings: Any = None,
+    state: Any = None,
 ) -> bool:
     """Unified near-miss waiver for explosion first-lift / quality / tier lag."""
     s = settings or get_settings()
@@ -565,11 +566,25 @@ def explosion_near_miss_waive(
                     "explosion_score",
                     "tier_not_elite",
                     "symbol_tqs_low",
+                    "premium_out_of_band",
+                    "premium_above",
+                    "premium_below",
                 )
                 if rr.startswith(oct_near_miss_prefixes):
                     return True
                 if "chart_not_aligned" in rr and score >= 70.0:
                     return True
+                if snap is not None:
+                    from app.engines.premium_filter import (
+                        oct_paper_slide_explosion_context_armed,
+                    )
+                    from app.models.schemas import AutoTraderState
+
+                    st = state if state is not None else AutoTraderState()
+                    if oct_paper_slide_explosion_context_armed(
+                        alert, snap, st, settings=s,
+                    ):
+                        return True
     if rr.startswith(
         (
             "first_lift_live_velocity_negative",
