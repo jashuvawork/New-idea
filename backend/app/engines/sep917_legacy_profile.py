@@ -67,6 +67,11 @@ def strict_atm_itm_scan(settings: Any = None) -> bool:
     return True
 
 
+def atm_itm_fixed_premium_band_only(settings: Any = None) -> bool:
+    """ATM/ITM monitor uses global ₹18–350 only — no deep-ITM intrinsic scan bypass."""
+    return sep917_legacy_profile_active(settings)
+
+
 def strict_atm_itm_execution(settings: Any = None) -> bool:
     """When True, no OTM bypass may make a contract executable (orders ATM/ITM only)."""
     from app.config import get_settings
