@@ -2082,10 +2082,25 @@ def find_best_entry(
             kept_candidates.append(c)
             continue
         if ranking.get("grade") == "REJECT":
+            from app.engines.live_paper_parity import trading_rules_match_paper
             from app.engines.trade_ranking import selector_rejection_reason
 
-            _record_selector_gate_rejection(c, selector_rejection_reason(ranking))
-            continue
+            tier_u = str(
+                ranking.get("signalTier")
+                or getattr(c.explosion_event, "tier", "")
+                or ""
+            ).upper()
+            min_score = float(
+                getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0
+            )
+            oct_keep = (
+                trading_rules_match_paper(settings)
+                and tier_u in ("ELITE", "EXPLODING")
+                and float(getattr(c, "score", 0) or 0) >= min_score
+            )
+            if not oct_keep:
+                _record_selector_gate_rejection(c, selector_rejection_reason(ranking))
+                continue
         if ftv_elite_top and not policy.get("passed"):
             _record_selector_gate_rejection(
                 c,
