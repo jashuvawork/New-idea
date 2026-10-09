@@ -159,3 +159,71 @@ def test_oct_paper_waives_explosion_score_near_miss():
         readiness_reason="explosion_score_below_min",
         settings=s,
     )
+
+
+@patch("app.engines.live_entry_score.compute_live_entry_score")
+@patch("app.engines.live_entry_score.get_settings")
+def test_oct_paper_skips_live_entry_score_floor_for_hot_elite(
+    mock_settings, mock_compute,
+):
+    from types import SimpleNamespace
+
+    from app.engines.live_entry_score import live_entry_score_blocks_entry
+
+    mock_settings.return_value = _frozen_paper_settings(
+        live_entry_score_min_elite=52.0,
+        premium_vertical_chase_block_enabled=False,
+        premium_post_spike_dump_guard_enabled=False,
+    )
+    mock_compute.return_value = (40.0, {"liveEntryScore": 40.0})
+    candidate = SimpleNamespace(
+        tier="ELITE",
+        liveEntryScore=40.0,
+        alert={
+            "tier": "ELITE",
+            "explosionScore": 100.0,
+            "velocity3s": -1.0,
+            "premium": 120.0,
+        },
+        explosion_event=None,
+    )
+    blocked, reason, meta = live_entry_score_blocks_entry(candidate, None)
+    assert blocked is False
+    assert reason == "ok"
+    assert meta.get("octPaperLiveEntryScoreFloorSkipped") is True
+
+    mock_settings.return_value = settings_mock(
+        enable_live_trading=True,
+        october_frozen_profile_enabled=False,
+        live_entry_score_min_elite=52.0,
+        premium_vertical_chase_block_enabled=False,
+        premium_post_spike_dump_guard_enabled=False,
+    )
+    blocked_legacy, reason_legacy, _ = live_entry_score_blocks_entry(candidate, None)
+    assert blocked_legacy is True
+    assert "live_entry_score_40_below_52" in reason_legacy
+
+
+@patch("app.engines.sep917_live_checklist.get_settings")
+def test_oct_paper_skips_sep917_checklist_when_enforcement_on(mock_settings):
+    from types import SimpleNamespace
+
+    from app.engines.sep917_live_checklist import sep917_live_checklist_entry_blocked
+
+    mock_settings.return_value = _frozen_paper_settings(
+        sep917_live_checklist_enforcement_enabled=True,
+    )
+    candidate = SimpleNamespace(
+        mode="explosion",
+        symbol="NIFTY",
+        side="CALL",
+        alert={"tier": "BUILDING", "explosionScore": 50.0},
+    )
+    blocked, reason, meta = sep917_live_checklist_entry_blocked(
+        None,
+        candidate,
+        None,
+        settings=mock_settings.return_value,
+    )
+    assert blocked is False
+    assert meta.get("octPaperSep917ChecklistSkipped") is True

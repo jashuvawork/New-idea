@@ -276,11 +276,31 @@ def live_entry_score_blocks_entry(
     min_live = live_entry_score_min_for_tier(tier, settings=settings)
     meta["liveEntryMin"] = min_live
     if live < min_live:
-        return (
-            True,
-            f"live_entry_score_{live:.0f}_below_{min_live:.0f}",
-            meta,
+        from app.engines.live_paper_parity import trading_rules_match_paper
+
+        alert = _alert_dict(candidate)
+        tier_u = tier.upper()
+        expl_score = float(
+            alert.get("explosionScore")
+            or getattr(getattr(candidate, "explosion_event", None), "explosion_score", 0)
+            or 0
         )
+        min_expl = float(
+            getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0
+        )
+        oct_paper_floor_skip = (
+            trading_rules_match_paper(settings)
+            and tier_u in ("ELITE", "EXPLODING")
+            and expl_score >= min_expl - 1e-6
+        )
+        if oct_paper_floor_skip:
+            meta["octPaperLiveEntryScoreFloorSkipped"] = True
+        else:
+            return (
+                True,
+                f"live_entry_score_{live:.0f}_below_{min_live:.0f}",
+                meta,
+            )
     from app.engines.premium_spike_dump_guard import post_spike_premium_dump_blocked
 
     dump_blocked, dump_reason, dump_meta = post_spike_premium_dump_blocked(
