@@ -25,6 +25,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt pytest
 
+      - name: Check enable_live_trading allowlist
+        run: python backend/scripts/check_enable_live_trading_rule_forks.py
+
       - name: Run pytest
         working-directory: backend
         run: python -m pytest tests/ -q --tb=no

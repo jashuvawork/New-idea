@@ -27,7 +27,7 @@ Use `legacy_live_entry_narrowings_active()` instead of bare `enable_live_trading
 
 ## Still different (cannot fully clone)
 
-- **Broker fill price & latency** — live uses Upstox; paper uses LTP ± optional slippage sim
+- **Broker fill price & latency** — live uses Upstox; paper uses LTP + point slippage; **paper-live parity sim** may add `paper_live_parity_market_slippage_pct` (config) for closer PnL — does not change entry gates
 - **Order reject / partial fill** — paper sim assumes fill; live may not
 - **Market tape** — Oct 1 / Oct 5 are references; each session’s candidates differ
 - **Capital book** — same *rules*, different lots if live book ≠ paper reference (e.g. ₹50k vs ₹150k)
