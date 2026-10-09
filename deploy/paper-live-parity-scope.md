@@ -36,6 +36,7 @@ Pretrade `armed_base_shallow_launch_blocked` (chop-live naming) is **skipped** w
 | Sep917 four-step checklist (even if enforcement flag mis-set) | `sep917_live_checklist.py` |
 | Live-entry-score **floor** for ELITE/EXPLODING ≥ min explosion score | `live_entry_score.py` (chase/dump guards still apply) |
 | Selector REJECT grade for hot ELITE/EXPLODING | `trade_selector.py` `oct_keep` |
+| Sep917 OTM `tradeable` wipe on open rip ELITE (score ≥90, v-rip/armed/first-lift) | `open_rip_selector.py` + `explosion_detector.py` stamp |
 
 Use `legacy_live_entry_narrowings_active()` instead of bare `enable_live_trading` when adding new live-only rule forks.
 

@@ -3390,7 +3390,13 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     # Shallow OTM is history-only unless pad / cheap-base / index-confirmed capture stamped.
     if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
         from app.engines.near_base_session_capture import otm_tradeable_preserved
+        from app.engines.open_rip_selector import open_rip_elite_tradeable_preserve
 
+        open_rip_preserve = open_rip_elite_tradeable_preserve(alert_out, settings=_settings)
+        if open_rip_preserve:
+            alert_out["openRipEliteStructural"] = True
+            tradeable = True
+            alert_out["tradeable"] = True
         if cheap_otm_stack_disabled(_settings) or not otm_tradeable_preserved(
             alert_out, settings=_settings
         ):
@@ -3398,6 +3404,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
             first_lift = False
             alert_out["tradeable"] = False
             alert_out["ictFirstLift"] = False
+            alert_out.pop("openRipEliteStructural", None)
     from app.engines.live_entry_score import stamp_alert_live_entry_scores
 
     alert_out = stamp_alert_live_entry_scores(alert_out)
