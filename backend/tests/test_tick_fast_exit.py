@@ -268,16 +268,17 @@ def test_three_overlapping_cycles_close_one_trade_exactly_once():
     release_persistence = threading.Event()
     broker_calls = 0
 
-    async def simulated_exit(_client, _trade, _current):
+    async def simulated_exit(**_kwargs):
         nonlocal broker_calls
         broker_calls += 1
         call_number = broker_calls
         first_at_broker_await.set()
         await release_broker.wait()
-        return {
-            "order_id": f"exit-{call_number}",
-            "fill_premium": 86.0,
-        }
+        return (
+            {"order_id": f"exit-{call_number}", "fill_premium": 86.0},
+            86.0,
+            False,
+        )
 
     def persist_close(_trade, _ctx):
         if record_closed.call_count > 1:
@@ -318,7 +319,10 @@ def test_three_overlapping_cycles_close_one_trade_exactly_once():
             "evaluate_explosion_exit",
             return_value=("explosion_peak_capture", 10.95 * 65),
         ),
-        patch.object(auto_trader, "simulate_exit_order", side_effect=simulated_exit),
+        patch(
+            "app.engines.execution_backend.submit_exit_order",
+            side_effect=simulated_exit,
+        ),
         patch.object(
             auto_trader.trade_store,
             "record_trade_closed",
@@ -378,12 +382,12 @@ def test_failed_broker_exit_releases_claim_for_next_cycle_retry():
     snapshots = {"NIFTY": _snap(strike=24300, put_ltp=60.0)}
     broker_calls = 0
 
-    async def fail_then_succeed(_client, _trade, _current):
+    async def fail_then_succeed(**_kwargs):
         nonlocal broker_calls
         broker_calls += 1
         if broker_calls == 1:
             raise auto_trader.UpstoxError("temporary broker failure")
-        return {"order_id": "exit-retry-2", "fill_premium": 60.0}
+        return ({"order_id": "exit-retry-2", "fill_premium": 60.0}, 60.0, False)
 
     async def run_failure_then_retry():
         await auto_trader.process_exits_only(snapshots, client=MagicMock())
@@ -398,7 +402,10 @@ def test_failed_broker_exit_releases_claim_for_next_cycle_retry():
             "evaluate_explosion_exit",
             return_value=("explosion_stop_loss", -15.05 * 65),
         ),
-        patch.object(auto_trader, "simulate_exit_order", side_effect=fail_then_succeed),
+        patch(
+            "app.engines.execution_backend.submit_exit_order",
+            side_effect=fail_then_succeed,
+        ),
         patch.object(auto_trader.trade_store, "record_trade_closed") as record_closed,
         patch("app.services.trade_store.record_trade_report"),
         patch("app.engines.snapshot_lag_analyzer.build_trade_close_report", return_value={}),
