@@ -153,6 +153,42 @@ Run in order **after** close — no config changes from monitor.
 | E | Loss autopsy (each loss &gt; ₹3k or top miss) | Map to **Section 1–5** — which checklist row failed? |
 | F | Hypothesis | **One** root cause; rule change only if stabilization bar met (`AGENTS.md`) |
 
+### 6.1 One-page RCA template (live vs Oct paper expectation)
+
+Copy for each session where live felt wrong vs paper/Oct reference. **Do not** open a rule-change PR from gut feel — fill this first.
+
+```text
+DATE (IST): ___________
+Prod commit: ___________  entryGatesMatchPaper: ___  tradingRulesMatchPaper: ___  legacyLiveNarrowStack: ___
+
+1) OUTCOME (numbers)
+   Live: trades __ | session PnL ₹___ | liveOrdersPlaced __
+   EOD scorecard: captured __ | missed __ | addedLosers __
+
+2) TOP MISS (if any) — one contract
+   Symbol / side / strike: ___________
+   Radar MFE / tier: ___________
+   Funnel: DETECTED? __ | GATED reason + IST time: __ | SELECTED? __ | ENTERED? __
+   If no GATED row: selector skip reason (explosion_not_tradeable / premium_not_tradeable / other): __
+
+3) PARITY CHECK (rule vs execution)
+   [ ] Flags false or legacy true → env/deploy (Section 0), not new gates
+   [ ] GATED on top ELITE → map to Section 1 row (pad / timing / breadth / loss stop)
+   [ ] No GATED, no SELECTED → funnel telemetry (#722 skips)
+   [ ] SELECTED, liveOrdersPlaced 0 → broker/capital/order path
+   [ ] Entered; PnL worse than paper sim → fill vs signal (brokerFill premium); not always a gate bug
+
+4) ONE HYPOTHESIS (single sentence)
+   _________________________________________________________________
+
+5) ACTION
+   [ ] Analysis only (no code)
+   [ ] One focused PR (AGENTS.md bar met: PnL ≤ −₹20k named miss | MFE ≥150% zero attempts | repeat block ≥3)
+   [ ] Env/overlay fix only (parity flags, capital overlay)
+```
+
+**Rule vs outcome:** Section 1–5 checklists test **rule parity** (would we allow/block the same shape?). EOD replay tests **tape opportunity** on that day. They are not interchangeable — a “miss” on live needs **funnel timestamps**, not EOD alone.
+
 ### Loss → checklist mapping (quick reference)
 
 | Symptom | Likely failed rows |
@@ -169,7 +205,13 @@ Run in order **after** close — no config changes from monitor.
 ```bash
 BASE=https://api.jashuvatrade.xyz
 curl -sS "$BASE/health" | jq '.status,.loopWatchdog.lastBeatAgeSeconds'
-curl -sS "$BASE/api/deployment/status" | jq '{commit, frozen: .frozenOctoberProfile, live: .flags.enableLiveTrading, parity: .flags.livePaperProfile}'
+curl -sS "$BASE/api/deployment/status" | jq '{
+  commit,
+  entryGates: .flags.entryGatesMatchPaper,
+  tradingRules: .flags.tradingRulesMatchPaper,
+  legacyNarrow: .legacyLiveNarrowStackActive,
+  livePaperProfile: .livePaperProfile
+}'
 curl -sS "$BASE/api/auto-trader/history/trades/closed?limit=50" | jq '[.trades[] | {closedAt, symbol, side, strike, pnlInr, exitReason}]'
 curl -sS "$BASE/api/ai/eod-trade-report/DATE" | jq '{netPnlInr, wins, losses, scorecard: .scorecard.overall}'
 ```

@@ -845,6 +845,10 @@ class Settings(BaseSettings):
     paper_slippage_explosion_mult: float = 1.5
     paper_slippage_swing_mult: float = 0.85
     paper_brokerage_round_trip_inr: float = 40.0
+    # Paper-live parity sim: extra MARKET-style % slip (observability/PnL — not entry rules)
+    paper_live_parity_realistic_fills: bool = True
+    paper_live_parity_market_slippage_pct: float = 0.35
+    paper_live_parity_exit_slippage_pct: float = 0.25
     # Realistic Indian options charges (F&O buy) — replaces flat brokerage so paper P&L
     # matches live net, esp. once positions size up. Turnover-based: brokerage + STT +
     # exchange txn + SEBI + stamp + GST. Rates ~Zerodha 2024-25 (configurable).

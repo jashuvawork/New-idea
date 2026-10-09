@@ -58,21 +58,41 @@ def should_simulate_slippage(trade: PaperTrade) -> bool:
     return True
 
 
+def _parity_realistic_fills_active(settings: Any = None) -> bool:
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "paper_live_parity_realistic_fills", True)):
+        return False
+    return bool(
+        getattr(settings, "paper_live_parity_enabled", False)
+        or getattr(settings, "paper_simulate_broker_orders", False)
+    )
+
+
 def apply_entry_fill(
     signal_premium: float,
     strategy_type: StrategyType,
     tier: Optional[str] = None,
 ) -> tuple[float, dict[str, Any]]:
     """Buyer pays above signal LTP."""
+    settings = get_settings()
     slip = entry_slip_points(strategy_type, tier)
     fill = round(signal_premium + slip, 2)
+    parity_pct = 0.0
+    if _parity_realistic_fills_active(settings) and signal_premium > 0:
+        parity_pct = float(
+            getattr(settings, "paper_live_parity_market_slippage_pct", 0.35) or 0.35
+        )
+        pct_fill = round(signal_premium * (1.0 + parity_pct / 100.0), 2)
+        fill = max(fill, pct_fill)
     return fill, {
-        "enabled": slip > 0 or get_settings().paper_brokerage_round_trip_inr > 0,
+        "enabled": slip > 0 or settings.paper_brokerage_round_trip_inr > 0,
         "signalPremium": round(signal_premium, 2),
         "entrySlipPoints": slip,
         "exitSlipPoints": exit_slip_points(strategy_type, tier),
-        "brokerageRoundTripInr": get_settings().paper_brokerage_round_trip_inr,
+        "brokerageRoundTripInr": settings.paper_brokerage_round_trip_inr,
         "fillPremium": fill,
+        "parityMarketSlippagePct": parity_pct if parity_pct else None,
+        "parityRealisticFill": bool(parity_pct),
         "tier": tier,
         "strategyType": strategy_type.value,
     }
@@ -84,10 +104,19 @@ def apply_exit_mark(
     tier: Optional[str] = None,
 ) -> float:
     """Seller receives below market LTP."""
+    settings = get_settings()
     slip = exit_slip_points(strategy_type, tier)
-    if slip <= 0:
-        return market_premium
-    return max(0.05, round(market_premium - slip, 2))
+    fill = market_premium
+    if slip > 0:
+        fill = max(0.05, round(market_premium - slip, 2))
+    if _parity_realistic_fills_active(settings) and market_premium > 0:
+        exit_pct = float(
+            getattr(settings, "paper_live_parity_exit_slippage_pct", 0.25) or 0.25
+        )
+        pct_fill = round(market_premium * (1.0 - exit_pct / 100.0), 2)
+        fill = min(fill, pct_fill) if slip > 0 else pct_fill
+        fill = max(0.05, fill)
+    return fill
 
 
 def mark_to_market(
