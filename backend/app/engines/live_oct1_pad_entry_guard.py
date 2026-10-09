@@ -15,6 +15,7 @@ from app.engines.live_paper_parity import entry_gates_match_paper
 _OCT1_PAD_CHASE_BLOCK_REASONS = frozenset({
     "live_oct1_chase_at_session_high",
     "live_oct1_chase_session_range_high",
+    "live_oct1_put_chase_at_session_low",
 })
 
 
@@ -161,95 +162,68 @@ def live_oct1_pad_entry_blocked(
     if not at_base:
         return True, "live_oct1_not_near_base_shape", meta
 
-    if bool(getattr(settings, "oct_paper_open_moment_pad_waiver_enabled", True)):
-        from app.engines.live_paper_parity import (
-            oct_paper_first_lift_small_lift_context,
-            trading_rules_match_paper,
-        )
-
-        pos_pre, dd_pre = _session_range_metrics(candidate)
-        evidence_pos = {
-            **evidence,
-            "sessionRangePosition": pos_pre,
-            "drawdownFromHighPct": dd_pre,
-        }
-        rr = ""
-        if isinstance(pre, dict):
-            rr = str(pre.get("firstLiftReadinessReason") or "")
-        if oct_paper_first_lift_small_lift_context(
-            evidence_pos,
-            settings=settings,
-            readiness_reason=rr,
-        ):
-            meta["octFirstLiftPadWaive"] = True
-            return False, "", meta
-        if trading_rules_match_paper(settings):
-            side_u = str(
-                getattr(getattr(candidate, "side", None), "value", None)
-                or getattr(candidate, "side", "")
-                or evidence.get("side")
-                or ""
-            ).upper()
-            try:
-                from app.engines.session_timing import in_open_premium_window
-
-                if in_open_premium_window():
-                    if side_u == "CALL":
-                        off_low = float(evidence_pos.get("offLowMovePct") or 0)
-                        min_off = float(
-                            getattr(
-                                settings,
-                                "live_paper_parity_min_off_session_low_pct",
-                                6.0,
-                            )
-                            or 6.0
-                        )
-                        if off_low >= min_off - 1e-6 and (
-                            evidence.get("armedBaseLaunch")
-                            or evidence.get("vRipReady")
-                            or str(evidence.get("momentType") or "")
-                            in (
-                                "armed_base_launch",
-                                "v_rip_session_low",
-                                "flat_then_vertical",
-                                "first_lift_local_base",
-                            )
-                        ):
-                            meta["octOpenCallRipPadWaive"] = True
-                            return False, "", meta
-                    elif side_u == "PUT":
-                        from app.engines.put_slide_ce_mirror import put_slide_pad_context
-
-                        if put_slide_pad_context(evidence, settings=settings):
-                            meta["octOpenPutSlidePadWaive"] = True
-                            return False, "", meta
-            except Exception:
-                pass
-
-    pos, dd = _session_range_metrics(candidate)
-    meta["sessionRangePosition"] = round(pos, 3)
-    meta["drawdownFromHighPct"] = round(dd, 2)
-
-    max_pos = float(
-        getattr(settings, "live_paper_parity_max_session_range_position", 0.52) or 0.52
-    )
-    # drawdownFromHighPct: 0 = at session high; more negative = deeper off high.
-    min_off_high = float(
-        getattr(settings, "live_paper_parity_min_off_session_high_pct", 6.0) or 6.0
-    )
-    if pos > max_pos + 1e-6:
-        return True, "live_oct1_chase_session_range_high", meta
-    if dd > -min_off_high + 1e-6:
-        return True, "live_oct1_chase_at_session_high", meta
-
-    from app.engines.sep09_intent_guards import sep09_near_peak_after_extended_rip
-
-    side = str(
+    side_u = str(
         getattr(getattr(candidate, "side", None), "value", None)
         or getattr(candidate, "side", "")
         or evidence.get("side")
         or ""
     ).upper()
+    rr = ""
+    if isinstance(pre, dict):
+        rr = str(pre.get("firstLiftReadinessReason") or "")
+
+    pos, dd = _session_range_metrics(candidate)
+    evidence_pos = {
+        **evidence,
+        "sessionRangePosition": pos,
+        "drawdownFromHighPct": dd,
+        "side": side_u or evidence.get("side"),
+    }
+    meta["sessionRangePosition"] = round(pos, 3)
+    meta["drawdownFromHighPct"] = round(dd, 2)
+
+    from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+    from app.engines.oct1_pad_location import (
+        oct1_pad_location_waived,
+        oct1_premium_location_chase_blocked,
+    )
+
+    if oct_paper_first_lift_small_lift_context(
+        evidence_pos,
+        settings=settings,
+        readiness_reason=rr,
+    ):
+        meta["octFirstLiftPadWaive"] = True
+        return False, "", meta
+
+    waived, waive_tag = oct1_pad_location_waived(
+        side_u,
+        evidence_pos,
+        settings=settings,
+        readiness_reason=rr,
+    )
+    if waived:
+        meta_key = {
+            "oct_first_lift_pad_waive": "octFirstLiftPadWaive",
+            "oct_open_call_rip_pad_waive": "octOpenCallRipPadWaive",
+            "oct_open_put_slide_pad_waive": "octOpenPutSlidePadWaive",
+        }.get(waive_tag, "octPadLocationWaive")
+        meta[meta_key] = True
+        return False, "", meta
+
+    blocked, chase_reason = oct1_premium_location_chase_blocked(
+        side_u,
+        pos,
+        dd,
+        evidence_pos,
+        settings=settings,
+        readiness_reason=rr,
+    )
+    if blocked:
+        return True, chase_reason, meta
+
+    from app.engines.sep09_intent_guards import sep09_near_peak_after_extended_rip
+
     near_peak, np_reason = sep09_near_peak_after_extended_rip(
         evidence,
         premium=float(
@@ -257,7 +231,7 @@ def live_oct1_pad_entry_blocked(
         ),
         symbol=str(getattr(candidate, "symbol", "") or evidence.get("symbol") or ""),
         strike=float(getattr(candidate, "strike", 0) or evidence.get("strike") or 0),
-        side=side,
+        side=side_u,
         alert=evidence,
         settings=settings,
     )

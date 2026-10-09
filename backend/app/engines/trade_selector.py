@@ -105,6 +105,26 @@ def _record_selector_gate_rejection(candidate: EntryCandidate, reason: str) -> N
         pass
 
 
+def _record_explosion_alert_skip(
+    symbol: str,
+    alert: dict,
+    reason: str,
+) -> None:
+    """Funnel RCA when explosion alerts drop before candidate build (Oct 8 silent skips)."""
+    try:
+        from app.services.radar_learning import record_funnel_gate_block
+
+        record_funnel_gate_block(
+            str(symbol or "").upper(),
+            str(alert.get("side") or "").upper(),
+            float(alert.get("strike") or 0),
+            str(reason or "explosion_skipped"),
+            stage="SELECTOR_GATE",
+        )
+    except Exception:
+        pass
+
+
 def rank_candidates_for_selection(
     candidates: list[EntryCandidate],
     legacy_score,
@@ -400,6 +420,8 @@ def _explosion_candidates(
                 settings=settings,
             )
         if not alert.get("tradeable") and not lift_ready and not chop_rally_capture:
+            if isinstance(alert, dict):
+                _record_explosion_alert_skip(symbol, alert, "explosion_not_tradeable")
             continue
         from app.engines.premium_filter import explosion_alert_premium_tradeable
 
@@ -411,6 +433,8 @@ def _explosion_candidates(
             state=state,
             settings=settings,
         ):
+            if isinstance(alert, dict):
+                _record_explosion_alert_skip(symbol, alert, "explosion_premium_not_tradeable")
             continue
         side_v = str(alert.get("side") or "").upper()
         tier_u = str(alert.get("tier") or "").upper()

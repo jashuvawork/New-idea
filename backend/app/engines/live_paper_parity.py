@@ -84,16 +84,26 @@ def oct_paper_first_lift_small_lift_context(
         getattr(s, "live_paper_parity_min_off_session_high_pct", 6.0) or 6.0
     )
     at_option_session_high = pos > 0 and dd > -min_off_high + 1e-6
-    if pos > max_pos + 1e-6 or at_option_session_high:
-        try:
-            from app.engines.session_timing import in_open_premium_window
-
-            if not in_open_premium_window():
-                return False
-        except Exception:
-            return False
-
     side = str(evidence.get("side") or "").upper()
+    if pos > max_pos + 1e-6 or at_option_session_high:
+        from app.engines.oct1_pad_location import oct1_open_moment_pad_waived
+
+        location_ok = False
+        if side == "PUT":
+            from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+            location_ok = put_slide_pad_context(evidence, settings=s)
+        if not location_ok:
+            location_ok = bool(oct1_open_moment_pad_waived(side, evidence, settings=s)[0])
+        if not location_ok:
+            try:
+                from app.engines.session_timing import in_open_premium_window
+
+                if not in_open_premium_window():
+                    return False
+            except Exception:
+                return False
+
     local = max(
         _parity_number(evidence.get("localBaseMovePct")),
         _parity_number(evidence.get("ictBaseRelativeMovePct")),
