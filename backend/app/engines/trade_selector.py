@@ -2363,10 +2363,17 @@ def find_best_entry(
             min_score = float(
                 getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0
             )
+            alert = getattr(c, "alert", None) if isinstance(getattr(c, "alert", None), dict) else {}
+            expl_score = float(
+                getattr(getattr(c, "explosion_event", None), "explosion_score", 0)
+                or alert.get("explosionScore")
+                or getattr(c, "score", 0)
+                or 0
+            )
             oct_keep = (
                 trading_rules_match_paper(settings)
                 and tier_u in ("ELITE", "EXPLODING")
-                and float(getattr(c, "score", 0) or 0) >= min_score
+                and expl_score >= min_score - 1e-6
             )
             if not oct_keep:
                 _record_selector_gate_rejection(c, selector_rejection_reason(ranking))

@@ -512,6 +512,13 @@ def filter_candidates_building_best_pick(candidates: list[Any]) -> list[Any]:
     out: list[Any] = []
     for c in candidates:
         key = _candidate_key(c)
+        tier_u = str(getattr(c, "tier", "") or "").upper()
+        if not tier_u and isinstance(getattr(c, "alert", None), dict):
+            tier_u = str(c.alert.get("tier") or "").upper()
+        # Oct 9 — never drop ELITE explosion legs for BUILDING scoreboard pick preference.
+        if tier_u == "ELITE":
+            out.append(c)
+            continue
         is_buildingish = _is_buildingish_candidate(c)
         if only_best and is_buildingish and preferred and key != preferred:
             continue

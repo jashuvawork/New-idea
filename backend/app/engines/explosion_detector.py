@@ -2912,11 +2912,56 @@ def scan_snapshot_explosions(
     )
 
 
+def _explosion_event_key(event: Any) -> tuple[str, float]:
+    side = str(getattr(getattr(event, "side", None), "value", event.side) or "").upper()
+    try:
+        strike = float(getattr(event, "strike", 0) or 0)
+    except (TypeError, ValueError):
+        strike = 0.0
+    return side, strike
+
+
+def select_explosion_events_for_selector(
+    ordered_events: list[Any],
+    settings: Any,
+) -> list[Any]:
+    """Cap explosionAlerts on snap without dropping high-score ELITE legs (Oct 8–9 zero-trade RCA)."""
+    try:
+        from app.engines.session_timing import in_open_premium_window
+
+        open_window = bool(in_open_premium_window())
+    except Exception:
+        open_window = False
+    base_cap = int(getattr(settings, "explosion_alerts_selector_cap", 25) or 25)
+    open_cap = int(getattr(settings, "explosion_alerts_open_window_selector_cap", 45) or 45)
+    limit = open_cap if open_window else base_cap
+    min_force = float(
+        getattr(settings, "explosion_alerts_force_include_min_score", 90.0) or 90.0
+    )
+    chosen = list(ordered_events[:limit])
+    chosen_keys = {_explosion_event_key(e) for e in chosen}
+    for event in ordered_events[limit:]:
+        tier = str(getattr(event, "tier", "") or "").upper()
+        if tier not in ("ELITE", "EXPLODING"):
+            continue
+        score = float(getattr(event, "explosion_score", 0) or 0)
+        if score < min_force - 1e-6:
+            continue
+        key = _explosion_event_key(event)
+        if key in chosen_keys:
+            continue
+        chosen.append(event)
+        chosen_keys.add(key)
+    return chosen
+
+
 def refresh_snapshot_explosion_alerts(snap: Any, *, expiry_day: bool = False) -> None:
     """Update explosionAlerts on a cached snapshot using fresh WS LTPs."""
     events = scan_snapshot_explosions(snap, expiry_day=expiry_day)
     # Keep BUILDING+ visible even when many WATCH rows compete for the top slice.
-    limit = 25
+    from app.config import get_settings as _gs_cap
+
+    settings = _gs_cap()
     hot = [
         e for e in events
         if str(getattr(e, "tier", "") or "").upper() in ("BUILDING", "EXPLODING", "ELITE")
@@ -2926,7 +2971,8 @@ def refresh_snapshot_explosion_alerts(snap: Any, *, expiry_day: bool = False) ->
         if str(getattr(e, "tier", "") or "").upper() not in ("BUILDING", "EXPLODING", "ELITE")
     ]
     ordered = hot + cold
-    alerts = [event_to_dict(e, snap) for e in ordered[:limit]]
+    sliced = select_explosion_events_for_selector(ordered, settings)
+    alerts = [event_to_dict(e, snap) for e in sliced]
     # Stamp index-level (spot tape) confirmation onto hot alerts so the selector, must-take
     # and UI all see the same "the index is thrusting" evidence — the causal driver behind a
     # sudden strike lift. Bounded to BUILDING+ and wrapped so a tape hiccup never breaks scan.
