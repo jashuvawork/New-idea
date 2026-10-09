@@ -1417,9 +1417,11 @@ def _elite_call_near_base_pad_location_ok(
     evidence: Mapping[str, Any],
     *,
     settings: Any = None,
+    side: str = "",
 ) -> bool:
-    """Oct 1 pad location — CE waive only when premium is off session high (not chase)."""
+    """Oct 1 pad location — side-aware session range (shared with live_oct1_pad_entry_guard)."""
     from app.config import get_settings
+    from app.engines.oct1_pad_location import oct1_pad_location_ok
 
     settings = settings or get_settings()
     meta = evidence.get("liveEntryScoreMeta") or {}
@@ -1431,17 +1433,10 @@ def _elite_call_near_base_pad_location_ok(
     dd = float(
         meta.get("drawdownFromHighPct") or evidence.get("drawdownFromHighPct") or 0
     )
-    max_pos = float(
-        getattr(settings, "live_paper_parity_max_session_range_position", 0.52) or 0.52
+    side_u = str(side or evidence.get("side") or "CALL").upper()
+    return oct1_pad_location_ok(
+        side_u, pos, dd, evidence, settings=settings,
     )
-    min_off_high = float(
-        getattr(settings, "live_paper_parity_min_off_session_high_pct", 6.0) or 6.0
-    )
-    if pos > max_pos + 1e-6:
-        return False
-    if dd > -min_off_high + 1e-6:
-        return False
-    return True
 
 
 def elite_entry_allowed(
@@ -1619,7 +1614,9 @@ def elite_entry_allowed(
         resolved_side == "CALL"
         and call_atm_itm_base_ok
         and at_base_shape
-        and _elite_call_near_base_pad_location_ok(evidence, settings=settings)
+        and _elite_call_near_base_pad_location_ok(
+            evidence, settings=settings, side=resolved_side,
+        )
     )
 
     if live_entry_moment_active(evidence, settings=settings):
