@@ -867,6 +867,11 @@ class Settings(BaseSettings):
     explosion_early_velocity_3s: float = 3.0
     explosion_early_volume_surge: float = 1.5
     explosion_scan_range: int = 800
+    # WS rescan keeps top N alerts on snap — gap-open days can have >25 hot legs; force-include
+    # ELITE/EXPLODING at/above min score so selector sees the same strikes radar archives (Oct 9).
+    explosion_alerts_selector_cap: int = 25
+    explosion_alerts_open_window_selector_cap: int = 45
+    explosion_alerts_force_include_min_score: float = 90.0
     explosion_sensex_scan_range: int = 1500
     explosion_worst_day_scan_range: int = 500
     explosion_sensex_worst_day_scan_range: int = 500

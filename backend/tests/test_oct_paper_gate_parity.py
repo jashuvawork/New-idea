@@ -80,6 +80,7 @@ def test_oct_paper_waives_first_lift_quality_near_miss():
 
 
 @patch("app.engines.expiry_day_guards.get_settings")
+@patch("app.engines.expiry_day_guards.in_expiry_evening_block", return_value=False)
 @patch("app.engines.expiry_day_guards.is_expiry_session", return_value=True)
 @patch("app.engines.expiry_day_guards.in_expiry_morning_window", return_value=False)
 @patch("app.engines.expiry_day_guards.predict_worst_expiry_day", return_value=(True, 80, ["chop"]))
@@ -89,6 +90,7 @@ def test_oct_paper_skips_expiry_declining_halt(
     _worst,
     _morning,
     _expiry,
+    _evening,
     mock_settings,
 ):
     mock_settings.return_value = _frozen_paper_settings()
