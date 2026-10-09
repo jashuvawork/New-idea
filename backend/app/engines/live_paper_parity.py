@@ -230,6 +230,20 @@ def trading_rules_match_paper(settings: Any | None = None) -> bool:
     return entry_gates_match_paper(s)
 
 
+def legacy_live_entry_narrowings_active(settings: Any | None = None) -> bool:
+    """
+    True when live-only entry/session narrowings may run (legacy stack or live without paper rules).
+
+    Prefer this over bare ``enable_live_trading`` for rule forks — Oct mirror live keeps this false.
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not _strict_bool(getattr(s, "enable_live_trading", False)):
+        return False
+    return not trading_rules_match_paper(s)
+
+
 def legacy_live_narrow_stack_active(settings: Any | None = None) -> bool:
     """
     Old ₹10k-style live-only stack (best-trades-only, structural hold, chop-live wire).
