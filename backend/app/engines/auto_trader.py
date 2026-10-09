@@ -114,13 +114,6 @@ from app.engines.worst_day_itm_fade import (
 from app.engines.session_timing import entries_allowed_now, entry_window_label, explosion_entries_allowed_now
 from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
-from app.services.order_executor import (
-    find_existing_exit_order,
-    place_entry_order,
-    fetch_order_average_price,
-    place_exit_order,
-)
-from app.services.paper_broker import simulate_entry_order, simulate_exit_order
 from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase
 
 logger = logging.getLogger(__name__)
@@ -497,12 +490,9 @@ def _execution_mode(settings) -> str:
 
 
 def _uses_paper_live_parity(settings) -> bool:
-    is_live = settings.enable_live_trading and settings.auto_trading_enabled
-    return (
-        settings.paper_live_parity_enabled
-        and settings.paper_simulate_broker_orders
-        and not is_live
-    )
+    from app.engines.execution_backend import uses_paper_broker_simulation
+
+    return uses_paper_broker_simulation(settings)
 
 
 def _record_deferred_candidate_fallback(
@@ -745,11 +735,12 @@ async def _open_from_candidate(
                 if blocked:
                     return False, budget_reason
 
+    from app.engines.live_paper_parity import legacy_live_narrow_stack_active
     from app.engines.worst_day_guard import worst_day_blocks_live
 
-    if snapshots:
+    if snapshots and legacy_live_narrow_stack_active(settings):
         live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
-        if live_blocked and settings.enable_live_trading:
+        if live_blocked:
             if bool(getattr(settings, "live_disable_session_lift", True)):
                 return False, "live_no_session_lift"
 
@@ -769,6 +760,7 @@ async def _open_from_candidate(
             ):
                 return False, live_reason
 
+    if snapshots:
         from app.engines.worst_day_guard import worst_day_allows_candidate
         from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
 
@@ -1000,8 +992,13 @@ async def _open_from_candidate(
         if far_otm:
             return False, far_reason
 
+    from app.engines.execution_backend import (
+        is_live_execution,
+        needs_broker_order_path,
+    )
+
     signal_premium = candidate.premium
-    is_live = settings.enable_live_trading and settings.auto_trading_enabled
+    is_live = is_live_execution(settings)
     use_parity = _uses_paper_live_parity(settings)
     tier = candidate.tier if candidate.mode == "explosion" else None
 
@@ -3048,56 +3045,40 @@ async def _open_from_candidate(
             ctx_extra["chopLiveGuard"] = True
             ctx_extra.update({k: v for k, v in chop_meta.items() if k != "chopLiveGuard"})
 
-    if is_live or use_parity:
+    if needs_broker_order_path(settings):
         if not client:
             return False, "broker client required for live / paper-live-parity"
         try:
-            if is_live:
-                order = await place_entry_order(
-                    client, snap, candidate.strike, candidate.side, lots,
-                )
-                broker_entry_fill = order.get("fill_premium")
-                if broker_entry_fill and float(broker_entry_fill) > 0:
-                    fill_premium = float(broker_entry_fill)
-                    slip_meta = {
-                        **(slip_meta or {}),
-                        "enabled": False,
-                        "signalPremium": round(signal_premium, 2),
-                        "fillPremium": round(fill_premium, 2),
-                        "brokerFill": True,
-                    }
-                ctx_extra.update({
-                    "instrumentKey": order["instrument_key"],
-                    "brokerOrderId": order["order_id"],
-                    "brokerQuantity": order["quantity"],
-                    "lotSize": order.get("lot_size", lot_mult),
-                    "brokerSimulated": False,
-                    "brokerEntryFillPremium": fill_premium,
-                })
-                state.liveOrdersPlaced += 1
-            else:
-                order = await simulate_entry_order(
-                    client,
-                    snap,
-                    candidate.strike,
-                    candidate.side,
-                    lots,
-                    signal_premium,
-                    candidate.strategy_type,
-                    tier=tier,
-                )
-                fill_premium = order["fill_premium"]
-                slip_meta = order.get("slippage", slip_meta)
+            from app.engines.execution_backend import submit_entry_order
+
+            order, broker_ctx, broker_fill = await submit_entry_order(
+                settings=settings,
+                client=client,
+                snap=snap,
+                strike=candidate.strike,
+                side=candidate.side,
+                lots=lots,
+                signal_premium=signal_premium,
+                strategy_type=candidate.strategy_type,
+                tier=tier or "",
+            )
+            fill_premium = broker_fill
+            if broker_ctx.get("lotSize") is not None:
+                lot_mult = int(broker_ctx["lotSize"])
+            if broker_ctx.get("brokerFill"):
+                slip_meta = {
+                    **(slip_meta or {}),
+                    "enabled": False,
+                    "signalPremium": round(signal_premium, 2),
+                    "fillPremium": round(fill_premium, 2),
+                    "brokerFill": True,
+                }
+            if broker_ctx.get("slippage"):
+                slip_meta = broker_ctx.get("slippage", slip_meta)
                 ctx_extra["slippage"] = slip_meta
-                ctx_extra.update({
-                    "instrumentKey": order["instrument_key"],
-                    "brokerOrderId": order["order_id"],
-                    "brokerQuantity": order["quantity"],
-                    "lotSize": order.get("lot_size", lot_mult),
-                    "brokerSimulated": True,
-                    "orderType": order.get("order_type"),
-                    "product": order.get("product"),
-                })
+            ctx_extra.update({k: v for k, v in broker_ctx.items() if k != "slippage"})
+            if is_live:
+                state.liveOrdersPlaced += 1
         except UpstoxError as e:
             logger.error("Entry failed for %s (%s): %s", symbol, _execution_mode(settings), e)
             return False, f"entry failed: {e}"
@@ -3543,59 +3524,49 @@ async def _process_open_trades(
         if exit_claim is None:
             continue
 
-        is_live = settings.enable_live_trading and settings.auto_trading_enabled
+        from app.engines.execution_backend import (
+            is_live_execution,
+            needs_broker_order_path,
+            submit_exit_order,
+        )
+
+        is_live = is_live_execution(settings)
         use_parity = _uses_paper_live_parity(settings)
-        needs_broker_exit = (is_live or use_parity) and broker_ctx.get("instrumentKey")
+        needs_broker_exit = needs_broker_order_path(settings) and broker_ctx.get(
+            "instrumentKey"
+        )
 
         if needs_broker_exit and not broker_ctx.get("brokerExitOrderId"):
             try:
                 trade.exitReason = exit_reason
-                if is_live:
-                    existing_exit_id = await find_existing_exit_order(client, trade)
-                    exit_result = (
-                        {"order_id": existing_exit_id, "reconciled": True}
-                        if existing_exit_id
-                        else await place_exit_order(client, trade)
-                    )
-                    exit_fill = exit_result.get("fill_premium")
-                    exit_oid = exit_result.get("order_id")
-                    if (not exit_fill or float(exit_fill) <= 0) and exit_oid:
-                        exit_fill = await fetch_order_average_price(client, str(exit_oid))
-                    if exit_fill and float(exit_fill) > 0:
-                        eval_premium = float(exit_fill)
-                        gross_pts, gross_inr = mark_to_market(
-                            trade.entryPremium, eval_premium, trade.lots, lot_mult,
-                        )
-                        pnl = finalize_closed_pnl_inr(
-                            gross_inr,
-                            entry_premium=trade.entryPremium,
-                            exit_premium=eval_premium,
-                            lots=trade.lots,
-                            lot_mult=lot_mult,
-                        )
-                        trade.currentPremium = eval_premium
-                        broker_ctx["brokerExitFillPremium"] = eval_premium
-                else:
-                    exit_result = await simulate_exit_order(client, trade, current)
-                    sim_fill = exit_result.get("fill_premium", eval_premium)
+                exit_result, exit_fill, exit_live = await submit_exit_order(
+                    settings=settings,
+                    client=client,
+                    trade=trade,
+                    mark_premium=current,
+                )
+                if exit_fill is not None and exit_fill > 0:
+                    eval_premium = float(exit_fill)
                     gross_pts, gross_inr = mark_to_market(
-                        trade.entryPremium, sim_fill, trade.lots, lot_mult,
+                        trade.entryPremium, eval_premium, trade.lots, lot_mult,
                     )
                     pnl = finalize_closed_pnl_inr(
                         gross_inr,
                         entry_premium=trade.entryPremium,
-                        exit_premium=sim_fill,
+                        exit_premium=eval_premium,
                         lots=trade.lots,
                         lot_mult=lot_mult,
                     )
-                    eval_premium = sim_fill
+                    trade.currentPremium = eval_premium
+                    if exit_live:
+                        broker_ctx["brokerExitFillPremium"] = eval_premium
                 broker_ctx["brokerExitOrderId"] = exit_result.get("order_id")
-                broker_ctx["brokerExitSimulated"] = use_parity
+                broker_ctx["brokerExitSimulated"] = use_parity and not exit_live
                 trade.entryContext = broker_ctx
                 # Persist the broker acknowledgement while the trade is still OPEN.
                 # A crash after this checkpoint restores the exit id and cannot sell twice.
                 trade_store.record_trade_mark(trade)
-                if is_live:
+                if exit_live:
                     state.liveOrdersPlaced += 1
             except UpstoxError as e:
                 _release_exit_claim(trade.id, exit_claim)

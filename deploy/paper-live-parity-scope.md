@@ -15,6 +15,12 @@ The old ₹10k narrow profile (`env.live-10k.overlay`: grade-S gate, structural 
 
 HUD: `livePaperProfile.legacyLiveNarrowStackActive`.
 
+## Rule-branch audit (Phase 2)
+
+Live **rule** forks must use `trading_rules_match_paper` / `legacy_live_narrow_stack_active`, not bare `enable_live_trading`. Order placement uses [`backend/app/engines/execution_backend.py`](../backend/app/engines/execution_backend.py) (`submit_entry_order` / `submit_exit_order`) — the only swap between Upstox and paper broker sim.
+
+Tests: `backend/tests/test_enable_live_trading_rule_parity.py`, `backend/tests/test_execution_backend.py`.
+
 ## Still different (cannot fully clone)
 
 - **Broker fill price & latency** — live uses Upstox; paper uses LTP ± optional slippage sim
