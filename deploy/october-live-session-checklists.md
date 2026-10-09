@@ -169,7 +169,7 @@ Prod commit: ___________  entryGatesMatchPaper: ___  tradingRulesMatchPaper: ___
    Symbol / side / strike: ___________
    Radar MFE / tier: ___________
    Funnel: DETECTED? __ | GATED reason + IST time: __ | SELECTED? __ | ENTERED? __
-   If no GATED row: selector skip reason (explosion_not_tradeable / premium_not_tradeable / other): __
+   If no GATED row: selector skip reason (explosion_not_tradeable / explosion_otm_shallow_not_allowed / premium_not_tradeable / other): __
 
 3) PARITY CHECK (rule vs execution)
    [ ] Flags false or legacy true → env/deploy (Section 0), not new gates

@@ -125,6 +125,191 @@ def _record_explosion_alert_skip(
         pass
 
 
+def _high_signal_explosion_alert(alert: dict, *, min_score: float = 85.0) -> bool:
+    if not isinstance(alert, dict):
+        return False
+    tier_u = str(alert.get("tier") or "").upper()
+    if tier_u not in ("ELITE", "EXPLODING"):
+        return False
+    score = float(alert.get("explosionScore") or alert.get("score") or 0)
+    return score >= min_score
+
+
+def _maybe_record_high_signal_explosion_skip(
+    symbol: str,
+    alert: dict,
+    reason: str,
+) -> None:
+    """Oct 9 RCA — radar DETECTED ELITE 100 with no SELECTOR_GATE until hours later."""
+    if _high_signal_explosion_alert(alert):
+        _record_explosion_alert_skip(symbol, alert, reason)
+
+
+def diagnose_selector_feed_gaps(
+    snapshots: dict[str, SymbolSnapshot],
+    state: AutoTraderState,
+) -> list[dict[str, Any]]:
+    """Surface high-score explosion alerts dropped before candidate build (zero-trade RCA)."""
+    settings = get_settings()
+    notes: list[dict[str, Any]] = []
+    for symbol, snap in snapshots.items():
+        if not snap.dataAvailable:
+            continue
+        for alert in snap.explosionAlerts or []:
+            if not _high_signal_explosion_alert(alert, min_score=90.0):
+                continue
+            reason = _high_signal_pre_candidate_skip_reason(
+                symbol, alert, snap, state, settings,
+            )
+            if not reason:
+                continue
+            notes.append(
+                {
+                    "symbol": symbol,
+                    "side": str(alert.get("side") or "").upper() or None,
+                    "strike": float(alert.get("strike") or 0) or None,
+                    "reason": reason,
+                    "mode": "explosion",
+                    "message": "High-signal explosion alert never reached SELECTED",
+                    "score": float(alert.get("explosionScore") or 0),
+                    "tier": alert.get("tier"),
+                }
+            )
+    return notes
+
+
+def _high_signal_pre_candidate_skip_reason(
+    symbol: str,
+    alert: dict,
+    snap: SymbolSnapshot,
+    state: AutoTraderState,
+    settings,
+) -> str | None:
+    """Mirror early _explosion_candidates drops for ELITE/EXPLODING RCA (Oct 9 open rip)."""
+    from app.engines.early_radar_pad_capture import (
+        alert_has_building_coil_pad,
+        alert_has_early_radar_pad_capture,
+        alert_has_early_radar_pad_ready,
+        building_coil_pad_moneyness_ok,
+        early_radar_pad_shallow_otm_ok,
+    )
+    from app.engines.ict_breakout_monitor import first_lift_entry_readiness
+
+    first_lift_ready, first_lift_readiness_reason = first_lift_entry_readiness(
+        snap=snap,
+        alert=alert,
+        state=state,
+    )
+    oct_first_lift_pad = False
+    if isinstance(alert, dict):
+        from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+
+        oct_first_lift_pad = oct_paper_first_lift_small_lift_context(
+            alert,
+            settings=settings,
+            readiness_reason=first_lift_readiness_reason,
+        )
+        if oct_first_lift_pad:
+            first_lift_ready = True
+    early_pad = alert_has_early_radar_pad_ready(alert)
+    coil_pad = alert_has_building_coil_pad(alert)
+    from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
+
+    pad_lane_waive = pad_lane_early_near_miss_waive(
+        alert, readiness_reason=first_lift_readiness_reason,
+    )
+    if not pad_lane_waive:
+        from app.engines.rally_capture import explosion_near_miss_waive
+
+        pad_lane_waive = explosion_near_miss_waive(
+            alert,
+            snap=snap,
+            readiness_reason=first_lift_readiness_reason,
+            state=state,
+            settings=settings,
+        )
+    lift_ready = (
+        first_lift_ready or early_pad or coil_pad or pad_lane_waive or oct_first_lift_pad
+    )
+    chop_rally_capture = False
+    if (
+        str(alert.get("side") or "").upper() == "CALL"
+        and str(alert.get("tier") or "").upper() == "BUILDING"
+    ):
+        from app.engines.pe_win_ce_mirror import ce_best_trade_building_capture_ok
+
+        chop_rally_capture = ce_best_trade_building_capture_ok(
+            alert,
+            snap,
+            state,
+            readiness_reason=first_lift_readiness_reason,
+            settings=settings,
+        )
+    if not alert.get("tradeable") and not lift_ready and not chop_rally_capture:
+        return "explosion_not_tradeable"
+    from app.engines.premium_filter import explosion_alert_premium_tradeable
+
+    if not explosion_alert_premium_tradeable(
+        alert.get("premium"),
+        peak_move_pct=float(alert.get("peakMovePct") or 0),
+        snap=snap,
+        alert=alert,
+        state=state,
+        settings=settings,
+    ):
+        return "explosion_premium_not_tradeable"
+    side_v = str(alert.get("side") or "").upper()
+    tier_u = str(alert.get("tier") or "").upper()
+    try:
+        strike_v = float(alert.get("strike") or 0)
+    except (TypeError, ValueError):
+        strike_v = 0.0
+    spot_v = float(snap.spot or 0)
+    atm_v = float(snap.atmStrike or 0)
+    if side_v in ("CALL", "PUT") and strike_v > 0 and spot_v > 0:
+        money = classify_moneyness(
+            Side(side_v),
+            strike_v,
+            spot_v,
+            symbol=symbol,
+            atm=atm_v if atm_v > 0 else None,
+        )
+        if money == "OTM":
+            from app.engines.moneyness import _depth_steps
+
+            depth = _depth_steps(
+                Side(side_v),
+                strike_v,
+                spot_v,
+                symbol,
+                atm_v if atm_v > 0 else spot_v,
+            )
+            max_steps = int(
+                getattr(settings, "explosion_shallow_otm_history_steps", 1) or 1
+            )
+            entry_steps = int(
+                getattr(settings, "explosion_shallow_otm_entry_steps", 1) or 1
+            )
+            pad_shallow_ok = early_radar_pad_shallow_otm_ok(alert, snap)
+            coil_moneyness_ok = building_coil_pad_moneyness_ok(alert, snap, settings)
+            shallow_elite_ok = (
+                bool(getattr(settings, "explosion_shallow_otm_entry_enabled", True))
+                and depth <= entry_steps
+                and tier_u in ("ELITE", "EXPLODING")
+            )
+            if not (
+                coil_moneyness_ok
+                or shallow_elite_ok
+                or (
+                    (lift_ready or alert_has_early_radar_pad_capture(alert))
+                    and pad_shallow_ok
+                    and depth <= max_steps
+                )
+            ):
+                return "explosion_otm_shallow_not_allowed"
+    return None
+
+
 def rank_candidates_for_selection(
     candidates: list[EntryCandidate],
     legacy_score,
@@ -498,20 +683,28 @@ def _explosion_candidates(
                         and depth <= max_steps
                     )
                 ):
+                    _maybe_record_high_signal_explosion_skip(
+                        symbol, alert, "explosion_otm_shallow_not_allowed",
+                    )
                     continue
         from app.engines.explosion_entry_guards import (
             deep_itm_near_strike_substitute_blocked,
             far_otm_near_base_substitute_blocked,
         )
 
-        itm_substitute, _itm_reason = deep_itm_near_strike_substitute_blocked(
+        itm_substitute, itm_reason = deep_itm_near_strike_substitute_blocked(
             Side(side_v),
             strike_v,
             snap,
         )
         if itm_substitute:
+            _maybe_record_high_signal_explosion_skip(
+                symbol,
+                alert,
+                str(itm_reason or "deep_itm_near_strike_substitute"),
+            )
             continue
-        far_otm, _far_reason = far_otm_near_base_substitute_blocked(
+        far_otm, far_reason = far_otm_near_base_substitute_blocked(
             Side(side_v),
             strike_v,
             snap,
@@ -519,6 +712,11 @@ def _explosion_candidates(
             candidate_score=float(alert.get("score") or 0),
         )
         if far_otm:
+            _maybe_record_high_signal_explosion_skip(
+                symbol,
+                alert,
+                str(far_reason or "far_otm_near_base_substitute"),
+            )
             continue
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
@@ -646,6 +844,9 @@ def _explosion_candidates(
                     side_v, snap, alert=alert,
                 )
                 if not local_base_ok and not pad_lane_ok and not grade_a_ok and not candlestick_ok:
+                    _maybe_record_high_signal_explosion_skip(
+                        symbol, alert, "chart_not_aligned",
+                    )
                     continue
         score_val = float(alert.get("explosionScore", 0))
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
@@ -702,6 +903,9 @@ def _explosion_candidates(
                 ),
             )
         if score_val < min_explosion_score:
+            _maybe_record_high_signal_explosion_skip(
+                symbol, alert, "explosion_score_below_min",
+            )
             continue
         # Explosion score is primary quality — don't block on low symbol TQS alone
         if (
@@ -709,6 +913,9 @@ def _explosion_candidates(
             and snap.tradeQualityScore < 25
             and score_val < settings.aggressive_min_explosion_score + 10
         ):
+            _maybe_record_high_signal_explosion_skip(
+                symbol, alert, "symbol_tqs_low",
+            )
             continue
 
         event = ExplosionEvent(
@@ -732,6 +939,9 @@ def _explosion_candidates(
         if not counter_trend_entry_allowed(
             event.side, snap, explosion_event=event, alert=alert if isinstance(alert, dict) else None,
         ):
+            _maybe_record_high_signal_explosion_skip(
+                symbol, alert, "counter_trend_requires_elite",
+            )
             continue
         from app.engines.winner_entry_guards import chop_weak_explosion_blocks_entry
 
@@ -742,8 +952,13 @@ def _explosion_candidates(
             tqs=snap.tradeQualityScore,
             tier=event.tier, explosion_event=event, alert=alert,
         )
-        chop_blocked, _ = chop_weak_explosion_blocks_entry(cand_probe, snap)
+        chop_blocked, chop_reason = chop_weak_explosion_blocks_entry(cand_probe, snap)
         if chop_blocked:
+            _maybe_record_high_signal_explosion_skip(
+                symbol,
+                alert,
+                str(chop_reason or "chop_weak_explosion"),
+            )
             continue
         suggestion = SuggestedTrade(
             id=alert.get("id", "x"),
@@ -758,7 +973,7 @@ def _explosion_candidates(
         blocked = state.calibrationBlocks.get(event.side.value, False)
         moment, _ = index_moment_active(snap)
         moment_surge = moment and side_aligned_with_index_moment(event.side, snap)
-        passed, _ = check_explosion_entry(
+        passed, entry_fail_reason = check_explosion_entry(
             event, suggestion, snap.breadth, blocked,
             index_moment=moment_surge,
             chart=snap.spotChart,
@@ -766,18 +981,29 @@ def _explosion_candidates(
             alert=alert if isinstance(alert, dict) else None,
         )
         if not passed:
+            _maybe_record_high_signal_explosion_skip(
+                symbol,
+                alert,
+                str(entry_fail_reason or "explosion_entry_blocked"),
+            )
             continue
 
         from app.engines.rally_capture import cross_side_chase_blocked
 
-        blocked_x, _ = cross_side_chase_blocked(event, snap)
+        blocked_x, cross_reason = cross_side_chase_blocked(event, snap)
         if blocked_x:
+            _maybe_record_high_signal_explosion_skip(
+                symbol,
+                alert,
+                str(cross_reason or "cross_side_chase_blocked"),
+            )
             continue
 
         blocked, reason = _reentry_blocked(
             symbol, event.side, event.strike, snap, explosion_event=event, state=state,
         )
         if blocked:
+            _maybe_record_high_signal_explosion_skip(symbol, alert, str(reason))
             continue
 
         rank = score_val * 0.55 + snap.tradeQualityScore * 0.25

@@ -80,7 +80,12 @@ from app.engines.edge_engine import (
     session_pf_feedback,
     tune_plan_with_edge,
 )
-from app.engines.trade_selector import EntryCandidate, diagnose_missed_entries, find_best_entry
+from app.engines.trade_selector import (
+    EntryCandidate,
+    diagnose_missed_entries,
+    diagnose_selector_feed_gaps,
+    find_best_entry,
+)
 from app.engines.paper_slippage import (
     apply_entry_fill,
     exit_premium_for_trade,
@@ -4925,6 +4930,7 @@ async def process(
             }
             if not found_candidate:
                 skipped.extend(diagnose_missed_entries(snapshots, state))
+                skipped.extend(diagnose_selector_feed_gaps(snapshots, state))
 
     state.skipped = skipped
     state.dailyReport = _calibration.build_report(state.closedPaperTrades)
