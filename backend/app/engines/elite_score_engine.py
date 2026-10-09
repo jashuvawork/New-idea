@@ -899,11 +899,20 @@ def elite_perfect_score_blocked(
     *,
     settings: Any = None,
     call_capture_waive: bool = False,
+    evidence: Mapping[str, Any] | None = None,
+    readiness_reason: str = "",
 ) -> tuple[bool, str]:
     """Block rounded score=100 chase entries unless still near base."""
     from app.config import get_settings
+    from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
 
     settings = settings or get_settings()
+    if oct_paper_first_lift_small_lift_context(
+        evidence,
+        settings=settings,
+        readiness_reason=readiness_reason,
+    ):
+        return False, ""
     if call_capture_waive:
         near_cap = float(
             getattr(settings, "best_trade_near_base_max_local_pct", 20.0) or 20.0
@@ -1078,7 +1087,17 @@ def elite_fvq_chase_blocked(
     if must_take:
         return False, ""
     from app.engines.live_entry_score import live_entry_best_trade_capture_active
-    from app.engines.live_paper_parity import trading_rules_match_paper
+    from app.engines.live_paper_parity import (
+        oct_paper_first_lift_small_lift_context,
+        trading_rules_match_paper,
+    )
+
+    if oct_paper_first_lift_small_lift_context(
+        evidence,
+        settings=settings,
+        readiness_reason=readiness_reason,
+    ):
+        return False, ""
 
     if trading_rules_match_paper(settings):
         tier_u = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
@@ -1442,6 +1461,13 @@ def elite_entry_allowed(
     from app.config import get_settings
 
     settings = settings or get_settings()
+    from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+
+    oct_first_lift = oct_paper_first_lift_small_lift_context(
+        evidence,
+        settings=settings,
+        readiness_reason=readiness_reason,
+    )
 
     resolved_mode, resolved_type = resolve_elite_session_day_type(
         state,
@@ -1772,12 +1798,15 @@ def elite_entry_allowed(
         mega_ok=mega_ok or building_rip_helper_ok,
         settings=settings,
     ):
-        if bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)):
+        if oct_first_lift:
+            pass
+        elif bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)):
             assessment = {**assessment, "side": resolved_side}
             return False, "elite_v_rip_only", assessment
-        local = _number(assessment.get("localBasePct"))
-        assessment = {**assessment, "side": resolved_side}
-        return False, f"elite_explosive_chase_local_{local:.0f}pct", assessment
+        else:
+            local = _number(assessment.get("localBasePct"))
+            assessment = {**assessment, "side": resolved_side}
+            return False, f"elite_explosive_chase_local_{local:.0f}pct", assessment
 
     milestone_blocked, milestone_reason = elite_milestone_depth_blocked(
         evidence, settings=settings,
@@ -1820,7 +1849,7 @@ def elite_entry_allowed(
         mirror_waived=mirror_active,
         rally_unlock_armed=rally_unlock_armed,
     )
-    if chop_call_blocked:
+    if chop_call_blocked and not oct_first_lift:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, chop_call_reason, assessment
 
@@ -1854,7 +1883,7 @@ def elite_entry_allowed(
     ):
         v_rip_shallow_blocked = False
         v_rip_shallow_reason = ""
-    if v_rip_shallow_blocked:
+    if v_rip_shallow_blocked and not oct_first_lift:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, v_rip_shallow_reason, assessment
 
@@ -1863,6 +1892,8 @@ def elite_entry_allowed(
         _number(assessment.get("localBasePct")),
         settings=settings,
         call_capture_waive=call_capture_waive,
+        evidence=evidence,
+        readiness_reason=readiness_reason,
     )
     if perfect_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
@@ -1874,12 +1905,12 @@ def elite_entry_allowed(
     shallow_blocked, shallow_reason = elite_shallow_lift_blocked(
         evidence, assessment, settings=settings,
     )
-    if shallow_blocked:
+    if shallow_blocked and not oct_first_lift:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, shallow_reason, assessment
 
     local = _number(assessment.get("localBasePct"))
-    if local > max_local + 1e-6:
+    if local > max_local + 1e-6 and not oct_first_lift:
         from app.engines.best_trade_policy import symmetric_best_trade_capture_active
 
         assessment = {**assessment, "side": resolved_side, "localBaseCapPct": round(max_local, 2)}

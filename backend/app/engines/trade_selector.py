@@ -320,6 +320,15 @@ def _explosion_candidates(
             alert=alert,
             state=state,
         )
+        if not first_lift_ready and isinstance(alert, dict):
+            from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+
+            if oct_paper_first_lift_small_lift_context(
+                alert,
+                settings=settings,
+                readiness_reason=first_lift_readiness_reason,
+            ):
+                first_lift_ready = True
         early_pad = alert_has_early_radar_pad_ready(alert)
         coil_pad = alert_has_building_coil_pad(alert)
         from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
