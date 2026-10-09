@@ -2,7 +2,173 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
+
+_OCT_FIRST_LIFT_SMALL_LIFT_MOMENTS = frozenset(
+    {
+        "armed_base_launch",
+        "v_rip_session_low",
+        "v_rip_session_high",
+        "first_lift_local_base",
+        "ict_base_armed",
+        "flat_then_vertical",
+        "volume_awaken",
+    }
+)
+
+
+def _parity_number(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def oct_paper_first_lift_small_lift_context(
+    evidence: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+    readiness_reason: str = "",
+) -> bool:
+    """
+    Oct 1 paper: symmetric CE/PE early armed-base / v-rip / first-lift at pad (small lift).
+
+    When true under trading_rules_match_paper, chase-style selector/elite blocks are waived.
+    negative_velocity and deep cold-tick rejects are not waived here.
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not trading_rules_match_paper(s):
+        return False
+    if not bool(getattr(s, "oct_paper_first_lift_small_lift_waiver_enabled", True)):
+        return False
+    if not isinstance(evidence, dict):
+        return False
+
+    tier = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+
+    moment = str(evidence.get("momentType") or "")
+    rr = str(
+        readiness_reason
+        or evidence.get("firstLiftReadinessReason")
+        or evidence.get("ictBaseReadinessReason")
+        or ""
+    ).lower()
+    launch = (
+        bool(evidence.get("firstLift") or evidence.get("ictFirstLift"))
+        or bool(evidence.get("armedBaseLaunch") or evidence.get("ictArmedBaseLaunch"))
+        or bool(evidence.get("vRipReady"))
+        or moment in _OCT_FIRST_LIFT_SMALL_LIFT_MOMENTS
+        or rr.startswith(
+            (
+                "armed_base",
+                "v_rip_session_low",
+                "v_rip_session_high",
+                "first_lift",
+                "ict_base",
+            )
+        )
+    )
+    if not launch:
+        return False
+
+    pos = _parity_number(evidence.get("sessionRangePosition"))
+    max_pos = float(
+        getattr(s, "live_paper_parity_max_session_range_position", 0.52) or 0.52
+    )
+    dd = _parity_number(evidence.get("drawdownFromHighPct"))
+    min_off_high = float(
+        getattr(s, "live_paper_parity_min_off_session_high_pct", 6.0) or 6.0
+    )
+    at_option_session_high = pos > 0 and dd > -min_off_high + 1e-6
+    if pos > max_pos + 1e-6 or at_option_session_high:
+        try:
+            from app.engines.session_timing import in_open_premium_window
+
+            if not in_open_premium_window():
+                return False
+        except Exception:
+            return False
+
+    side = str(evidence.get("side") or "").upper()
+    local = max(
+        _parity_number(evidence.get("localBaseMovePct")),
+        _parity_number(evidence.get("ictBaseRelativeMovePct")),
+    )
+    min_move = float(
+        getattr(s, "oct_paper_first_lift_small_lift_min_local_pct", 2.0) or 2.0
+    )
+    max_move = float(
+        getattr(s, "oct_paper_first_lift_small_lift_max_local_pct", 40.0) or 40.0
+    )
+    max_move = max(
+        max_move,
+        float(getattr(s, "first_lift_trade_max_move_pct", 40.0) or 40.0),
+    )
+
+    session_pad = False
+    if side == "CALL":
+        off_low = _parity_number(evidence.get("offLowMovePct"))
+        min_off = float(
+            getattr(s, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
+        )
+        session_pad = off_low >= min_off - 1e-6
+    elif side == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+        session_pad = put_slide_pad_context(evidence, settings=s)
+
+    if local <= 0 and session_pad:
+        local = min_move
+
+    if local > 0 and local < min_move - 1e-6:
+        return False
+    if local > max_move + 1e-6 and not session_pad:
+        return False
+    if local > max_move + 1e-6 and session_pad:
+        session_cap = float(
+            getattr(s, "oct_paper_first_lift_small_lift_session_expansion_max_local_pct", 55.0)
+            or 55.0
+        )
+        try:
+            from app.engines.session_timing import in_open_premium_window
+
+            if in_open_premium_window():
+                open_cap = float(
+                    getattr(s, "oct_paper_open_moment_max_local_pct", 70.0) or 70.0
+                )
+                session_cap = max(session_cap, open_cap)
+        except Exception:
+            pass
+        if local > session_cap + 1e-6:
+            return False
+
+    try:
+        from app.engines.session_timing import in_open_premium_window
+
+        if in_open_premium_window() and session_pad and launch:
+            score = _parity_number(
+                evidence.get("explosionScore") or evidence.get("score")
+            )
+            min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
+            if score >= min_score - 1e-6:
+                if str(evidence.get("moneyness") or "").upper() != "OTM":
+                    return True
+    except Exception:
+        pass
+
+    if str(evidence.get("moneyness") or "").upper() == "OTM":
+        steps = _parity_number(evidence.get("strikeStepsFromAtm"))
+        max_steps = int(
+            getattr(s, "oct_paper_first_lift_small_lift_max_strike_steps", 3) or 3
+        )
+        if steps <= 0 or steps > max_steps + 1e-6:
+            return False
+
+    return True
 
 
 def _strict_bool(value: Any, default: bool = False) -> bool:

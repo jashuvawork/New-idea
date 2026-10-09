@@ -3243,6 +3243,14 @@ class Settings(BaseSettings):
     # Frozen Oct slide/rally: ITM rip may exceed ₹350 cap while still Oct 1 ATM/ITM capture.
     oct_paper_slide_explosion_max_premium_inr: float = 650.0
     oct_paper_slide_premium_waiver_enabled: bool = True
+    # Oct 1 first-lift / small-lift at pad — waive chase blockers (not negative_velocity).
+    oct_paper_first_lift_small_lift_waiver_enabled: bool = True
+    oct_paper_first_lift_small_lift_min_local_pct: float = 2.0
+    oct_paper_first_lift_small_lift_max_local_pct: float = 40.0
+    oct_paper_first_lift_small_lift_session_expansion_max_local_pct: float = 55.0
+    oct_paper_first_lift_small_lift_max_strike_steps: int = 3
+    oct_paper_open_moment_max_local_pct: float = 70.0
+    oct_paper_open_moment_pad_waiver_enabled: bool = True
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0

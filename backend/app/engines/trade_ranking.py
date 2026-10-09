@@ -1891,9 +1891,16 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
 
     rejected = False
     if timing == "FAILED_LAUNCH" or timing_action == "block" and v3 < 0:
-        rejected = True
-        penalties.append({"code": "failed_launch", "points": 45.0})
-        score -= 45.0
+        from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+
+        failed_launch_block = True
+        if oct_paper_first_lift_small_lift_context(evidence, settings=settings):
+            if v3 >= 0 or micro_pullback or _pad_lane_cold_velocity_ok(evidence, v3, v9):
+                failed_launch_block = False
+        if failed_launch_block:
+            rejected = True
+            penalties.append({"code": "failed_launch", "points": 45.0})
+            score -= 45.0
     if v3 < 0 and not micro_pullback and not _pad_lane_cold_velocity_ok(
         evidence, v3, v9
     ):

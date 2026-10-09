@@ -161,6 +161,71 @@ def live_oct1_pad_entry_blocked(
     if not at_base:
         return True, "live_oct1_not_near_base_shape", meta
 
+    if bool(getattr(settings, "oct_paper_open_moment_pad_waiver_enabled", True)):
+        from app.engines.live_paper_parity import (
+            oct_paper_first_lift_small_lift_context,
+            trading_rules_match_paper,
+        )
+
+        pos_pre, dd_pre = _session_range_metrics(candidate)
+        evidence_pos = {
+            **evidence,
+            "sessionRangePosition": pos_pre,
+            "drawdownFromHighPct": dd_pre,
+        }
+        rr = ""
+        if isinstance(pre, dict):
+            rr = str(pre.get("firstLiftReadinessReason") or "")
+        if oct_paper_first_lift_small_lift_context(
+            evidence_pos,
+            settings=settings,
+            readiness_reason=rr,
+        ):
+            meta["octFirstLiftPadWaive"] = True
+            return False, "", meta
+        if trading_rules_match_paper(settings):
+            side_u = str(
+                getattr(getattr(candidate, "side", None), "value", None)
+                or getattr(candidate, "side", "")
+                or evidence.get("side")
+                or ""
+            ).upper()
+            try:
+                from app.engines.session_timing import in_open_premium_window
+
+                if in_open_premium_window():
+                    if side_u == "CALL":
+                        off_low = float(evidence_pos.get("offLowMovePct") or 0)
+                        min_off = float(
+                            getattr(
+                                settings,
+                                "live_paper_parity_min_off_session_low_pct",
+                                6.0,
+                            )
+                            or 6.0
+                        )
+                        if off_low >= min_off - 1e-6 and (
+                            evidence.get("armedBaseLaunch")
+                            or evidence.get("vRipReady")
+                            or str(evidence.get("momentType") or "")
+                            in (
+                                "armed_base_launch",
+                                "v_rip_session_low",
+                                "flat_then_vertical",
+                                "first_lift_local_base",
+                            )
+                        ):
+                            meta["octOpenCallRipPadWaive"] = True
+                            return False, "", meta
+                    elif side_u == "PUT":
+                        from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+                        if put_slide_pad_context(evidence, settings=settings):
+                            meta["octOpenPutSlidePadWaive"] = True
+                            return False, "", meta
+            except Exception:
+                pass
+
     pos, dd = _session_range_metrics(candidate)
     meta["sessionRangePosition"] = round(pos, 3)
     meta["drawdownFromHighPct"] = round(dd, 2)

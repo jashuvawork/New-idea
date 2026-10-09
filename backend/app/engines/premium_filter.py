@@ -218,7 +218,12 @@ def explosion_alert_premium_tradeable(
         max_otm = int(getattr(settings, "explosion_shallow_otm_entry_steps", 1) or 1)
         if depth > max_otm:
             return False
-    if not oct_paper_slide_explosion_context_armed(alert, snap, state, settings=settings):
+    from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+
+    slide_or_lift = oct_paper_slide_explosion_context_armed(
+        alert, snap, state, settings=settings,
+    ) or oct_paper_first_lift_small_lift_context(alert, settings=settings)
+    if not slide_or_lift:
         return False
     min_prem = _explosion_min_premium(
         prem, peak_move_pct=peak_move_pct, snap=snap, settings=settings,

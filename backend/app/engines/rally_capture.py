@@ -557,6 +557,16 @@ def explosion_near_miss_waive(
         from app.engines.live_paper_parity import trading_rules_match_paper
 
         if trading_rules_match_paper(s):
+            from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+
+            if oct_paper_first_lift_small_lift_context(
+                alert,
+                settings=s,
+                readiness_reason=readiness_reason,
+            ):
+                if "negative" in rr and "velocity" in rr:
+                    return False
+                return True
             tier = str(alert.get("tier") or "").upper()
             score = float(alert.get("explosionScore") or alert.get("score") or 0)
             min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
