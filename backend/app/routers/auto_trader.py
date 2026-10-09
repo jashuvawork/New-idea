@@ -1,8 +1,7 @@
 """Auto-trader status and reporting API."""
 
-from fastapi import APIRouter
-
-from fastapi import HTTPException
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from app.engines.auto_trader import (
     entries_execution_active,
@@ -156,6 +155,43 @@ async def trade_history_day(date: str):
     if len(date) != 10 or date[4] != "-" or date[7] != "-":
         raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
     return trade_store.get_day_detail(date)
+
+
+@router.get("/trade-archives")
+async def trade_archives(limit: int = 90):
+    """List daily paper+live trade ZIP archives (survives purge-logs)."""
+    return {"archives": trade_store.list_trade_archives(limit=min(max(limit, 1), 365))}
+
+
+@router.get("/trade-archives/{date}")
+async def download_trade_archive(date: str):
+    """Download trades-YYYY-MM-DD.zip for one session."""
+    if len(date) != 10 or date[4] != "-" or date[7] != "-":
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+    try:
+        path = trade_store.trade_archive_path(date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Trade archive not found — finalize runs at 16:00 IST or POST /api/ai/radar-finalize/{date}",
+        )
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=path.name,
+    )
+
+
+@router.post("/trade-archives/{date}/build")
+async def build_trade_archive(date: str):
+    """Build or refresh the daily trade ZIP (admin/recovery)."""
+    if len(date) != 10 or date[4] != "-" or date[7] != "-":
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+    import asyncio
+
+    return await asyncio.to_thread(trade_store.finalize_daily_trades_archive, date)
 
 
 @router.get("/history/trades/closed")

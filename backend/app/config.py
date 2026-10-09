@@ -3792,6 +3792,9 @@ class Settings(BaseSettings):
     # Persistence
     trade_store_dir: str = "/tmp/nexusquant/trades"
     trade_log_file: str = ""  # default: {trade_store_dir}/trades.log
+    # Daily ZIP of paper + live trades (day JSON + trades.log excerpt) at radar finalize.
+    trade_daily_archive_enabled: bool = True
+    trade_archive_retention_days: int = 90
     radar_archive_enabled: bool = True
     radar_archive_dir: str = ""  # default: {trade_store_dir}/radar_archives
     radar_archive_top_n_per_day: int = 100
