@@ -23,6 +23,20 @@ Tests: `backend/tests/test_enable_live_trading_rule_parity.py`, `backend/tests/t
 
 Pretrade `armed_base_shallow_launch_blocked` (chop-live naming) is **skipped** when `trading_rules_match_paper` — same Oct armed-base path as paper.
 
+**Pre-entry blocks inert under `tradingRulesMatchPaper` (Frozen Oct mirror live):**
+
+| Gate | Module |
+|------|--------|
+| Chop-live wire (entry, second leg, session lift narrow) | `chop_live_guards.py` |
+| Whipsaw session pause | `whipsaw_guards.py` |
+| Power-hour top-only session block | `power_hour_guards.py` |
+| Expiry worst-day declining halt | `expiry_day_guards.py` |
+| Live best-trades-only order wire | `live_best_trades.py` |
+| Worst-day blocks live trading | `worst_day_guard.py` |
+| Sep917 four-step checklist (even if enforcement flag mis-set) | `sep917_live_checklist.py` |
+| Live-entry-score **floor** for ELITE/EXPLODING ≥ min explosion score | `live_entry_score.py` (chase/dump guards still apply) |
+| Selector REJECT grade for hot ELITE/EXPLODING | `trade_selector.py` `oct_keep` |
+
 Use `legacy_live_entry_narrowings_active()` instead of bare `enable_live_trading` when adding new live-only rule forks.
 
 ## Still different (cannot fully clone)
