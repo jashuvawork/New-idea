@@ -228,8 +228,22 @@ def _high_signal_pre_candidate_skip_reason(
             state=state,
             settings=settings,
         )
+    from app.engines.open_rip_selector import open_rip_selector_lift_waiver
+
+    open_rip_lift = open_rip_selector_lift_waiver(
+        alert,
+        snap,
+        state,
+        settings=settings,
+        readiness_reason=first_lift_readiness_reason,
+    )
     lift_ready = (
-        first_lift_ready or early_pad or coil_pad or pad_lane_waive or oct_first_lift_pad
+        first_lift_ready
+        or early_pad
+        or coil_pad
+        or pad_lane_waive
+        or oct_first_lift_pad
+        or open_rip_lift
     )
     chop_rally_capture = False
     if (
@@ -578,8 +592,22 @@ def _explosion_candidates(
                 state=state,
                 readiness_reason=first_lift_readiness_reason,
             )
+        from app.engines.open_rip_selector import open_rip_selector_lift_waiver
+
+        open_rip_lift = open_rip_selector_lift_waiver(
+            alert if isinstance(alert, dict) else {},
+            snap,
+            state,
+            settings=settings,
+            readiness_reason=first_lift_readiness_reason,
+        )
         lift_ready = (
-            first_lift_ready or early_pad or coil_pad or pad_lane_waive or oct_first_lift_pad
+            first_lift_ready
+            or early_pad
+            or coil_pad
+            or pad_lane_waive
+            or oct_first_lift_pad
+            or open_rip_lift
         )
         slow_grind_trough = bool(
             alert.get("slowGrindArmedTrough")

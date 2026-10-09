@@ -206,4 +206,10 @@ def otm_tradeable_preserved(alert: Mapping[str, Any], *, settings: Any = None) -
         or alert.get("ictIndexConfirmedLocalBase")
     ):
         return True
+    if bool(alert.get("openRipEliteStructural")):
+        return True
+    from app.engines.open_rip_selector import open_rip_elite_tradeable_preserve
+
+    if open_rip_elite_tradeable_preserve(alert, settings=settings):
+        return True
     return False
