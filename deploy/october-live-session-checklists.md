@@ -2,6 +2,8 @@
 
 Operational checklists for **live and paper** when [`env.october-frozen.overlay`](env.october-frozen.overlay) is active. Use with [`verify-oct-live-ready.sh`](verify-oct-live-ready.sh) before open and the **post-session audit** at the bottom after close.
 
+**Arm live (CE + PE Oct paper stack):** step-by-step [`live-ce-pe-oct-paper-setup.md`](live-ce-pe-oct-paper-setup.md).
+
 **What is / isn’t mirrored paper↔live:** [`paper-live-parity-scope.md`](paper-live-parity-scope.md)
 
 **HUD (read-only):** `GET https://api.jashuvatrade.xyz/api/deployment/status`  
