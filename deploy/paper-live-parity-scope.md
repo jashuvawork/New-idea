@@ -37,6 +37,8 @@ Pretrade `armed_base_shallow_launch_blocked` (chop-live naming) is **skipped** w
 | Live-entry-score **floor** for ELITE/EXPLODING ≥ min explosion score | `live_entry_score.py` (chase/dump guards still apply) |
 | Selector REJECT grade for hot ELITE/EXPLODING | `trade_selector.py` `oct_keep` |
 | Sep917 OTM `tradeable` wipe on open rip ELITE (score ≥90, v-rip/armed/first-lift) | `open_rip_selector.py` + `explosion_detector.py` stamp |
+| Negative v3 on ELITE **with launch context** (Oct 1 paper) | `oct_paper_elite_rip_context()` — open window or small lift; **blocks late chase** after 09:45 |
+| WS explosion refresh cadence | `effective_ws_overlay_interval_ms()` — no 1s floor when `LATENCY_MODE=aggressive` |
 
 Use `legacy_live_entry_narrowings_active()` instead of bare `enable_live_trading` when adding new live-only rule forks.
 
