@@ -3408,4 +3408,8 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     from app.engines.live_entry_score import stamp_alert_live_entry_scores
 
     alert_out = stamp_alert_live_entry_scores(alert_out)
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    alert_out["alertStampedAt"] = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
     return alert_out

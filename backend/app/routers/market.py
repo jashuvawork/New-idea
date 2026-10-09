@@ -154,8 +154,9 @@ async def _store_cache_async(snap: MultiSnapshot) -> None:
 
 def ws_overlay_due() -> bool:
     """Throttle WS overlay serialize+broadcast — balance freshness vs event-loop load."""
-    settings = get_settings()
-    min_ms = max(_WS_OVERLAY_MIN_MS, settings.sse_heartbeat_seconds * 1000)
+    from app.engines.session_timing import effective_ws_overlay_interval_ms
+
+    min_ms = effective_ws_overlay_interval_ms()
     return (time.monotonic() - _last_ws_overlay_mono) * 1000 >= min_ms
 
 

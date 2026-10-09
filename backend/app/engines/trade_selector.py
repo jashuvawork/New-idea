@@ -2398,10 +2398,16 @@ def find_best_entry(
                 or getattr(c, "score", 0)
                 or 0
             )
+            from app.engines.live_paper_parity import oct_paper_elite_rip_context
+
+            rank_evidence = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
             oct_keep = (
                 trading_rules_match_paper(settings)
                 and tier_u in ("ELITE", "EXPLODING")
                 and expl_score >= min_score - 1e-6
+            ) or oct_paper_elite_rip_context(
+                {**rank_evidence, "tier": tier_u, "explosionScore": expl_score},
+                settings=settings,
             )
             if not oct_keep:
                 _record_selector_gate_rejection(c, selector_rejection_reason(ranking))

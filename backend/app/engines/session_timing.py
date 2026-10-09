@@ -89,6 +89,27 @@ def in_open_premium_window() -> bool:
     return start <= current < end
 
 
+def effective_ws_overlay_interval_ms() -> int:
+    """WS explosion refresh cadence — must not exceed 1s floor when aggressive preset is on."""
+    settings = get_settings()
+    floor = float(getattr(settings, "ws_snapshot_cache_interval_ms", 400) or 400)
+    heartbeat_ms = float(settings.sse_heartbeat_seconds or 0.5) * 1000.0
+    interval = max(floor, heartbeat_ms)
+    if in_open_premium_window() and settings.explosion_open_entry_enabled:
+        open_ms = float(getattr(settings, "explosion_open_scan_interval_ms", 400) or 400)
+        tick_ms = float(getattr(settings, "tick_snapshot_interval_ms", 75) or 75)
+        interval = min(interval, open_ms, tick_ms * 2.0)
+    return int(max(50.0, interval))
+
+
+def effective_building_ltp_monitor_min_ms() -> float:
+    settings = get_settings()
+    base = float(getattr(settings, "building_ltp_monitor_min_ms", 75.0) or 75.0)
+    if in_open_premium_window():
+        return min(base, 40.0)
+    return base
+
+
 def effective_entry_scan_interval_ms() -> int:
     """Fastest cadence across all active fast windows (open premium + expiry).
 

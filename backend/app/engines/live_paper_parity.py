@@ -181,6 +181,81 @@ def oct_paper_first_lift_small_lift_context(
     return True
 
 
+def oct_paper_elite_rip_context(
+    evidence: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """
+    Oct 1 paper: ELITE/EXPLODING at armed-base / v-rip / first-lift may keep negative v3.
+
+    Matches EOD replay — micro-pullback and pad-lane flat coil still apply; random cold
+    negative velocity without launch context stays rejected.
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not trading_rules_match_paper(s):
+        return False
+    if not isinstance(evidence, dict):
+        return False
+    tier = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    score = _parity_number(evidence.get("explosionScore") or evidence.get("score"))
+    min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
+    if score < min_score - 1e-6:
+        return False
+    armed_launch = bool(evidence.get("armedBaseLaunch") or evidence.get("ictArmedBaseLaunch"))
+    elite_base_ready = bool(
+        evidence.get("eliteBaseReady") or evidence.get("ictEliteBaseReady")
+    )
+    v_rip_ready = bool(
+        evidence.get("vRipReady")
+        or evidence.get("ictVRipReady")
+        or "v_rip" in str(evidence.get("momentType") or "").lower()
+    )
+    building_rip_ready = bool(
+        evidence.get("buildingRipReady") or evidence.get("ictBuildingRipReady")
+    )
+    flat_vertical = bool(
+        evidence.get("flatThenVertical") or evidence.get("ictFlatThenVertical")
+    )
+    first_lift = bool(evidence.get("firstLift") or evidence.get("ictFirstLift"))
+    from app.engines.open_rip_selector import open_rip_elite_structural_evidence
+
+    structural = (
+        armed_launch
+        or elite_base_ready
+        or v_rip_ready
+        or building_rip_ready
+        or flat_vertical
+        or first_lift
+        or open_rip_elite_structural_evidence(evidence)
+    )
+    if not structural:
+        return False
+    try:
+        from app.engines.session_timing import in_open_premium_window
+
+        if in_open_premium_window():
+            return True
+    except Exception:
+        return True
+    # After open window: Oct 1 paper still took pullbacks near session low, not afternoon chase.
+    local = _parity_number(evidence.get("localBaseMovePct"))
+    off_low = _parity_number(evidence.get("offLowMovePct"))
+    pos = _parity_number(evidence.get("sessionRangePosition"))
+    max_late_local = float(
+        getattr(s, "oct_paper_elite_rip_max_local_outside_open_pct", 28.0) or 28.0
+    )
+    if pos > 0.55 + 1e-6:
+        return False
+    if off_low >= float(getattr(s, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0) - 1e-6:
+        return local <= max_late_local + 1e-6
+    return local <= max_late_local + 1e-6
+
+
 def _strict_bool(value: Any, default: bool = False) -> bool:
     """Only real bools count — MagicMock attrs must not flip parity on in tests."""
     if isinstance(value, bool):
