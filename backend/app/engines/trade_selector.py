@@ -320,14 +320,16 @@ def _explosion_candidates(
             alert=alert,
             state=state,
         )
-        if not first_lift_ready and isinstance(alert, dict):
+        oct_first_lift_pad = False
+        if isinstance(alert, dict):
             from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
 
-            if oct_paper_first_lift_small_lift_context(
+            oct_first_lift_pad = oct_paper_first_lift_small_lift_context(
                 alert,
                 settings=settings,
                 readiness_reason=first_lift_readiness_reason,
-            ):
+            )
+            if oct_first_lift_pad:
                 first_lift_ready = True
         early_pad = alert_has_early_radar_pad_ready(alert)
         coil_pad = alert_has_building_coil_pad(alert)
@@ -371,7 +373,9 @@ def _explosion_candidates(
                 state=state,
                 readiness_reason=first_lift_readiness_reason,
             )
-        lift_ready = first_lift_ready or early_pad or coil_pad or pad_lane_waive
+        lift_ready = (
+            first_lift_ready or early_pad or coil_pad or pad_lane_waive or oct_first_lift_pad
+        )
         slow_grind_trough = bool(
             alert.get("slowGrindArmedTrough")
             or alert.get("ictSlowGrindArmedTrough")

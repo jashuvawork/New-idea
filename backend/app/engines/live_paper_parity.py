@@ -11,6 +11,8 @@ _OCT_FIRST_LIFT_SMALL_LIFT_MOMENTS = frozenset(
         "v_rip_session_high",
         "first_lift_local_base",
         "ict_base_armed",
+        "flat_then_vertical",
+        "volume_awaken",
     }
 )
 
@@ -73,6 +75,24 @@ def oct_paper_first_lift_small_lift_context(
     if not launch:
         return False
 
+    pos = _parity_number(evidence.get("sessionRangePosition"))
+    max_pos = float(
+        getattr(s, "live_paper_parity_max_session_range_position", 0.52) or 0.52
+    )
+    dd = _parity_number(evidence.get("drawdownFromHighPct"))
+    min_off_high = float(
+        getattr(s, "live_paper_parity_min_off_session_high_pct", 6.0) or 6.0
+    )
+    at_option_session_high = pos > 0 and dd > -min_off_high + 1e-6
+    if pos > max_pos + 1e-6 or at_option_session_high:
+        try:
+            from app.engines.session_timing import in_open_premium_window
+
+            if not in_open_premium_window():
+                return False
+        except Exception:
+            return False
+
     side = str(evidence.get("side") or "").upper()
     local = max(
         _parity_number(evidence.get("localBaseMovePct")),
@@ -113,8 +133,32 @@ def oct_paper_first_lift_small_lift_context(
             getattr(s, "oct_paper_first_lift_small_lift_session_expansion_max_local_pct", 55.0)
             or 55.0
         )
+        try:
+            from app.engines.session_timing import in_open_premium_window
+
+            if in_open_premium_window():
+                open_cap = float(
+                    getattr(s, "oct_paper_open_moment_max_local_pct", 70.0) or 70.0
+                )
+                session_cap = max(session_cap, open_cap)
+        except Exception:
+            pass
         if local > session_cap + 1e-6:
             return False
+
+    try:
+        from app.engines.session_timing import in_open_premium_window
+
+        if in_open_premium_window() and session_pad and launch:
+            score = _parity_number(
+                evidence.get("explosionScore") or evidence.get("score")
+            )
+            min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
+            if score >= min_score - 1e-6:
+                if str(evidence.get("moneyness") or "").upper() != "OTM":
+                    return True
+    except Exception:
+        pass
 
     if str(evidence.get("moneyness") or "").upper() == "OTM":
         steps = _parity_number(evidence.get("strikeStepsFromAtm"))

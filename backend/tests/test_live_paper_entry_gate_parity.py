@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from app.engines.entry_timing import timing_blocks_entry
@@ -239,3 +240,43 @@ def test_oct7_peak_pe_blocked_symmetric(settings_factory):
 )
 def test_oct7_pad_pe_allowed_symmetric(settings_factory):
     _assert_pad_allowed(settings_factory(), _oct7_pad_pe_candidate())
+
+
+def _oct9_open_call_rip_at_option_high() -> SimpleNamespace:
+    """Gap-up open: near-base shape but option premium already at its session high."""
+    alert = {
+        "tier": "ELITE",
+        "momentType": "armed_base_launch",
+        "localBaseMovePct": 12.0,
+        "offLowMovePct": 15.0,
+        "premium": 149.0,
+        "sessionLowPremium": 60.0,
+        "sessionPeakPremium": 170.0,
+        "side": "CALL",
+        "armedBaseLaunch": True,
+        "firstLift": True,
+        "explosionScore": 100.0,
+        "moneyness": "ATM",
+        "strikeStepsFromAtm": 1,
+    }
+    return SimpleNamespace(
+        mode="explosion",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22450.0,
+        premium=149.0,
+        alert=alert,
+        pretrade_meta={},
+        liveEntryScoreMeta={"drawdownFromHighPct": 0.0, "sessionRangePosition": 0.88},
+        snap=_snap(),
+    )
+
+
+@patch("app.engines.session_timing.in_open_premium_window", return_value=True)
+@pytest.mark.parametrize(
+    "settings_factory",
+    [_paper_parity_settings, _frozen_live_parity_on],
+)
+def test_oct9_open_call_rip_waives_option_session_high_block(_window, settings_factory):
+    """Oct 9 NIFTY gap-up: do not treat fresh armed-base rip as Oct7 session-high chase."""
+    _assert_pad_allowed(settings_factory(), _oct9_open_call_rip_at_option_high())

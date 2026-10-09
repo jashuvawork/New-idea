@@ -3249,6 +3249,8 @@ class Settings(BaseSettings):
     oct_paper_first_lift_small_lift_max_local_pct: float = 40.0
     oct_paper_first_lift_small_lift_session_expansion_max_local_pct: float = 55.0
     oct_paper_first_lift_small_lift_max_strike_steps: int = 3
+    oct_paper_open_moment_max_local_pct: float = 70.0
+    oct_paper_open_moment_pad_waiver_enabled: bool = True
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0
