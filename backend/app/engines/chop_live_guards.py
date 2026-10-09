@@ -258,6 +258,11 @@ def armed_base_shallow_launch_blocked(
     """Hard block shallow armed-base launches on chop or midday windows (CE/PE symmetric)."""
     settings = get_settings()
     meta: dict[str, Any] = {}
+    from app.engines.live_paper_parity import trading_rules_match_paper
+
+    if trading_rules_match_paper(settings):
+        meta["octPaperArmedBaseChopSkipped"] = True
+        return False, "", meta
     if not getattr(settings, "chop_live_block_armed_base_launch", True):
         return False, "", meta
     if str(getattr(candidate, "mode", "") or "") != "explosion":

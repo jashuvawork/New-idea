@@ -19,7 +19,11 @@ HUD: `livePaperProfile.legacyLiveNarrowStackActive`.
 
 Live **rule** forks must use `trading_rules_match_paper` / `legacy_live_narrow_stack_active`, not bare `enable_live_trading`. Order placement uses [`backend/app/engines/execution_backend.py`](../backend/app/engines/execution_backend.py) (`submit_entry_order` / `submit_exit_order`) — the only swap between Upstox and paper broker sim.
 
-Tests: `backend/tests/test_enable_live_trading_rule_parity.py`, `backend/tests/test_execution_backend.py`.
+Tests: `backend/tests/test_enable_live_trading_rule_parity.py`, `backend/tests/test_execution_backend.py`, `backend/tests/test_paper_live_full_parity_guards.py`.
+
+Pretrade `armed_base_shallow_launch_blocked` (chop-live naming) is **skipped** when `trading_rules_match_paper` — same Oct armed-base path as paper.
+
+Use `legacy_live_entry_narrowings_active()` instead of bare `enable_live_trading` when adding new live-only rule forks.
 
 ## Still different (cannot fully clone)
 

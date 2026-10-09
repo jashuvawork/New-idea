@@ -80,10 +80,13 @@ async def deployment_status():
     token_status = await get_daily_token_status()
     store_health = trade_store.check_store_health()
     today_counts = trade_store.count_today_trades()
+    live_paper_profile = __live_paper_profile_flags(settings)
     return {
         "status": "ok",
         "commit": settings.commit_sha,
         "environment": settings.environment,
+        "livePaperProfile": live_paper_profile,
+        "legacyLiveNarrowStackActive": __legacy_live_narrow_stack_active(settings),
         "loopWatchdog": watchdog_status(),
         "radarHealth": health_status(),
         "frozenOctoberProfile": __frozen_october_profile_flags(settings),
@@ -109,7 +112,7 @@ async def deployment_status():
             "entryGatesMatchPaper": __entry_gates_match_paper(settings),
             "tradingRulesMatchPaper": __trading_rules_match_paper(settings),
             "legacyLiveNarrowStackActive": __legacy_live_narrow_stack_active(settings),
-            "livePaperProfile": __live_paper_profile_flags(settings),
+            "livePaperProfile": live_paper_profile,
             "liveBestTradesOnlyEnabled": bool(
                 getattr(settings, "live_best_trades_only_enabled", True)
             ),
