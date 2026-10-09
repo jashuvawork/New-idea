@@ -36,7 +36,7 @@ def open_rip_elite_structural_evidence(alert: Mapping[str, Any]) -> bool:
     moment = str(alert.get("momentType") or "")
     if moment in _OPEN_RIP_MOMENTS:
         return True
-    if any(
+    return any(
         bool(alert.get(k))
         for k in (
             "vRipReady",
@@ -51,14 +51,7 @@ def open_rip_elite_structural_evidence(alert: Mapping[str, Any]) -> bool:
             "bullishLocalBaseActive",
             "localBaseReversalActive",
         )
-    ):
-        return True
-    pad = max(
-        _num(alert.get("localBaseMovePct")),
-        _num(alert.get("ictBaseRelativeMovePct")),
-        _num(alert.get("offLowMovePct")),
     )
-    return pad >= 12.0
 
 
 def open_rip_elite_tradeable_preserve(

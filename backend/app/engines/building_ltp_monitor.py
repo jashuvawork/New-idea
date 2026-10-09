@@ -768,9 +768,9 @@ def building_ltp_monitor_due(
         return False
 
     mono = time.monotonic() if now_mono is None else float(now_mono)
-    min_ms = float(
-        getattr(settings, "building_ltp_monitor_min_ms", 75.0) or 75.0
-    )
+    from app.engines.session_timing import effective_building_ltp_monitor_min_ms
+
+    min_ms = effective_building_ltp_monitor_min_ms()
     if _last_building_cycle_mono > 0 and (mono - _last_building_cycle_mono) * 1000 < min_ms:
         return False
 

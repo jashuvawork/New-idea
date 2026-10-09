@@ -3262,6 +3262,8 @@ class Settings(BaseSettings):
     oct_paper_first_lift_small_lift_max_strike_steps: int = 3
     oct_paper_open_moment_max_local_pct: float = 70.0
     oct_paper_open_moment_pad_waiver_enabled: bool = True
+    # After 09:45 IST: negative v3 ELITE rip only if still small lift off base (blocks late chase).
+    oct_paper_elite_rip_max_local_outside_open_pct: float = 28.0
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0
