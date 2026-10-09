@@ -248,6 +248,8 @@ print('  enableLiveTrading:', f.get('enableLiveTrading'))
 print('  paperTrading:', f.get('paperTrading'))
 print('  livePaperParityEnabled:', f.get('livePaperParityEnabled'))
 print('  liveBestTradesOnlyEnabled:', f.get('liveBestTradesOnlyEnabled'))
+print('  entryGatesMatchPaper:', f.get('entryGatesMatchPaper'))
+print('  tradingRulesMatchPaper:', f.get('tradingRulesMatchPaper'))
 print('  fallbackCapitalInr:', f.get('fallbackCapitalInr'))
 print('  dailyLossStopInr:', f.get('dailyLossStopInr'))
 if not f.get('enableLiveTrading') or f.get('paperTrading'):
@@ -266,6 +268,8 @@ if prof.get('profileIssues'):
     print('  profileIssues:', prof.get('profileIssues'))
 if prof.get('profileOk') is not True:
     raise SystemExit('ERROR: live env is not Oct paper profile — run --prepare and restart')
+if f.get('entryGatesMatchPaper') is not True or f.get('tradingRulesMatchPaper') is not True:
+    raise SystemExit('ERROR: live must have entryGatesMatchPaper and tradingRulesMatchPaper true')
 cap = float(f.get('fallbackCapitalInr') or 0)
 loss = float(f.get('dailyLossStopInr') or 0)
 if abs(cap - expect_cap) > 1.0:

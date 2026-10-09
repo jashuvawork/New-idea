@@ -495,6 +495,14 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
                 Download ZIP
               </a>
             ) : null}
+            <a
+              href={`${API_BASE}/api/auto-trader/trade-archives/${selectedDate}`}
+              download={`trades-${selectedDate}.zip`}
+              className="h-10 sm:h-8 inline-flex items-center rounded-lg border border-nexus-green/35 bg-nexus-green/10 px-3 text-[10px] font-semibold text-nexus-green hover:bg-nexus-green/20"
+              title="Paper + live fills for this session (daily archive)"
+            >
+              Trades ZIP
+            </a>
             <button
               type="button"
               onClick={() => Promise.all([loadOverview(), loadDay(selectedDate)])}

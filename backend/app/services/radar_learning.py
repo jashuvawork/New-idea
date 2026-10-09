@@ -1694,7 +1694,21 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
     if funnel_file.exists():
         artifacts["funnel_events.jsonl"] = _read_bytes_locked(funnel_file)
     tape_present = tape.exists()
+    try:
+        from app.services.trade_store import finalize_daily_trades_archive, get_day_detail
+
+        day_detail = get_day_detail(date)
+        artifacts["session_trades.json"] = json.dumps(day_detail, indent=2, default=str)
+    except Exception as exc:
+        logger.warning("Failed to bundle session trades into radar ZIP for %s: %s", date, exc)
     path = add_archive_artifacts(date, artifacts)
+    trade_archive: dict[str, Any] = {}
+    try:
+        from app.services.trade_store import finalize_daily_trades_archive
+
+        trade_archive = finalize_daily_trades_archive(date)
+    except Exception as exc:
+        logger.warning("Daily trade archive failed for %s: %s", date, exc)
     tape_bundled = False
     try:
         with zipfile.ZipFile(path, "r") as archive:
@@ -1753,6 +1767,7 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
         "analysisOnly": analysis_only,
         "premiumTapeBundled": tape_bundled,
         "purgedTelemetry": purged,
+        "tradeArchive": trade_archive,
     }
 
 
