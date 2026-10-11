@@ -286,7 +286,7 @@ if d.get('readyForLive') is not True:
     steps = d.get('armLiveSteps') or []
     for s in steps[:6]:
         print('   -', s)
-    raise SystemExit('ERROR: readyForLive is false — fix armLiveSteps before session')
+    print('WARN: readyForLive false (expected when market closed) — re-check before 9:15 IST')
 " 2>/dev/null || echo "  (readiness endpoint not ready yet)"
 fi
 
