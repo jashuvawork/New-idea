@@ -211,6 +211,19 @@ def live_oct1_pad_entry_blocked(
         meta[meta_key] = True
         return False, "", meta
 
+    if snap is not None:
+        from app.engines.oct_open_index_flip_otm import oct_index_flip_session_pad_waived
+
+        flip_waived, flip_tag = oct_index_flip_session_pad_waived(
+            evidence_pos,
+            snap,
+            settings=settings,
+            require_open_window=False,
+        )
+        if flip_waived:
+            meta["octIndexFlipSessionPadWaive"] = flip_tag
+            return False, "", meta
+
     blocked, chase_reason = oct1_premium_location_chase_blocked(
         side_u,
         pos,

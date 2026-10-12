@@ -140,6 +140,78 @@ def test_entry_window_relax_at_four_pct_pad(mock_bypass, _parity, _open, mock_se
     assert blocked is False, reason
 
 
+@patch("app.config.get_settings")
+@patch("app.engines.oct_open_index_flip_otm._in_open_premium_window", return_value=True)
+@patch("app.engines.live_paper_parity.trading_rules_match_paper", return_value=True)
+@patch("app.engines.index_rally_side_flip.index_rally_side_flip_bypass")
+def test_open_index_flip_pad_chase_waived_at_25pct(mock_bypass, _p, _open, mock_settings):
+    from app.engines.explosion_entry_guards import tier_promotion_pad_chase_blocked
+    from types import SimpleNamespace
+
+    mock_settings.return_value = _frozen_settings()
+    mock_bypass.return_value = (True, "index_slide_side_flip", {})
+    event = SimpleNamespace(tier="ELITE", side=Side.PUT, symbol="NIFTY")
+    ict = SimpleNamespace()
+    alert = {
+        "symbol": "NIFTY",
+        "side": "PUT",
+        "strike": 22650.0,
+        "tier": "ELITE",
+        "momentType": "armed_base_launch",
+        "armedBaseLaunch": True,
+    }
+    snap = _snap()
+    with patch(
+        "app.engines.explosion_entry_guards.effective_local_base_move_pct",
+        return_value=25.2,
+    ):
+        blocked, reason = tier_promotion_pad_chase_blocked(
+            event, ict=ict, alert=alert, snap=snap,
+        )
+    assert blocked is False, reason
+
+
+def test_live_oct1_index_flip_waives_order_gate():
+    from app.engines.live_oct1_pad_entry_guard import live_oct1_pad_entry_blocked
+    from types import SimpleNamespace
+
+    settings = _frozen_settings()
+    alert = {
+        "tier": "ELITE",
+        "momentType": "v_rip_session_low",
+        "localBaseMovePct": 14.0,
+        "side": "PUT",
+        "symbol": "NIFTY",
+        "armedBaseLaunch": True,
+    }
+    cand = SimpleNamespace(
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=22700.0,
+        premium=130.0,
+        mode="explosion",
+        tier="ELITE",
+        alert=alert,
+        pretrade_meta={"causalRanking": {"evidence": {"tier": "ELITE"}}},
+        liveEntryScoreMeta={"sessionRangePosition": 0.85, "drawdownFromHighPct": -2.0},
+    )
+    snap = _snap(spot=22400.0, atm=22400.0)
+    with patch("app.engines.live_oct1_pad_entry_guard.oct1_pad_entry_guard_active", return_value=True):
+        with patch(
+            "app.engines.best_trade_policy.symmetric_best_trade_at_base_capture",
+            return_value=(True, "ok"),
+        ):
+            with patch(
+                "app.engines.oct_open_index_flip_otm.oct_index_flip_session_pad_waived",
+                return_value=(True, "index_slide_side_flip"),
+            ):
+                blocked, reason, meta = live_oct1_pad_entry_blocked(
+                    cand, snap, settings=settings,
+                )
+    assert blocked is False, reason
+    assert meta.get("octIndexFlipSessionPadWaive")
+
+
 def test_oct1_put_vrip_armed_open_waive():
     from app.engines.oct1_pad_location import oct1_open_moment_pad_waived
 

@@ -144,3 +144,96 @@ def oct_open_index_flip_entry_window_lo_relax(
         return default_lo
     floor = float(getattr(settings, "oct_open_index_flip_min_pad_pct", 3.0) or 3.0)
     return min(default_lo, max(0.0, floor))
+
+
+def _open_rip_or_pad_lane(alert: Mapping[str, Any]) -> bool:
+    if open_index_flip_structural_open_rip(alert):
+        return True
+    from app.engines.early_radar_pad_capture import (
+        alert_has_early_radar_pad_capture,
+        alert_has_early_radar_pad_ready,
+    )
+
+    if alert_has_early_radar_pad_ready(alert):
+        return True
+    if alert_has_early_radar_pad_capture(alert):
+        return True
+    return bool(alert.get("armedBaseLaunch") or alert.get("ictArmedBaseLaunch"))
+
+
+def oct_index_flip_session_pad_waived(
+    alert: Mapping[str, Any],
+    snap: Optional[SymbolSnapshot],
+    *,
+    settings: Any = None,
+    require_open_window: bool = False,
+) -> tuple[bool, str]:
+    """
+    Waive pad-location / pad-chase when index flip confirms the side (CE/PE).
+
+    require_open_window=True: tier-promotion pad-chase only (09:15–09:45).
+    require_open_window=False: live Oct1 order gate (e.g. 11:15 slide PUT fill).
+    """
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    from app.engines.live_paper_parity import trading_rules_match_paper
+
+    if not trading_rules_match_paper(settings):
+        return False, ""
+    if require_open_window:
+        if not bool(getattr(settings, "oct_paper_open_moment_pad_waiver_enabled", True)):
+            return False, ""
+        if not _in_open_premium_window():
+            return False, ""
+    if not isinstance(alert, dict) or snap is None:
+        return False, ""
+    if not _open_rip_or_pad_lane(alert):
+        return False, ""
+    flip_ok, flip_reason = index_flip_bypass_for_alert(alert, snap, settings=settings)
+    if not flip_ok:
+        return False, ""
+    return True, flip_reason or "oct_index_flip_pad_waive"
+
+
+def oct_open_index_flip_pad_chase_waived(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any,
+    ict: Any,
+    snap: Optional[SymbolSnapshot],
+    *,
+    base_rel: float,
+    settings: Any = None,
+) -> bool:
+    """Allow promoted ELITE up to max baseRel during open index-flip rips (Oct 12 ~25%)."""
+    from app.config import get_settings
+    from app.engines.explosion_entry_guards import effective_local_base_move_pct
+
+    settings = settings or get_settings()
+    resolved = alert if isinstance(alert, dict) else {}
+    if snap is None:
+        return False
+    side = _side_u(
+        resolved.get("side")
+        or getattr(explosion_event, "side", None)
+    )
+    if side:
+        resolved = {**resolved, "side": side}
+    if not resolved.get("symbol"):
+        sym = str(getattr(explosion_event, "symbol", "") or getattr(snap, "symbol", "") or "")
+        if sym:
+            resolved = {**resolved, "symbol": sym}
+    waived, _ = oct_index_flip_session_pad_waived(
+        resolved,
+        snap,
+        settings=settings,
+        require_open_window=True,
+    )
+    if not waived:
+        return False
+    if base_rel <= 0:
+        base_rel = effective_local_base_move_pct(explosion_event, ict)
+    cap = float(
+        getattr(settings, "oct_open_index_flip_max_pad_chase_rel_pct", 32.0) or 32.0
+    )
+    return base_rel <= cap + 1e-6

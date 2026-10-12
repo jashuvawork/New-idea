@@ -377,6 +377,7 @@ def tier_promotion_pad_chase_blocked(
     *,
     ict: Any = None,
     alert: Optional[dict[str, Any]] = None,
+    snap: Any = None,
 ) -> tuple[bool, str]:
     """Block ELITE/EXPLODING entries promoted off the pad without a pad stamp.
 
@@ -407,6 +408,17 @@ def tier_promotion_pad_chase_blocked(
     )
     base_rel = effective_local_base_move_pct(explosion_event, ict)
     if base_rel > threshold + 1e-6:
+        from app.engines.oct_open_index_flip_otm import oct_open_index_flip_pad_chase_waived
+
+        if oct_open_index_flip_pad_chase_waived(
+            resolved,
+            explosion_event,
+            ict,
+            snap,
+            base_rel=base_rel,
+            settings=settings,
+        ):
+            return False, ""
         return True, f"tier_promotion_pad_chase_blocked_{base_rel:.1f}%"
     return False, ""
 

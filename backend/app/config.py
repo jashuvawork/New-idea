@@ -3265,6 +3265,7 @@ class Settings(BaseSettings):
     # Oct 12 RCA: open index flip (CALL rally / PUT slide) — capped OTM + early pad floor
     oct_open_index_flip_max_otm_steps: int = 2
     oct_open_index_flip_min_pad_pct: float = 3.0
+    oct_open_index_flip_max_pad_chase_rel_pct: float = 32.0
     # After 09:45 IST: negative v3 ELITE rip only if still small lift off base (blocks late chase).
     oct_paper_elite_rip_max_local_outside_open_pct: float = 28.0
 

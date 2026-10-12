@@ -1177,6 +1177,7 @@ def validate_candidate(
             explosion_event,
             ict=trap_ict,
             alert=alert_dict,
+            snap=snap,
         )
         if pad_chase and not (strict_base_ready and not post_session_win):
             return False, pad_reason, meta
