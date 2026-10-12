@@ -3810,9 +3810,10 @@ class Settings(BaseSettings):
     radar_archive_enabled: bool = True
     radar_archive_dir: str = ""  # default: {trade_store_dir}/radar_archives
     radar_archive_top_n_per_day: int = 100
-    # Keep one trading week of daily archives for EOD replay / tradeability review.
-    # Premium tapes are large; unbounded retention fills the disk and stalls the backend.
-    radar_archive_retention_days: int = 7
+    # Daily radar-YYYY-MM-DD.zip retention on local disk. 0 = keep every finalized EOD ZIP.
+    # Intraday telemetry JSONL uses radar_telemetry_retention_days (purged after finalize).
+    radar_archive_retention_days: int = 0
+    radar_telemetry_retention_days: int = 7
     # When true, daily finalize ZIPs only bundle artifacts needed for EOD replay and
     # funnel/scorecard analysis (premium tape, funnel, scorecard). Skips alerts tape,
     # pipeline history, and per-day FTV calibration blobs.
