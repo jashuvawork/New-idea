@@ -61,6 +61,41 @@ def test_oct_first_lift_context_afternoon_ce_local_base_not_open_window():
     assert oct_paper_first_lift_small_lift_context(ev, settings=s)
 
 
+def test_oct_first_lift_context_put_afternoon_slide_pad():
+    s = _frozen_paper_settings()
+    ev = {
+        "side": "PUT",
+        "tier": "ELITE",
+        "momentType": "first_lift_local_base",
+        "firstLift": True,
+        "localBaseMovePct": 6.0,
+        "offHighMovePct": 4.0,
+        "sessionRangePosition": 0.58,
+        "drawdownFromHighPct": -15.0,
+        "moneyness": "ITM",
+        "strikeStepsFromAtm": 1,
+        "explosionScore": 100.0,
+    }
+    assert oct_paper_first_lift_small_lift_context(ev, settings=s)
+
+
+def test_oct_first_lift_rejects_put_session_low_dump_chase():
+    s = _frozen_paper_settings()
+    ev = {
+        "side": "PUT",
+        "tier": "ELITE",
+        "momentType": "armed_base_launch",
+        "armedBaseLaunch": True,
+        "localBaseMovePct": 14.0,
+        "offHighMovePct": 0.5,
+        "sessionRangePosition": 0.03,
+        "drawdownFromHighPct": -40.0,
+        "moneyness": "ATM",
+        "explosionScore": 100.0,
+    }
+    assert not oct_paper_first_lift_small_lift_context(ev, settings=s)
+
+
 def test_oct_first_lift_context_put_slide_symmetric():
     s = _frozen_paper_settings()
     ev = {

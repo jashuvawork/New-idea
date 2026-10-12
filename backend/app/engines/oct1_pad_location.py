@@ -90,6 +90,70 @@ def oct1_pad_location_waived(
     return oct1_open_moment_pad_waived(side, evidence, settings=settings)
 
 
+def oct1_premium_location_chase_core(
+    side: str,
+    pos: float,
+    dd: float,
+    evidence: Mapping[str, Any],
+    *,
+    settings: Any = None,
+    dd_present: bool = True,
+) -> tuple[bool, str]:
+    """
+    Oct 1 pad chase rules without first-lift / open waivers (safe inside waiver evaluators).
+
+    CALL: upper range + near session high.
+    PUT:  session-low dump chase; slide-pad waives high-side blocks when stamped.
+    """
+    settings = settings or get_settings()
+    side_u = _side_u(side)
+    max_pos = float(
+        getattr(settings, "live_paper_parity_max_session_range_position", 0.52) or 0.52
+    )
+    min_off_high = float(
+        getattr(settings, "live_paper_parity_min_off_session_high_pct", 6.0) or 6.0
+    )
+
+    if side_u == "PUT" and bool(
+        getattr(settings, "live_paper_parity_put_slide_waives_session_high_block", True)
+    ):
+        from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+        if put_slide_pad_context(evidence, settings=settings):
+            return False, ""
+
+    if side_u == "CALL":
+        if pos > max_pos + 1e-6:
+            return True, "live_oct1_chase_session_range_high"
+        if dd_present and dd > -min_off_high + 1e-6:
+            return True, "live_oct1_chase_at_session_high"
+        return False, ""
+
+    if side_u == "PUT":
+        min_off_low = float(
+            getattr(settings, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
+        )
+        low_fraction = max(0.0, min(1.0, min_off_low / 100.0))
+        if pos > 0 and pos < low_fraction - 1e-6:
+            local = max(
+                float(evidence.get("localBaseMovePct") or 0),
+                float(evidence.get("ictBaseRelativeMovePct") or 0),
+            )
+            if local >= 12.0:
+                return True, "live_oct1_put_chase_at_session_low"
+        if pos > max_pos + 1e-6:
+            return True, "live_oct1_chase_session_range_high"
+        if dd_present and dd > -min_off_high + 1e-6:
+            return True, "live_oct1_chase_at_session_high"
+        return False, ""
+
+    if pos > max_pos + 1e-6:
+        return True, "live_oct1_chase_session_range_high"
+    if dd_present and dd > -min_off_high + 1e-6:
+        return True, "live_oct1_chase_at_session_high"
+    return False, ""
+
+
 def oct1_premium_location_chase_blocked(
     side: str,
     pos: float,
@@ -112,52 +176,9 @@ def oct1_premium_location_chase_blocked(
     if waived:
         return False, ""
 
-    side_u = _side_u(side)
-    max_pos = float(
-        getattr(settings, "live_paper_parity_max_session_range_position", 0.52) or 0.52
+    return oct1_premium_location_chase_core(
+        side, pos, dd, evidence, settings=settings, dd_present=True,
     )
-    min_off_high = float(
-        getattr(settings, "live_paper_parity_min_off_session_high_pct", 6.0) or 6.0
-    )
-
-    if side_u == "PUT" and bool(
-        getattr(settings, "live_paper_parity_put_slide_waives_session_high_block", True)
-    ):
-        from app.engines.put_slide_ce_mirror import put_slide_pad_context
-
-        if put_slide_pad_context(evidence, settings=settings):
-            return False, ""
-
-    if side_u == "CALL":
-        if pos > max_pos + 1e-6:
-            return True, "live_oct1_chase_session_range_high"
-        if dd > -min_off_high + 1e-6:
-            return True, "live_oct1_chase_at_session_high"
-        return False, ""
-
-    if side_u == "PUT":
-        min_off_low = float(
-            getattr(settings, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
-        )
-        low_fraction = max(0.0, min(1.0, min_off_low / 100.0))
-        if pos > 0 and pos < low_fraction - 1e-6:
-            local = max(
-                float(evidence.get("localBaseMovePct") or 0),
-                float(evidence.get("ictBaseRelativeMovePct") or 0),
-            )
-            if local >= 12.0:
-                return True, "live_oct1_put_chase_at_session_low"
-        if pos > max_pos + 1e-6:
-            return True, "live_oct1_chase_session_range_high"
-        if dd > -min_off_high + 1e-6:
-            return True, "live_oct1_chase_at_session_high"
-        return False, ""
-
-    if pos > max_pos + 1e-6:
-        return True, "live_oct1_chase_session_range_high"
-    if dd > -min_off_high + 1e-6:
-        return True, "live_oct1_chase_at_session_high"
-    return False, ""
 
 
 def oct1_pad_location_ok(
