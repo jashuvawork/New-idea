@@ -61,6 +61,41 @@ def test_oct_first_lift_context_afternoon_ce_local_base_not_open_window():
     assert oct_paper_first_lift_small_lift_context(ev, settings=s)
 
 
+def test_oct_first_lift_context_put_afternoon_slide_pad():
+    s = _frozen_paper_settings()
+    ev = {
+        "side": "PUT",
+        "tier": "ELITE",
+        "momentType": "first_lift_local_base",
+        "firstLift": True,
+        "localBaseMovePct": 6.0,
+        "offHighMovePct": 4.0,
+        "sessionRangePosition": 0.58,
+        "drawdownFromHighPct": -15.0,
+        "moneyness": "ITM",
+        "strikeStepsFromAtm": 1,
+        "explosionScore": 100.0,
+    }
+    assert oct_paper_first_lift_small_lift_context(ev, settings=s)
+
+
+def test_oct_first_lift_rejects_put_session_low_dump_chase():
+    s = _frozen_paper_settings()
+    ev = {
+        "side": "PUT",
+        "tier": "ELITE",
+        "momentType": "armed_base_launch",
+        "armedBaseLaunch": True,
+        "localBaseMovePct": 14.0,
+        "offHighMovePct": 0.5,
+        "sessionRangePosition": 0.03,
+        "drawdownFromHighPct": -40.0,
+        "moneyness": "ATM",
+        "explosionScore": 100.0,
+    }
+    assert not oct_paper_first_lift_small_lift_context(ev, settings=s)
+
+
 def test_oct_first_lift_context_put_slide_symmetric():
     s = _frozen_paper_settings()
     ev = {
@@ -223,6 +258,26 @@ def test_oct_first_lift_otm_all_session_not_open_only():
     }
     assert oct_paper_first_lift_otm_entry_ok(alert, depth_steps=2, settings=s)
     assert not oct_paper_first_lift_otm_entry_ok(alert, depth_steps=5, settings=s)
+
+
+def test_oct_elite_rip_put_uses_slide_pad_not_call_off_low():
+    from app.engines.live_paper_parity import oct_paper_elite_rip_context
+
+    s = _frozen_paper_settings()
+    ev = {
+        "side": "PUT",
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "velocity3s": -1.0,
+        "momentType": "v_rip_session_high",
+        "vRipReady": True,
+        "localBaseMovePct": 10.0,
+        "offHighMovePct": 4.0,
+        "sessionRangePosition": 0.55,
+        "drawdownFromHighPct": -12.0,
+    }
+    with patch("app.engines.session_timing.in_open_premium_window", return_value=False):
+        assert oct_paper_elite_rip_context(ev, settings=s)
 
 
 def test_counter_trend_allows_oct_first_lift_afternoon():

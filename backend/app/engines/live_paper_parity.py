@@ -91,18 +91,19 @@ def oct_paper_first_lift_small_lift_context(
         float(getattr(s, "first_lift_trade_max_move_pct", 40.0) or 40.0),
     )
 
-    session_pad = False
+    location_pad = False
     if side == "CALL":
         off_low = _parity_number(evidence.get("offLowMovePct"))
         min_off = float(
             getattr(s, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
         )
-        session_pad = off_low >= min_off - 1e-6
+        location_pad = off_low >= min_off - 1e-6
     elif side == "PUT":
         from app.engines.put_slide_ce_mirror import put_slide_pad_context
 
-        session_pad = put_slide_pad_context(evidence, settings=s)
+        location_pad = put_slide_pad_context(evidence, settings=s)
 
+    session_pad = location_pad
     # First lift off a measured local base (2–40%) is pad entry, not session-high chase.
     if not session_pad and launch and min_move <= local <= max_move + 1e-6:
         session_pad = True
@@ -119,16 +120,38 @@ def oct_paper_first_lift_small_lift_context(
         evidence.get("drawdownFromHighPct") is not None
         and str(evidence.get("drawdownFromHighPct")).strip() != ""
     )
-    at_option_session_high = (
-        dd_present and pos > 0 and dd > -min_off_high + 1e-6
+    from app.engines.oct1_pad_location import oct1_premium_location_chase_core
+
+    chase_blocked, chase_reason = oct1_premium_location_chase_core(
+        side,
+        pos,
+        dd,
+        evidence,
+        settings=s,
+        dd_present=dd_present,
     )
-    if at_option_session_high:
-        return False
-    if pos > max_pos + 1e-6:
+    if chase_blocked:
+        if chase_reason == "live_oct1_put_chase_at_session_low":
+            if not location_pad:
+                return False
+        elif chase_reason == "live_oct1_chase_at_session_high":
+            return False
+        elif chase_reason == "live_oct1_chase_session_range_high":
+            off_session_high = dd_present and dd > -min_off_high + 1e-6
+            pad_ok = location_pad or (
+                launch
+                and min_move <= local <= max_move + 1e-6
+                and not off_session_high
+            )
+            if not pad_ok:
+                return False
+        elif not (session_pad and launch):
+            return False
+    if pos > max_pos + 1e-6 and not session_pad:
         from app.engines.oct1_pad_location import oct1_open_moment_pad_waived
 
-        location_ok = session_pad
-        if side == "PUT" and not location_ok:
+        location_ok = False
+        if side == "PUT":
             from app.engines.put_slide_ce_mirror import put_slide_pad_context
 
             location_ok = put_slide_pad_context(evidence, settings=s)
@@ -303,10 +326,28 @@ def oct_paper_elite_rip_context(
             return True
     except Exception:
         return True
-    # After open window: Oct 1 paper still took pullbacks near session low, not afternoon chase.
+
+    # After 09:45: same pad policy as #721/#722 first-lift (all session), not a separate chase lane.
+    if oct_paper_first_lift_small_lift_context(evidence, settings=s):
+        return True
+
+    side = str(evidence.get("side") or "").upper()
     local = _parity_number(evidence.get("localBaseMovePct"))
-    off_low = _parity_number(evidence.get("offLowMovePct"))
     pos = _parity_number(evidence.get("sessionRangePosition"))
+
+    # PUT slide pad + cold v3 (#717) — not CALL off-low semantics.
+    if side == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+        if not put_slide_pad_context(evidence, settings=s):
+            return False
+        max_late = float(
+            getattr(s, "put_slide_cold_velocity_max_local_pct", 22.0) or 22.0
+        )
+        return local <= max_late + 1e-6
+
+    # CALL: #730 small-lift off session low, not extended afternoon chase.
+    off_low = _parity_number(evidence.get("offLowMovePct"))
     max_late_local = float(
         getattr(s, "oct_paper_elite_rip_max_local_outside_open_pct", 28.0) or 28.0
     )
