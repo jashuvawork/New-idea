@@ -1136,10 +1136,10 @@ def validate_candidate(
         if not strict_base_ready and alert_dict is not None:
             from app.engines.live_paper_parity import (
                 oct_paper_first_lift_small_lift_context,
-                trading_rules_match_paper,
+                oct_paper_entry_loosening_active,
             )
 
-            if trading_rules_match_paper(settings) and oct_paper_first_lift_small_lift_context(
+            if oct_paper_entry_loosening_active(settings) and oct_paper_first_lift_small_lift_context(
                 alert_dict,
                 settings=settings,
             ):

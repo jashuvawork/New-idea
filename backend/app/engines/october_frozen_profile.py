@@ -35,6 +35,7 @@ def october_frozen_profile_summary(settings: Any | None = None) -> dict[str, Any
         "padEntryGuardEnabled": bool(
             getattr(s, "live_paper_parity_pad_entry_guard_enabled", True)
         ),
+        "octPaperReplicaEnabled": bool(getattr(s, "oct_paper_replica_enabled", False)),
         "adaptiveExitsEnabled": bool(getattr(s, "adaptive_exits_enabled", True)),
         "executedEntrySlOnlyLossExits": bool(
             getattr(s, "executed_entry_sl_only_loss_exits", True)
@@ -50,7 +51,10 @@ def october_frozen_profile_summary(settings: Any | None = None) -> dict[str, Any
 def october_frozen_profile_ok(settings: Any | None = None) -> tuple[bool, list[str]]:
     """Deploy sign-off: Frozen October rules + CE/PE symmetric capture paths."""
     from app.config import get_settings
-    from app.engines.live_paper_parity import live_paper_parity_active
+    from app.engines.live_paper_parity import (
+        live_paper_parity_active,
+        oct_paper_replica_active,
+    )
 
     s = settings or get_settings()
     if not october_frozen_profile_active(s):
@@ -76,6 +80,7 @@ def october_frozen_profile_ok(settings: Any | None = None) -> tuple[bool, list[s
         issues.append("top_moments_only_still_enabled")
     if bool(getattr(s, "sep917_live_checklist_enforcement_enabled", False)):
         issues.append("sep917_live_checklist_enforcement_enabled")
-    if not bool(getattr(s, "live_paper_parity_pad_entry_guard_enabled", True)):
+    replica = oct_paper_replica_active(s)
+    if not replica and not bool(getattr(s, "live_paper_parity_pad_entry_guard_enabled", True)):
         issues.append("pad_entry_guard_disabled")
     return (len(issues) == 0, issues)

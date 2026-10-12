@@ -768,9 +768,9 @@ def elite_side_local_base_cap(
             effective_near_base_max_local_pct,
             symmetric_best_trade_at_base_capture,
         )
-        from app.engines.live_paper_parity import trading_rules_match_paper
+        from app.engines.live_paper_parity import oct_paper_entry_loosening_active
 
-        if trading_rules_match_paper(settings):
+        if oct_paper_entry_loosening_active(settings):
             ok, _ = symmetric_best_trade_at_base_capture(
                 evidence,
                 evidence,
@@ -996,8 +996,10 @@ def _near_strike_fvq_bypass_eligible(
     if not has_launch_signal:
         return False
 
+    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
+
     moneyness = str(evidence.get("moneyness") or "").upper()
-    if moneyness == "OTM":
+    if moneyness == near_strike_waiver_excluded_moneyness(settings):
         return False
 
     steps = _number(evidence.get("strikeStepsFromAtm"))
@@ -1089,7 +1091,7 @@ def elite_fvq_chase_blocked(
     from app.engines.live_entry_score import live_entry_best_trade_capture_active
     from app.engines.live_paper_parity import (
         oct_paper_first_lift_small_lift_context,
-        trading_rules_match_paper,
+        oct_paper_entry_loosening_active,
     )
 
     if oct_paper_first_lift_small_lift_context(
@@ -1099,7 +1101,7 @@ def elite_fvq_chase_blocked(
     ):
         return False, ""
 
-    if trading_rules_match_paper(settings):
+    if oct_paper_entry_loosening_active(settings):
         tier_u = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
         score = float(
             evidence.get("explosionScore") or evidence.get("explosion_score") or 0

@@ -421,10 +421,10 @@ def tier_promotion_pad_chase_blocked(
             return False, ""
         from app.engines.live_paper_parity import (
             oct_paper_structural_pad_context,
-            trading_rules_match_paper,
+            oct_paper_entry_loosening_active,
         )
 
-        if trading_rules_match_paper(settings) and oct_paper_structural_pad_context(
+        if oct_paper_entry_loosening_active(settings) and oct_paper_structural_pad_context(
             resolved,
             settings=settings,
         ):
@@ -1248,13 +1248,16 @@ def _near_strike_armed_alert_active(
     tier = str(alert.get("tier") or "").upper()
     if tier not in ("ELITE", "EXPLODING"):
         return False
+    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
+
     money = str(alert.get("moneyness") or "").upper()
-    if money == "OTM":
+    excluded = near_strike_waiver_excluded_moneyness()
+    if money == excluded:
         return False
     steps = float(alert.get("strikeStepsFromAtm") or 0)
     if steps > max_steps + 1e-6:
         return False
-    if steps <= 0 and money != "ATM":
+    if steps <= 0 and (excluded == "ITM" or money != "ATM"):
         return False
     return bool(
         alert.get("ictArmedBaseLaunch")
@@ -1323,6 +1326,9 @@ def deep_itm_near_strike_substitute_blocked(
     max_otm = int(
         getattr(s, "explosion_deep_itm_substitute_near_strike_max_steps", 2) or 2
     )
+    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
+
+    excluded_alt = near_strike_waiver_excluded_moneyness(s)
     for alt in snap.explosionAlerts or []:
         if str(alt.get("side") or "").upper() != side_v:
             continue
@@ -1330,7 +1336,7 @@ def deep_itm_near_strike_substitute_blocked(
         if alt_strike <= 0:
             continue
         _, alt_money, _ = _strike_depth(side, alt_strike, snap)
-        if alt_money not in ("ATM", "ITM"):
+        if alt_money == excluded_alt or alt_money not in ("ATM", "ITM", "OTM"):
             continue
         alt_depth, _, _ = _strike_depth(side, alt_strike, snap)
         if alt_depth > max_otm:
