@@ -51,20 +51,11 @@ Use `legacy_live_entry_narrowings_active()` instead of bare `enable_live_trading
 - **Capital book** — same *rules*, different lots if live book ≠ paper reference (e.g. ₹50k vs ₹150k). Oct 1 reference fills used ~₹1.8L/trade (8–62 lots); on **₹50k** (`env.live-50k.overlay`) expect fewer lots and tighter trail INR — parity fixes gates/exits, not historical lot counts.
 - **Open rip velocity** — `oct_paper_first_lift_negative_velocity_waiver` (#730) in readiness + near-miss when structural ELITE at pad
 - **Exit hold** — `oct_paper_peak_keep_exit_parity_enabled`: peak-keep / velocity-reversal before implicit `explosion_stage_trail` on first lifts
-
-## Oct 1 / Oct 5 reference PRs (source of truth — not generic symmetry)
-
-| Intent | PR | Side notes |
-|--------|-----|------------|
-| Open first-lift waives chase | #721 | CE + PE open window |
-| Side-aware pad location (CALL high / PUT slide + session-low dump) | #722, #699, #701, #707 | PUT **does not** use CALL `offLow` for slide pad — `put_slide_pad_context` (#717) |
-| Negative v3 on structural rip | #730 | Open: any side; after open: CALL off-low / PUT slide pad (#717) |
-| First-lift all-session live mirror | #734+ | `oct_paper_first_lift_*` + pretrade parity |
-| Post-win same-strike V-rip | #683, #684 | Oct 5 afternoon; `same_strike_post_win_v_rip_reentry_waive` |
-| Mirror after trail win / block cross chase | #674, #677, #678 | `PE_WIN_CE_MIRROR_*`, index rally/slide flip — **not** identical rules both sides |
-| Skip live-only halts | #719, #712, #710 | `trading_rules_match_paper` |
-
-When adding gates: mirror **paired** PR behavior (table above), not a new symmetric helper unless Oct 1/5 paper/EOD proves both sides.
+- **Pre-selection (Oct 8–12 gap)** — under `trading_rules_match_paper`: structural pad waives `explosion_otm_shallow_not_allowed`, smart Ichimoku cloud side, `tier_promotion_pad_chase_blocked`, tight `entry_window_local_high_*`, chart_not_aligned at selector
+- **OTM stamp (Oct 9)** — Sep917 must not clear `open_rip` / `octPaperOtmStructural` tradeable after preserve
+- **Order path (Oct 1 funnel)** — `oct_paper_exec_strict_bypass`: strict first-lift + premium-fade / MTF retest like paper pad fills (most SELECTED still die at order — that is expected; pad rip should survive `exec_*_fading`)
+- **After same-side loss** — `oct_paper_same_side_reentry_waiver`: new strike structural rip (Oct 5 afternoon vertical); same strike after loss still blocked; `oct_paper_reentry_ml_waiver` for pad context
+- **Not parity targets** — late radar ELITE stamp (~15:50) is scorecard not entry; `entry_preorder_claim_conflict` is concurrent scan dedupe (excluded_keys retry)
 
 ## Oct 1 / Oct 5 reference PRs (source of truth — not generic symmetry)
 
@@ -82,4 +73,8 @@ When adding gates: mirror **paired** PR behavior (table above), not a new symmet
 
 ## HUD
 
-`GET /api/deployment/status` → `flags.entryGatesMatchPaper`, `flags.tradingRulesMatchPaper`, `livePaperProfile.sizesFromPaperBook`.
+`GET /api/deployment/status` → `flags.entryGatesMatchPaper`, `flags.tradingRulesMatchPaper`, `livePaperProfile.octPaperBehaviorParity`, `livePaperProfile.bookMatchesOctPaperReferenceLots`.
+
+**HUD honesty:** `entryGatesMatchPaper` / `profileOk` mean **parity env + frozen overlay** — not “Oct 1 lot replay.” On **₹50k**, `sizesFromPaperBook` is **false**; pad cap **0.52** still applies unless structural **session_pad** waives (#722). Deploy **`main` past #736 + follow-up** for negative v3, Ichimoku/OTM selector, peak-keep exit, OTM stamp preserve (`explosion_not_tradeable` Oct 9 RCA).
+
+**Not stored on live:** Oct 1/5 paper fills, milestone resets — funnel truth stays in **radar ZIPs** only.

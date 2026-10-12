@@ -69,6 +69,99 @@ def test_non_paper_still_rejects_negative_velocity(mock_settings):
     assert ranking["grade"] == "REJECT"
 
 
+def test_oct_paper_exec_strict_bypass_for_put_slide():
+    from app.engines.live_paper_parity import oct_paper_exec_strict_bypass
+
+    s = _frozen_paper_settings()
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "side": "PUT",
+        "armedBaseLaunch": True,
+        "firstLift": True,
+        "localBaseMovePct": 6.0,
+        "sessionRangePosition": 0.42,
+    }
+    with patch(
+        "app.engines.put_slide_ce_mirror.put_slide_pad_context", return_value=True
+    ):
+        assert oct_paper_exec_strict_bypass(alert, settings=s)
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_oct_paper_tier_promotion_chase_waived(mock_settings):
+    from types import SimpleNamespace
+
+    from app.engines.explosion_entry_guards import tier_promotion_pad_chase_blocked
+
+    mock_settings.return_value = _frozen_paper_settings()
+    event = SimpleNamespace(tier="ELITE", side="PUT")
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "side": "PUT",
+        "armedBaseLaunch": True,
+        "localBaseMovePct": 12.0,
+        "sessionRangePosition": 0.4,
+    }
+    with patch(
+        "app.engines.put_slide_ce_mirror.put_slide_pad_context", return_value=True
+    ):
+        with patch(
+            "app.engines.explosion_entry_guards.effective_local_base_move_pct",
+            return_value=12.0,
+        ):
+            blocked, _ = tier_promotion_pad_chase_blocked(
+                event, alert=alert,
+            )
+            assert blocked is False
+
+
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_oct_paper_same_side_reentry_waived_new_strike(mock_settings):
+    from datetime import timedelta
+    from unittest.mock import MagicMock
+
+    from app.engines.session_mode_feedback import session_same_side_loss_reentry_blocked
+    from app.models.schemas import Side
+
+    mock_settings.return_value = _frozen_paper_settings()
+    state = AutoTraderState()
+    prior = MagicMock()
+    prior.symbol = "SENSEX"
+    prior.side = Side.PUT
+    prior.strike = 72400.0
+    prior.pnlInr = -5000.0
+    prior.closedAt = datetime.now(IST) - timedelta(minutes=6.0)
+    prior.strategyType = "EXPLOSIVE"
+    state.closedPaperTrades = [prior]
+    candidate = type(
+        "C",
+        (),
+        {
+            "symbol": "NIFTY",
+            "side": Side.PUT,
+            "strike": 22550.0,
+            "alert": {
+                "tier": "ELITE",
+                "explosionScore": 100.0,
+                "side": "PUT",
+                "armedBaseLaunch": True,
+                "localBaseMovePct": 8.0,
+                "sessionRangePosition": 0.4,
+            },
+        },
+    )()
+    with patch(
+        "app.engines.put_slide_ce_mirror.put_slide_pad_context", return_value=True
+    ):
+        blocked, meta = session_same_side_loss_reentry_blocked(
+            state, symbol="NIFTY", side=Side.PUT, candidate=candidate,
+        )
+    assert blocked is False
+    assert meta.get("octPaperSameSideReentryWaived") is True
+
+
 def test_oct_paper_negative_velocity_readiness_waiver_structural():
     from app.engines.live_paper_parity import oct_paper_first_lift_negative_velocity_ok
 

@@ -1529,11 +1529,15 @@ def resolve_strict_pad_lane_for_entry(
         explosion_event,
     )
     armed_pad_strict = _armed_base_launch_pad_chart_signal(row, explosion_event)
+    from app.engines.live_paper_parity import oct_paper_exec_strict_bypass
+
+    oct_paper_strict = oct_paper_exec_strict_bypass(row)
     strict_bypass = (
         armed_base_chart_bypass
         or pad_lane_chart_bypass
         or shallow_otm_bypass
         or armed_pad_strict
+        or oct_paper_strict
     )
     return pad_lane_chart_bypass, strict_bypass
 

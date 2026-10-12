@@ -419,6 +419,16 @@ def tier_promotion_pad_chase_blocked(
             settings=settings,
         ):
             return False, ""
+        from app.engines.live_paper_parity import (
+            oct_paper_structural_pad_context,
+            trading_rules_match_paper,
+        )
+
+        if trading_rules_match_paper(settings) and oct_paper_structural_pad_context(
+            resolved,
+            settings=settings,
+        ):
+            return False, ""
         return True, f"tier_promotion_pad_chase_blocked_{base_rel:.1f}%"
     return False, ""
 
@@ -554,7 +564,18 @@ def explosion_entry_window_blocked(
                 )
         if pad < effective_lo:
             return True, f"entry_window_local_low_{pad:.0f}%"
-        if pad > hi:
+        effective_hi = hi
+        if alert is not None:
+            from app.engines.live_paper_parity import (
+                oct_paper_first_lift_entry_window_hi_relax,
+            )
+
+            effective_hi = oct_paper_first_lift_entry_window_hi_relax(
+                alert,
+                default_hi=hi,
+                settings=settings,
+            )
+        if pad > effective_hi:
             return True, f"entry_window_local_high_{pad:.0f}%"
         return False, ""
 

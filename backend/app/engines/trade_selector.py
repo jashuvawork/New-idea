@@ -202,9 +202,9 @@ def _high_signal_pre_candidate_skip_reason(
     )
     oct_first_lift_pad = False
     if isinstance(alert, dict):
-        from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+        from app.engines.live_paper_parity import oct_paper_structural_pad_context
 
-        oct_first_lift_pad = oct_paper_first_lift_small_lift_context(
+        oct_first_lift_pad = oct_paper_structural_pad_context(
             alert,
             settings=settings,
             readiness_reason=first_lift_readiness_reason,
@@ -455,7 +455,12 @@ def _building_aligned_ict_alert_ok(
     # GainzAlgo-style Smart Ichimoku break-P on index chart.
     from app.engines.smart_ichimoku import ichimoku_break_supports_side
 
-    ok, _ = ichimoku_break_supports_side(Side(side_raw), snap, require_confirmed=True)
+    ok, _ = ichimoku_break_supports_side(
+        Side(side_raw),
+        snap,
+        require_confirmed=True,
+        alert=alert if isinstance(alert, dict) else None,
+    )
     return ok
 
 
@@ -552,9 +557,9 @@ def _explosion_candidates(
         )
         oct_first_lift_pad = False
         if isinstance(alert, dict):
-            from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+            from app.engines.live_paper_parity import oct_paper_structural_pad_context
 
-            oct_first_lift_pad = oct_paper_first_lift_small_lift_context(
+            oct_first_lift_pad = oct_paper_structural_pad_context(
                 alert,
                 settings=settings,
                 readiness_reason=first_lift_readiness_reason,
@@ -893,7 +898,26 @@ def _explosion_candidates(
                 candlestick_ok = ftv_candlestick_chart_bypass(
                     side_v, snap, alert=alert,
                 )
-                if not local_base_ok and not pad_lane_ok and not grade_a_ok and not candlestick_ok:
+                oct_chart_ok = False
+                from app.engines.live_paper_parity import (
+                    oct_paper_structural_pad_context,
+                    trading_rules_match_paper,
+                )
+
+                if trading_rules_match_paper(settings):
+
+                    oct_chart_ok = oct_paper_structural_pad_context(
+                        alert,
+                        settings=settings,
+                        readiness_reason=first_lift_readiness_reason,
+                    )
+                if (
+                    not local_base_ok
+                    and not pad_lane_ok
+                    and not grade_a_ok
+                    and not candlestick_ok
+                    and not oct_chart_ok
+                ):
                     _maybe_record_high_signal_explosion_skip(
                         symbol, alert, "chart_not_aligned",
                     )

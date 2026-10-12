@@ -383,9 +383,15 @@ def ichimoku_break_supports_side(
     snap: Optional[SymbolSnapshot],
     *,
     require_confirmed: bool = True,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str]:
     """True when smart Ichimoku break-P agrees with CALL/PUT for flat→vertical."""
     settings = get_settings()
+    if isinstance(alert, dict):
+        from app.engines.live_paper_parity import oct_paper_structural_pad_context
+
+        if oct_paper_structural_pad_context(alert, settings=settings):
+            return True, "oct_paper_waives_smart_ichimoku"
     if not bool(getattr(settings, "smart_ichimoku_flat_vertical_confirm_enabled", True)):
         return True, "smart_ichimoku_confirm_disabled"
     if snap is None:
