@@ -645,6 +645,9 @@ def ftv_runner_pct_floor(
     min_gain_for_pts_arm = _cfg_float(
         s, "ftv_runner_pct_trail_max_profit_min_gain_pct", 8.0
     )
+    pct_of_entry = _cfg_float(s, "ftv_runner_pct_trail_arm_min_best_pct_of_entry", 15.0)
+    if pct_of_entry > 0:
+        arm_min_pts = min(arm_min_pts, entry * pct_of_entry / 100.0)
     if modest is not None:
         arm_pct, arm_min_pts, keep = modest
         armed = gain_pct >= arm_pct or best >= arm_min_pts

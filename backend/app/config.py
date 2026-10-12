@@ -1676,6 +1676,9 @@ class Settings(BaseSettings):
     # Point-arm on max-profit legs still needs this min % off entry (Oct7 72600 CE +20pt
     # but +5% scratched; Sep2 +31pt at +11.7% still arms).
     ftv_runner_pct_trail_max_profit_min_gain_pct: float = 8.0
+    # Point-arm scales down on cheap premiums: arm at min(20pt, this % of entry). Oct 12
+    # NIFTY 22300 PE @ ₹58.5 peaked +10.2pt (+17%, ₹7.3k) and rode back to +₹2k (20pt = 34%).
+    ftv_runner_pct_trail_arm_min_best_pct_of_entry: float = 15.0
     ftv_runner_pct_trail_keep_ratio: float = 0.75
     ftv_runner_pct_trail_min_best_points: float = 6.0
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
