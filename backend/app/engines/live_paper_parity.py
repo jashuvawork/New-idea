@@ -230,7 +230,7 @@ def oct_paper_first_lift_otm_entry_ok(
         return False
     if not isinstance(alert, dict):
         return False
-    if not oct_paper_first_lift_small_lift_context(alert, settings=s):
+    if not oct_paper_structural_pad_context(alert, settings=s):
         return False
     max_steps = int(
         getattr(s, "oct_paper_first_lift_small_lift_max_strike_steps", 3) or 3
@@ -396,6 +396,97 @@ def oct_paper_first_lift_negative_velocity_ok(
         if put_slide_cold_velocity_ok(evidence, live_v3, v9):
             return True
     return False
+
+
+def oct_paper_structural_pad_context(
+    evidence: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+    readiness_reason: str = "",
+) -> bool:
+    """Oct 1/5 pad entry — first-lift small lift (#734) or structural elite rip (#730)."""
+    if not isinstance(evidence, dict):
+        return False
+    return oct_paper_first_lift_small_lift_context(
+        evidence,
+        settings=settings,
+        readiness_reason=readiness_reason,
+    ) or oct_paper_elite_rip_context(evidence, settings=settings)
+
+
+def oct_paper_exec_strict_bypass(
+    alert: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Order-path strict first-lift / premium-fade / MTF — match Oct 1 paper pad fills."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not trading_rules_match_paper(s):
+        return False
+    if not bool(getattr(s, "oct_paper_exec_strict_bypass_enabled", True)):
+        return False
+    return oct_paper_structural_pad_context(alert, settings=s)
+
+
+def oct_paper_first_lift_entry_window_hi_relax(
+    alert: Mapping[str, Any] | None,
+    *,
+    default_hi: float,
+    settings: Any = None,
+) -> float:
+    """Oct 1 paper: first-lift at pad may sit above default 65% window when still expanding."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not trading_rules_match_paper(s):
+        return default_hi
+    if not isinstance(alert, dict):
+        return default_hi
+    if not oct_paper_first_lift_small_lift_context(alert, settings=s):
+        return default_hi
+    cap = float(
+        getattr(s, "oct_paper_first_lift_small_lift_session_expansion_max_local_pct", 55.0)
+        or 55.0
+    )
+    try:
+        from app.engines.session_timing import in_open_premium_window
+
+        if in_open_premium_window():
+            cap = max(
+                cap,
+                float(getattr(s, "oct_paper_open_moment_max_local_pct", 70.0) or 70.0),
+            )
+    except Exception:
+        pass
+    return max(default_hi, cap)
+
+
+def oct_paper_same_side_reentry_after_loss_waived(
+    *,
+    prior_loss_trade: Any,
+    strike: float,
+    alert: Mapping[str, Any] | None,
+    settings: Any = None,
+) -> bool:
+    """Oct 5 afternoon vertical — new strike same side after loss if structural pad rip."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not trading_rules_match_paper(s):
+        return False
+    if not bool(getattr(s, "oct_paper_same_side_reentry_waiver_enabled", True)):
+        return False
+    if prior_loss_trade is None:
+        return False
+    try:
+        prior_strike = float(getattr(prior_loss_trade, "strike", 0) or 0)
+    except (TypeError, ValueError):
+        prior_strike = 0.0
+    if prior_strike > 0 and abs(prior_strike - float(strike or 0)) < 1e-6:
+        return False
+    return oct_paper_structural_pad_context(alert, settings=s)
 
 
 def oct_paper_peak_keep_exit_parity_active(settings: Any | None = None) -> bool:

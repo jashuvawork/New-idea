@@ -3260,6 +3260,9 @@ class Settings(BaseSettings):
     oct_paper_first_lift_negative_velocity_waiver_enabled: bool = True
     # Live+paper parity: prefer peak-keep / velocity-reversal over implicit stage-trail on first lifts.
     oct_paper_peak_keep_exit_parity_enabled: bool = True
+    oct_paper_exec_strict_bypass_enabled: bool = True
+    oct_paper_same_side_reentry_waiver_enabled: bool = True
+    oct_paper_reentry_ml_waiver_enabled: bool = True
     oct_paper_first_lift_small_lift_min_local_pct: float = 2.0
     oct_paper_first_lift_small_lift_max_local_pct: float = 40.0
     oct_paper_first_lift_small_lift_session_expansion_max_local_pct: float = 55.0

@@ -51,6 +51,10 @@ Use `legacy_live_entry_narrowings_active()` instead of bare `enable_live_trading
 - **Capital book** — same *rules*, different lots if live book ≠ paper reference (e.g. ₹50k vs ₹150k). Oct 1 reference fills used ~₹1.8L/trade (8–62 lots); on **₹50k** (`env.live-50k.overlay`) expect fewer lots and tighter trail INR — parity fixes gates/exits, not historical lot counts.
 - **Open rip velocity** — `oct_paper_first_lift_negative_velocity_waiver` (#730) in readiness + near-miss when structural ELITE at pad
 - **Exit hold** — `oct_paper_peak_keep_exit_parity_enabled`: peak-keep / velocity-reversal before implicit `explosion_stage_trail` on first lifts
+- **Pre-selection (Oct 8–12 gap)** — under `trading_rules_match_paper`: structural pad waives `explosion_otm_shallow_not_allowed`, smart Ichimoku cloud side, `tier_promotion_pad_chase_blocked`, tight `entry_window_local_high_*`, chart_not_aligned at selector
+- **Order path (Oct 1 funnel)** — `oct_paper_exec_strict_bypass`: strict first-lift + premium-fade / MTF retest like paper pad fills (most SELECTED still die at order — that is expected; pad rip should survive `exec_*_fading`)
+- **After same-side loss** — `oct_paper_same_side_reentry_waiver`: new strike structural rip (Oct 5 afternoon vertical); same strike after loss still blocked; `oct_paper_reentry_ml_waiver` for pad context
+- **Not parity targets** — late radar ELITE stamp (~15:50) is scorecard not entry; `entry_preorder_claim_conflict` is concurrent scan dedupe (excluded_keys retry)
 
 ## Oct 1 / Oct 5 reference PRs (source of truth — not generic symmetry)
 
