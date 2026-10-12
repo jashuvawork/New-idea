@@ -326,10 +326,28 @@ def oct_paper_elite_rip_context(
             return True
     except Exception:
         return True
-    # After open window: Oct 1 paper still took pullbacks near session low, not afternoon chase.
+
+    # After 09:45: same pad policy as #721/#722 first-lift (all session), not a separate chase lane.
+    if oct_paper_first_lift_small_lift_context(evidence, settings=s):
+        return True
+
+    side = str(evidence.get("side") or "").upper()
     local = _parity_number(evidence.get("localBaseMovePct"))
-    off_low = _parity_number(evidence.get("offLowMovePct"))
     pos = _parity_number(evidence.get("sessionRangePosition"))
+
+    # PUT slide pad + cold v3 (#717) — not CALL off-low semantics.
+    if side == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+        if not put_slide_pad_context(evidence, settings=s):
+            return False
+        max_late = float(
+            getattr(s, "put_slide_cold_velocity_max_local_pct", 22.0) or 22.0
+        )
+        return local <= max_late + 1e-6
+
+    # CALL: #730 small-lift off session low, not extended afternoon chase.
+    off_low = _parity_number(evidence.get("offLowMovePct"))
     max_late_local = float(
         getattr(s, "oct_paper_elite_rip_max_local_outside_open_pct", 28.0) or 28.0
     )

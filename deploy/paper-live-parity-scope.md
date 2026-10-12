@@ -50,6 +50,20 @@ Use `legacy_live_entry_narrowings_active()` instead of bare `enable_live_trading
 - **Market tape** — Oct 1 / Oct 5 are references; each session’s candidates differ
 - **Capital book** — same *rules*, different lots if live book ≠ paper reference (e.g. ₹50k vs ₹150k)
 
+## Oct 1 / Oct 5 reference PRs (source of truth — not generic symmetry)
+
+| Intent | PR | Side notes |
+|--------|-----|------------|
+| Open first-lift waives chase | #721 | CE + PE open window |
+| Side-aware pad location (CALL high / PUT slide + session-low dump) | #722, #699, #701, #707 | PUT **does not** use CALL `offLow` for slide pad — `put_slide_pad_context` (#717) |
+| Negative v3 on structural rip | #730 | Open: any side; after open: CALL off-low / PUT slide pad (#717) |
+| First-lift all-session live mirror | #734+ | `oct_paper_first_lift_*` + pretrade parity |
+| Post-win same-strike V-rip | #683, #684 | Oct 5 afternoon; `same_strike_post_win_v_rip_reentry_waive` |
+| Mirror after trail win / block cross chase | #674, #677, #678 | `PE_WIN_CE_MIRROR_*`, index rally/slide flip — **not** identical rules both sides |
+| Skip live-only halts | #719, #712, #710 | `trading_rules_match_paper` |
+
+When adding gates: mirror **paired** PR behavior (table above), not a new symmetric helper unless Oct 1/5 paper/EOD proves both sides.
+
 ## HUD
 
 `GET /api/deployment/status` → `flags.entryGatesMatchPaper`, `flags.tradingRulesMatchPaper`, `livePaperProfile.sizesFromPaperBook`.
