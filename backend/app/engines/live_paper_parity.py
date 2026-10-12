@@ -358,6 +358,56 @@ def oct_paper_elite_rip_context(
     return local <= max_late_local + 1e-6
 
 
+def oct_paper_first_lift_negative_velocity_ok(
+    evidence: Mapping[str, Any] | None,
+    *,
+    live_v3: float,
+    v9: float = 0.0,
+    settings: Any = None,
+) -> bool:
+    """
+    Oct 1 / Oct 5 paper: ELITE open rip at pad may pass readiness while 3s velocity is negative.
+
+    Matches ``rank_trade_evidence`` + EOD replay — not a blanket cold-tick waiver.
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not bool(
+        getattr(s, "oct_paper_first_lift_negative_velocity_waiver_enabled", True)
+    ):
+        return False
+    if not trading_rules_match_paper(s):
+        return False
+    if not isinstance(evidence, dict):
+        return False
+    if live_v3 >= -1e-9:
+        return True
+    if oct_paper_elite_rip_context(evidence, settings=s):
+        return True
+    from app.engines.pad_lane_capture import pad_lane_cold_velocity_ok
+
+    if pad_lane_cold_velocity_ok(evidence, live_v3, v9):
+        return True
+    side = str(evidence.get("side") or "").upper()
+    if side == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_cold_velocity_ok
+
+        if put_slide_cold_velocity_ok(evidence, live_v3, v9):
+            return True
+    return False
+
+
+def oct_paper_peak_keep_exit_parity_active(settings: Any | None = None) -> bool:
+    """When true, skip implicit stage-trail ladder on first-lift legs (Oct 1 peak-keep holds)."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not trading_rules_match_paper(s):
+        return False
+    return bool(getattr(s, "oct_paper_peak_keep_exit_parity_enabled", True))
+
+
 def _strict_bool(value: Any, default: bool = False) -> bool:
     """Only real bools count — MagicMock attrs must not flip parity on in tests."""
     if isinstance(value, bool):

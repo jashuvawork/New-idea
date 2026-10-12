@@ -2416,7 +2416,15 @@ def first_lift_entry_readiness(
     v3 = max(v3, float(persisted.get("velocity3s") or 0))
     v9 = max(v9, float(persisted.get("velocity9s") or 0))
     if live_v3 < 0:
-        return False, "first_lift_live_velocity_negative"
+        from app.engines.live_paper_parity import oct_paper_first_lift_negative_velocity_ok
+
+        if not oct_paper_first_lift_negative_velocity_ok(
+            row,
+            live_v3=live_v3,
+            v9=v9,
+            settings=settings,
+        ):
+            return False, "first_lift_live_velocity_negative"
     if v_rip_lane:
         min_v3 = float(
             getattr(settings, "ict_v_rip_min_velocity_3s", 1.2) or 1.2

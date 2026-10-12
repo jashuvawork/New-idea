@@ -69,6 +69,45 @@ def test_non_paper_still_rejects_negative_velocity(mock_settings):
     assert ranking["grade"] == "REJECT"
 
 
+def test_oct_paper_negative_velocity_readiness_waiver_structural():
+    from app.engines.live_paper_parity import oct_paper_first_lift_negative_velocity_ok
+
+    s = _frozen_paper_settings()
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "side": "PUT",
+        "armedBaseLaunch": True,
+        "firstLift": True,
+        "localBaseMovePct": 8.0,
+        "sessionRangePosition": 0.4,
+    }
+    with patch(
+        "app.engines.put_slide_ce_mirror.put_slide_pad_context", return_value=True
+    ):
+        assert oct_paper_first_lift_negative_velocity_ok(
+            alert, live_v3=-1.2, v9=0.5, settings=s,
+        )
+
+
+def test_oct_paper_peak_keep_exit_disables_implicit_stage_ladder():
+    from types import SimpleNamespace
+
+    from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
+
+    trade = SimpleNamespace(
+        entryContext={
+            "momentType": "first_lift_local_base",
+            "ictFirstLift": True,
+        },
+    )
+    with patch(
+        "app.engines.live_paper_parity.oct_paper_peak_keep_exit_parity_active",
+        return_value=True,
+    ):
+        assert trade_uses_moment_stage_ladder(trade) is False
+
+
 def test_oct_paper_waives_first_lift_quality_near_miss():
     s = _frozen_paper_settings()
     alert = {"tier": "ELITE", "explosionScore": 100.0, "side": "PUT", "strike": 72200.0}

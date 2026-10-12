@@ -565,7 +565,16 @@ def explosion_near_miss_waive(
                 readiness_reason=readiness_reason,
             ):
                 if "negative" in rr and "velocity" in rr:
-                    return False
+                    from app.engines.live_paper_parity import (
+                        oct_paper_first_lift_negative_velocity_ok,
+                    )
+
+                    v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
+                    v9 = float(alert.get("velocity9s") or alert.get("velocity_9s") or 0)
+                    if not oct_paper_first_lift_negative_velocity_ok(
+                        alert, live_v3=v3, v9=v9, settings=s,
+                    ):
+                        return False
                 return True
             tier = str(alert.get("tier") or "").upper()
             score = float(alert.get("explosionScore") or alert.get("score") or 0)
@@ -595,9 +604,21 @@ def explosion_near_miss_waive(
                         alert, snap, st, settings=s,
                     ):
                         return True
+    if rr.startswith("first_lift_live_velocity_negative"):
+        if isinstance(alert, dict):
+            from app.engines.live_paper_parity import (
+                oct_paper_first_lift_negative_velocity_ok,
+            )
+
+            v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
+            v9 = float(alert.get("velocity9s") or alert.get("velocity_9s") or 0)
+            if oct_paper_first_lift_negative_velocity_ok(
+                alert, live_v3=v3, v9=v9, settings=s,
+            ):
+                return True
+        return False
     if rr.startswith(
         (
-            "first_lift_live_velocity_negative",
             "mid_rip_armed_coil_rejected",
             "first_lift_base_move_outside",
         )
