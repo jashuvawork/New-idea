@@ -955,6 +955,7 @@ async def _open_from_candidate(
             candidate.explosion_event,
             ict=pre_ict,
             alert=alert_row if alert_row else None,
+            snap=snap,
         )
         if pad_chase and not (early_base_entry_ready and not post_session_win):
             return False, pad_reason

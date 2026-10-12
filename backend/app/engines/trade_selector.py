@@ -1247,6 +1247,7 @@ def _explosion_candidates(
             event,
             ict=ict,
             alert=alert,
+            snap=snap,
         )
         if chase_blocked and not first_lift_ready and not early_pad:
             continue
