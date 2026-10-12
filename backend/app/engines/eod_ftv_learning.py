@@ -224,7 +224,7 @@ def cleanup_learned_eod_archives(*, now: Optional[datetime] = None) -> dict[str,
     zip is removed once its knowledge has been extracted and it is past the retention window.
     """
     settings = get_settings()
-    if not bool(getattr(settings, "eod_learning_cleanup_enabled", True)):
+    if not bool(getattr(settings, "eod_learning_cleanup_enabled", False)):
         return {"status": "disabled"}
     current = now or datetime.now(IST)
     retention = int(getattr(settings, "eod_learning_raw_retention_days", 7) or 7)

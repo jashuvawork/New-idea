@@ -156,5 +156,5 @@ Scheduled market monitors live in `.cursor/automations/` — enable those only v
 ### Radar / EOD storage (analysis-only from Aug 26+)
 - Intraday telemetry lives under `{TRADE_STORE_DIR}/radar_archives/telemetry/` (`*.premium.jsonl`, `*.funnel.jsonl`).
 - At **16:00 IST finalize**, the daily ZIP (`radar-YYYY-MM-DD.zip`) keeps only what EOD replay needs: **premium tape**, **funnel events**, **scorecard**, and radar entries. Alerts tape and pipeline history are **not** stored by default.
-- After finalize, intraday telemetry JSONL is **purged** (data remains in the ZIP). Retention is **7 days** of ZIPs.
+- After finalize, intraday telemetry JSONL is **purged** (data remains in the ZIP). **`RADAR_ARCHIVE_RETENTION_DAYS=0`** (default) keeps **every** finalized `radar-*.zip`; set a positive value to prune old ZIPs on disk. Intraday JSONL rotation uses **`RADAR_TELEMETRY_RETENTION_DAYS`** (default 7). Optional off-box copy: **`RADAR_BACKUP_DIR`** / **`RADAR_BACKUP_S3_BUCKET`** at finalize.
 - EOD replay reads `premium_tape.jsonl` from telemetry during the session, or from the ZIP after finalize (`/api/ai/eod-local-base-replay/{DATE}`).

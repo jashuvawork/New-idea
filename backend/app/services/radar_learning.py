@@ -1599,7 +1599,11 @@ def _prune_learning_files(
     protect_dates: frozenset[str] | None = None,
 ) -> None:
     current = _aware(now)
-    retention_days = max(1, int(get_settings().radar_archive_retention_days))
+    settings = get_settings()
+    retention_days = max(
+        1,
+        int(getattr(settings, "radar_telemetry_retention_days", 7) or 7),
+    )
     cutoff = current.date() - timedelta(days=retention_days)
     protected = protect_dates or frozenset()
     for path in _telemetry_dir().glob("*.jsonl"):
