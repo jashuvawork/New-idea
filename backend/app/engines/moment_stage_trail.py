@@ -127,8 +127,15 @@ def moment_stage_near_complete(
 
 def trade_uses_moment_stage_ladder(trade: PaperTrade) -> bool:
     ctx = trade.entryContext or {}
+    from app.engines.live_paper_parity import oct_paper_peak_keep_exit_parity_active
+
+    paper_peak_keep = oct_paper_peak_keep_exit_parity_active()
     if ctx.get("momentStageLadder") or (ctx.get("exitPlan") or {}).get("momentStageLadder"):
         return True
+    if paper_peak_keep and ctx.get("maxProfitCapture"):
+        return True
+    if paper_peak_keep:
+        return False
     moment = str(ctx.get("momentType") or "").lower()
     if moment in (
         "first_lift_local_base",

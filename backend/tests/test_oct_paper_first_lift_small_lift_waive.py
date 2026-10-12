@@ -177,7 +177,7 @@ def test_first_lift_elite_entry_passes_high_fvq_score100(_day):
     assert ok is True, reason
 
 
-def test_near_miss_waives_except_negative_velocity():
+def test_near_miss_waives_structural_open_rip_negative_velocity():
     s = _frozen_paper_settings()
     alert = {
         "tier": "ELITE",
@@ -189,10 +189,27 @@ def test_near_miss_waives_except_negative_velocity():
         "offLowMovePct": 8.0,
         "moneyness": "ATM",
         "strikeStepsFromAtm": 1,
+        "velocity3s": -0.8,
+        "velocity9s": 1.2,
     }
     assert explosion_near_miss_waive(
         alert, readiness_reason="explosion_score_below_min", settings=s,
     )
+    assert explosion_near_miss_waive(
+        alert, readiness_reason="first_lift_live_velocity_negative", settings=s,
+    )
+
+
+def test_near_miss_still_blocks_cold_negative_without_launch():
+    s = _frozen_paper_settings()
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 100.0,
+        "side": "CALL",
+        "localBaseMovePct": 10.0,
+        "velocity3s": -2.5,
+        "velocity9s": -1.0,
+    }
     assert not explosion_near_miss_waive(
         alert, readiness_reason="first_lift_live_velocity_negative", settings=s,
     )
