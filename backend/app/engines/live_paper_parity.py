@@ -75,35 +75,7 @@ def oct_paper_first_lift_small_lift_context(
     if not launch:
         return False
 
-    pos = _parity_number(evidence.get("sessionRangePosition"))
-    max_pos = float(
-        getattr(s, "live_paper_parity_max_session_range_position", 0.52) or 0.52
-    )
-    dd = _parity_number(evidence.get("drawdownFromHighPct"))
-    min_off_high = float(
-        getattr(s, "live_paper_parity_min_off_session_high_pct", 6.0) or 6.0
-    )
-    at_option_session_high = pos > 0 and dd > -min_off_high + 1e-6
     side = str(evidence.get("side") or "").upper()
-    if pos > max_pos + 1e-6 or at_option_session_high:
-        from app.engines.oct1_pad_location import oct1_open_moment_pad_waived
-
-        location_ok = False
-        if side == "PUT":
-            from app.engines.put_slide_ce_mirror import put_slide_pad_context
-
-            location_ok = put_slide_pad_context(evidence, settings=s)
-        if not location_ok:
-            location_ok = bool(oct1_open_moment_pad_waived(side, evidence, settings=s)[0])
-        if not location_ok:
-            try:
-                from app.engines.session_timing import in_open_premium_window
-
-                if not in_open_premium_window():
-                    return False
-            except Exception:
-                return False
-
     local = max(
         _parity_number(evidence.get("localBaseMovePct")),
         _parity_number(evidence.get("ictBaseRelativeMovePct")),
@@ -130,6 +102,46 @@ def oct_paper_first_lift_small_lift_context(
         from app.engines.put_slide_ce_mirror import put_slide_pad_context
 
         session_pad = put_slide_pad_context(evidence, settings=s)
+
+    # First lift off a measured local base (2–40%) is pad entry, not session-high chase.
+    if not session_pad and launch and min_move <= local <= max_move + 1e-6:
+        session_pad = True
+
+    pos = _parity_number(evidence.get("sessionRangePosition"))
+    max_pos = float(
+        getattr(s, "live_paper_parity_max_session_range_position", 0.52) or 0.52
+    )
+    dd = _parity_number(evidence.get("drawdownFromHighPct"))
+    min_off_high = float(
+        getattr(s, "live_paper_parity_min_off_session_high_pct", 6.0) or 6.0
+    )
+    dd_present = (
+        evidence.get("drawdownFromHighPct") is not None
+        and str(evidence.get("drawdownFromHighPct")).strip() != ""
+    )
+    at_option_session_high = (
+        dd_present and pos > 0 and dd > -min_off_high + 1e-6
+    )
+    if at_option_session_high:
+        return False
+    if pos > max_pos + 1e-6:
+        from app.engines.oct1_pad_location import oct1_open_moment_pad_waived
+
+        location_ok = session_pad
+        if side == "PUT" and not location_ok:
+            from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+            location_ok = put_slide_pad_context(evidence, settings=s)
+        if not location_ok:
+            location_ok = bool(oct1_open_moment_pad_waived(side, evidence, settings=s)[0])
+        if not location_ok:
+            try:
+                from app.engines.session_timing import in_open_premium_window
+
+                if not in_open_premium_window():
+                    return False
+            except Exception:
+                return False
 
     if local <= 0 and session_pad:
         local = min_move
@@ -179,6 +191,55 @@ def oct_paper_first_lift_small_lift_context(
             return False
 
     return True
+
+
+def oct_paper_first_lift_otm_entry_ok(
+    alert: Mapping[str, Any] | None,
+    *,
+    depth_steps: int,
+    settings: Any = None,
+) -> bool:
+    """Oct 1 paper: ELITE first-lift / armed-base OTM (≤N steps) any session — not open-window only."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not trading_rules_match_paper(s):
+        return False
+    if not isinstance(alert, dict):
+        return False
+    if not oct_paper_first_lift_small_lift_context(alert, settings=s):
+        return False
+    max_steps = int(
+        getattr(s, "oct_paper_first_lift_small_lift_max_strike_steps", 3) or 3
+    )
+    return int(depth_steps or 0) > 0 and int(depth_steps) <= max_steps
+
+
+def oct_paper_first_lift_entry_window_lo_relax(
+    alert: Mapping[str, Any] | None,
+    *,
+    default_lo: float,
+    settings: Any = None,
+    readiness_reason: str = "",
+) -> float:
+    """Oct 1 paper: first-lift at pad uses small-lift floor (e.g. 2%), not 15% entry window."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not trading_rules_match_paper(s):
+        return default_lo
+    if not isinstance(alert, dict):
+        return default_lo
+    if not oct_paper_first_lift_small_lift_context(
+        alert,
+        settings=s,
+        readiness_reason=readiness_reason,
+    ):
+        return default_lo
+    floor = float(
+        getattr(s, "oct_paper_first_lift_small_lift_min_local_pct", 2.0) or 2.0
+    )
+    return min(default_lo, floor) if floor > 0 else default_lo
 
 
 def oct_paper_elite_rip_context(

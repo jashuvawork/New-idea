@@ -530,18 +530,28 @@ def explosion_entry_window_blocked(
     pad = effective_local_base_move_pct(explosion_event, ict)
     if pad > 0:
         effective_lo = lo
-        if alert is not None and snap is not None:
-            from app.engines.oct_open_index_flip_otm import (
-                oct_open_index_flip_entry_window_lo_relax,
+        if alert is not None:
+            from app.engines.live_paper_parity import (
+                oct_paper_first_lift_entry_window_lo_relax,
             )
 
-            effective_lo = oct_open_index_flip_entry_window_lo_relax(
+            effective_lo = oct_paper_first_lift_entry_window_lo_relax(
                 alert,
-                snap,
-                explosion_event,
                 default_lo=lo,
                 settings=settings,
             )
+            if snap is not None:
+                from app.engines.oct_open_index_flip_otm import (
+                    oct_open_index_flip_entry_window_lo_relax,
+                )
+
+                effective_lo = oct_open_index_flip_entry_window_lo_relax(
+                    alert,
+                    snap,
+                    explosion_event,
+                    default_lo=effective_lo,
+                    settings=settings,
+                )
         if pad < effective_lo:
             return True, f"entry_window_local_low_{pad:.0f}%"
         if pad > hi:

@@ -1120,18 +1120,31 @@ def validate_candidate(
             if isinstance(getattr(candidate, "alert", None), dict)
             else None,
         )
+        alert_dict = (
+            getattr(candidate, "alert", None)
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None
+        )
         from app.engines.ict_breakout_monitor import first_lift_entry_ready
 
         strict_base_ready = first_lift_entry_ready(
             snap=snap,
             event=explosion_event,
             ict=trap_ict,
-            alert=(
-                getattr(candidate, "alert", None)
-                if isinstance(getattr(candidate, "alert", None), dict)
-                else None
-            ),
+            alert=alert_dict,
         )
+        if not strict_base_ready and alert_dict is not None:
+            from app.engines.live_paper_parity import (
+                oct_paper_first_lift_small_lift_context,
+                trading_rules_match_paper,
+            )
+
+            if trading_rules_match_paper(settings) and oct_paper_first_lift_small_lift_context(
+                alert_dict,
+                settings=settings,
+            ):
+                strict_base_ready = True
+                meta["octPaperFirstLiftPad"] = True
         from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
         must_take = elite_must_take_bypass_allowed(
@@ -1145,12 +1158,6 @@ def validate_candidate(
         )
         from app.engines.advanced_indicators import squeeze_early_base_active
         from app.engines.bullish_local_base import bullish_local_base_prediction
-
-        alert_dict = (
-            getattr(candidate, "alert", None)
-            if isinstance(getattr(candidate, "alert", None), dict)
-            else None
-        )
 
         bullish_base = bullish_local_base_prediction(
             snap,
