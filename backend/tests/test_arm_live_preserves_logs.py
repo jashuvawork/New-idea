@@ -26,6 +26,29 @@ def test_arm_live_paths_do_not_purge_trade_logs(path: Path):
     assert "purge-logs" not in path.read_text()
 
 
+@pytest.mark.parametrize("path", ARM_PATHS[1:], ids=lambda p: p.name)
+def test_arm_live_workflows_use_150k_capital(path: Path):
+    text = path.read_text()
+    assert "env.live-150k.overlay" in text
+    assert "env.live-50k.overlay" not in text
+    assert "LIVE_CAPITAL_INR=50000" not in text
+
+
+def test_ec2_update_preserves_150k_live_overlay(tmp_path: Path):
+    script = (ROOT / "deploy" / "ec2-update.sh").read_text()
+    fn = script.split("_parity_cap_overlay() {", 1)[1].split("\n  }\n", 1)[0]
+    env_file = tmp_path / "env"
+    env_file.write_text("ENABLE_LIVE_TRADING=true\nFALLBACK_CAPITAL_INR=150000\n")
+    out = subprocess.run(
+        ["bash", "-c", f'_f() {{{fn}\n}}; _f'],
+        env={**os.environ, "ENV_FILE": str(env_file), "REPO_DIR": "/repo"},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert out == "/repo/deploy/env.live-150k.overlay"
+
+
 def test_arm_live_audits_env_before_setting_live_flags():
     script = GO_LIVE.read_text()
     arm_block = script.split('if [ "$MODE" = "arm-live" ]; then', 1)[1]
