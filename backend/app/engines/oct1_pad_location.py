@@ -57,6 +57,11 @@ def oct1_open_moment_pad_waived(
 
         if put_slide_pad_context(evidence, settings=settings):
             return True, "oct_open_put_slide_pad_waive"
+        moment = str(evidence.get("momentType") or "").lower()
+        tier = str(evidence.get("tier") or "").upper()
+        if moment == "v_rip_session_low" and tier in ("ELITE", "EXPLODING"):
+            if evidence.get("armedBaseLaunch") or evidence.get("ictArmedBaseLaunch"):
+                return True, "oct_open_put_vrip_armed_waive"
     return False, ""
 
 

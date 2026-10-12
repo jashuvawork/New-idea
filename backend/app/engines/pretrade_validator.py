@@ -1146,31 +1146,32 @@ def validate_candidate(
         from app.engines.advanced_indicators import squeeze_early_base_active
         from app.engines.bullish_local_base import bullish_local_base_prediction
 
-        bullish_base = bullish_local_base_prediction(
-            snap,
-            explosion_event,
-            trap_ict,
-            alert=(
-                getattr(candidate, "alert", None)
-                if isinstance(getattr(candidate, "alert", None), dict)
-                else None
-            ),
-        )
-
-        window_blocked, window_reason = explosion_entry_window_blocked(
-            explosion_event, ict=trap_ict, top_must_take=must_take,
-            squeeze_early_base=squeeze_early_base_active(explosion_event, snap),
-            bullish_local_base=bool(bullish_base.get("active")),
-        )
-        if window_blocked and not strict_base_ready:
-            return False, window_reason, meta
-
-        post_session_win, _post_win_meta = _post_session_win(state)
         alert_dict = (
             getattr(candidate, "alert", None)
             if isinstance(getattr(candidate, "alert", None), dict)
             else None
         )
+
+        bullish_base = bullish_local_base_prediction(
+            snap,
+            explosion_event,
+            trap_ict,
+            alert=alert_dict,
+        )
+
+        window_blocked, window_reason = explosion_entry_window_blocked(
+            explosion_event,
+            ict=trap_ict,
+            top_must_take=must_take,
+            squeeze_early_base=squeeze_early_base_active(explosion_event, snap),
+            bullish_local_base=bool(bullish_base.get("active")),
+            alert=alert_dict,
+            snap=snap,
+        )
+        if window_blocked and not strict_base_ready:
+            return False, window_reason, meta
+
+        post_session_win, _post_win_meta = _post_session_win(state)
 
         pad_chase, pad_reason = tier_promotion_pad_chase_blocked(
             explosion_event,
