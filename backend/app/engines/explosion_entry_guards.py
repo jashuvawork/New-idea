@@ -418,6 +418,8 @@ def explosion_entry_window_blocked(
     top_must_take: bool = False,
     squeeze_early_base: bool = False,
     bullish_local_base: bool = False,
+    alert: Optional[dict[str, Any]] = None,
+    snap: Any = None,
 ) -> tuple[bool, str]:
     """Hard-block EXPLOSIVE entries outside the active early window.
 
@@ -515,7 +517,20 @@ def explosion_entry_window_blocked(
     # Primary: local pad / off-low — never day% when a pad exists.
     pad = effective_local_base_move_pct(explosion_event, ict)
     if pad > 0:
-        if pad < lo:
+        effective_lo = lo
+        if alert is not None and snap is not None:
+            from app.engines.oct_open_index_flip_otm import (
+                oct_open_index_flip_entry_window_lo_relax,
+            )
+
+            effective_lo = oct_open_index_flip_entry_window_lo_relax(
+                alert,
+                snap,
+                explosion_event,
+                default_lo=lo,
+                settings=settings,
+            )
+        if pad < effective_lo:
             return True, f"entry_window_local_low_{pad:.0f}%"
         if pad > hi:
             return True, f"entry_window_local_high_{pad:.0f}%"

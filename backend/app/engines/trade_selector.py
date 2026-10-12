@@ -311,9 +311,15 @@ def _high_signal_pre_candidate_skip_reason(
                 and depth <= entry_steps
                 and tier_u in ("ELITE", "EXPLODING")
             )
+            from app.engines.oct_open_index_flip_otm import oct_open_index_flip_otm_entry_ok
+
+            open_flip_otm = oct_open_index_flip_otm_entry_ok(
+                alert, snap, settings=settings,
+            )
             if not (
                 coil_moneyness_ok
                 or shallow_elite_ok
+                or open_flip_otm
                 or (
                     (lift_ready or alert_has_early_radar_pad_capture(alert))
                     and pad_shallow_ok
@@ -702,9 +708,15 @@ def _explosion_candidates(
                     and abs(float(runner.strike or 0) - strike_v) <= strike_step(symbol) * 0.51
                 ):
                     shallow_elite_ok = True
+                from app.engines.oct_open_index_flip_otm import oct_open_index_flip_otm_entry_ok
+
+                open_flip_otm = oct_open_index_flip_otm_entry_ok(
+                    alert, snap, settings=settings,
+                )
                 if not (
                     coil_moneyness_ok
                     or shallow_elite_ok
+                    or open_flip_otm
                     or (
                         (lift_ready or alert_has_early_radar_pad_capture(alert))
                         and pad_shallow_ok
@@ -1254,9 +1266,13 @@ def _explosion_candidates(
         from app.engines.advanced_indicators import squeeze_early_base_active
 
         window_blocked, _window_reason = explosion_entry_window_blocked(
-            event, ict=ict, top_must_take=must_take,
+            event,
+            ict=ict,
+            top_must_take=must_take,
             squeeze_early_base=squeeze_early_base_active(event, snap),
             bullish_local_base=bool(bullish_base.get("active")),
+            alert=alert if isinstance(alert, dict) else None,
+            snap=snap,
         )
         if window_blocked and not first_lift_ready:
             continue
