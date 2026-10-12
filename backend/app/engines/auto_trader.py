@@ -3020,10 +3020,10 @@ async def _open_from_candidate(
         chop_second_same_side_leg_blocked,
     )
 
-    from app.engines.live_paper_parity import trading_rules_match_paper
+    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
 
     chop_live_wire = (
-        not trading_rules_match_paper(settings)
+        not oct_paper_entry_loosening_active(settings)
         and (
             chop_live_guard_day_active(state, snap, snapshots)
             or legacy_live_narrow_stack_active(settings)

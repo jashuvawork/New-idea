@@ -901,10 +901,10 @@ def _explosion_candidates(
                 oct_chart_ok = False
                 from app.engines.live_paper_parity import (
                     oct_paper_structural_pad_context,
-                    trading_rules_match_paper,
+                    oct_paper_entry_loosening_active,
                 )
 
-                if trading_rules_match_paper(settings):
+                if oct_paper_entry_loosening_active(settings):
 
                     oct_chart_ok = oct_paper_structural_pad_context(
                         alert,
@@ -2431,7 +2431,7 @@ def find_best_entry(
             kept_candidates.append(c)
             continue
         if ranking.get("grade") == "REJECT":
-            from app.engines.live_paper_parity import trading_rules_match_paper
+            from app.engines.live_paper_parity import oct_paper_entry_loosening_active
             from app.engines.trade_ranking import selector_rejection_reason
 
             tier_u = str(
@@ -2453,7 +2453,7 @@ def find_best_entry(
 
             rank_evidence = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
             oct_keep = (
-                trading_rules_match_paper(settings)
+                oct_paper_entry_loosening_active(settings)
                 and tier_u in ("ELITE", "EXPLODING")
                 and expl_score >= min_score - 1e-6
             ) or oct_paper_elite_rip_context(

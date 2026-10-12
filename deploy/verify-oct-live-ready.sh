@@ -88,9 +88,11 @@ if frozen.get("profileOk") is not True:
 if prof.get("profileOk") is not True:
     print("live paper profile issues:", prof.get("profileIssues"), file=sys.stderr)
     sys.exit(1)
-if not frozen.get("padEntryGuardEnabled"):
+if not frozen.get("padEntryGuardEnabled") and not frozen.get("octPaperReplicaEnabled"):
     print("pad entry guard disabled", file=sys.stderr)
     sys.exit(1)
+if frozen.get("octPaperReplicaEnabled"):
+    print("  octPaperReplicaEnabled: True (Oct 1/5 radar+selection+entry; pad guard off by design)")
 
 live = bool(f.get("enableLiveTrading"))
 paper = bool(f.get("paperTrading"))

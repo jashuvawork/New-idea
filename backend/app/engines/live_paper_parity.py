@@ -39,7 +39,7 @@ def oct_paper_first_lift_small_lift_context(
     from app.config import get_settings
 
     s = settings or get_settings()
-    if not trading_rules_match_paper(s):
+    if not oct_paper_entry_loosening_active(s):
         return False
     if not bool(getattr(s, "oct_paper_first_lift_small_lift_waiver_enabled", True)):
         return False
@@ -226,7 +226,7 @@ def oct_paper_first_lift_otm_entry_ok(
     from app.config import get_settings
 
     s = settings or get_settings()
-    if not trading_rules_match_paper(s):
+    if not oct_paper_entry_loosening_active(s):
         return False
     if not isinstance(alert, dict):
         return False
@@ -249,7 +249,7 @@ def oct_paper_first_lift_entry_window_lo_relax(
     from app.config import get_settings
 
     s = settings or get_settings()
-    if not trading_rules_match_paper(s):
+    if not oct_paper_entry_loosening_active(s):
         return default_lo
     if not isinstance(alert, dict):
         return default_lo
@@ -279,7 +279,7 @@ def oct_paper_elite_rip_context(
     from app.config import get_settings
 
     s = settings or get_settings()
-    if not trading_rules_match_paper(s):
+    if not oct_paper_entry_loosening_active(s):
         return False
     if not isinstance(evidence, dict):
         return False
@@ -377,7 +377,7 @@ def oct_paper_first_lift_negative_velocity_ok(
         getattr(s, "oct_paper_first_lift_negative_velocity_waiver_enabled", True)
     ):
         return False
-    if not trading_rules_match_paper(s):
+    if not oct_paper_entry_loosening_active(s):
         return False
     if not isinstance(evidence, dict):
         return False
@@ -423,7 +423,7 @@ def oct_paper_exec_strict_bypass(
     from app.config import get_settings
 
     s = settings or get_settings()
-    if not trading_rules_match_paper(s):
+    if not oct_paper_entry_loosening_active(s):
         return False
     if not bool(getattr(s, "oct_paper_exec_strict_bypass_enabled", True)):
         return False
@@ -440,7 +440,7 @@ def oct_paper_first_lift_entry_window_hi_relax(
     from app.config import get_settings
 
     s = settings or get_settings()
-    if not trading_rules_match_paper(s):
+    if not oct_paper_entry_loosening_active(s):
         return default_hi
     if not isinstance(alert, dict):
         return default_hi
@@ -474,7 +474,7 @@ def oct_paper_same_side_reentry_after_loss_waived(
     from app.config import get_settings
 
     s = settings or get_settings()
-    if not trading_rules_match_paper(s):
+    if not oct_paper_entry_loosening_active(s):
         return False
     if not bool(getattr(s, "oct_paper_same_side_reentry_waiver_enabled", True)):
         return False
@@ -548,6 +548,36 @@ def trading_rules_match_paper(settings: Any | None = None) -> bool:
     return entry_gates_match_paper(s)
 
 
+def oct_paper_replica_active(settings: Any | None = None) -> bool:
+    """
+    Oct 1 / Oct 5 paper replica — radar, selection and entry as those sessions ran.
+
+    Turns off post-Oct 5 entry loosenings (#718+ parity waivers), the pad guard
+    (#699/#701/#707), the ₹18–350 radar scan band (#714) and strict ATM/ITM-only
+    execution (#692). Exits (peak-keep, adaptive SL, N×/k× fast fade) stay current.
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    return _strict_bool(getattr(s, "oct_paper_replica_enabled", False))
+
+
+def oct_paper_entry_loosening_active(settings: Any | None = None) -> bool:
+    """
+    Post-Oct 5 entry/selection waivers keyed off trading_rules_match_paper.
+
+    False under the Oct paper replica so gates that ran on Oct 1 / Oct 5 paper
+    (power hour, whipsaw, expiry halts, chop-day wire, entry-score floor) run again.
+    Exit and sizing paths keep using trading_rules_match_paper.
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if oct_paper_replica_active(s):
+        return False
+    return trading_rules_match_paper(s)
+
+
 def legacy_live_entry_narrowings_active(settings: Any | None = None) -> bool:
     """
     True when live-only entry/session narrowings may run (legacy stack or live without paper rules).
@@ -589,11 +619,26 @@ def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
     parity = live_paper_parity_active(s)
     gates = entry_gates_match_paper(s)
     rules = trading_rules_match_paper(s)
+    loosening = oct_paper_entry_loosening_active(s)
     cap_inr = float(getattr(s, "fallback_capital_inr", 0) or 0)
+    from app.engines.sep917_legacy_profile import (
+        atm_itm_fixed_premium_band_only,
+        strict_atm_itm_execution,
+    )
+
     return {
         "active": parity,
         "entryGatesMatchPaper": gates,
         "tradingRulesMatchPaper": rules,
+        "octPaperReplica": {
+            "enabled": oct_paper_replica_active(s),
+            "postOct5EntryLooseningActive": loosening,
+            "radarFixedPremiumBandOnly": atm_itm_fixed_premium_band_only(s),
+            "strictAtmItmExecution": strict_atm_itm_execution(s),
+            "padEntryGuardEnabled": bool(
+                getattr(s, "live_paper_parity_pad_entry_guard_enabled", True)
+            ),
+        },
         "bookMatchesOctPaperReferenceLots": cap_inr
         >= float(getattr(s, "oct_paper_reference_capital_inr", 149_000.0) or 149_000.0),
         "legacyLiveNarrowStackActive": legacy_live_narrow_stack_active(s),
@@ -611,14 +656,14 @@ def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
             "negativeVelocityWaiver": bool(
                 getattr(s, "oct_paper_first_lift_negative_velocity_waiver_enabled", True)
             )
-            and rules,
+            and loosening,
             "peakKeepExitParity": oct_paper_peak_keep_exit_parity_active(s),
             "execStrictBypass": bool(
                 getattr(s, "oct_paper_exec_strict_bypass_enabled", True)
             )
-            and rules,
-            "structuralPadSelectorWaivers": rules,
-            "otmTradeablePreserveOnStamp": rules,
+            and loosening,
+            "structuralPadSelectorWaivers": loosening,
+            "otmTradeablePreserveOnStamp": loosening,
         },
         "parityHudNote": (
             "entryGatesMatchPaper means parity env flags — not Oct 1 lot-for-lot replay. "

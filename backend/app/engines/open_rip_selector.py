@@ -78,10 +78,10 @@ def open_rip_elite_tradeable_preserve(
         return False
     from app.engines.live_paper_parity import (
         oct_paper_structural_pad_context,
-        trading_rules_match_paper,
+        oct_paper_entry_loosening_active,
     )
 
-    if trading_rules_match_paper(s) and oct_paper_structural_pad_context(alert, settings=s):
+    if oct_paper_entry_loosening_active(s) and oct_paper_structural_pad_context(alert, settings=s):
         return True
     try:
         from app.engines.session_timing import in_open_premium_window
@@ -105,7 +105,7 @@ def open_rip_selector_lift_waiver(
     from app.config import get_settings
     from app.engines.live_paper_parity import (
         oct_paper_first_lift_small_lift_context,
-        trading_rules_match_paper,
+        oct_paper_entry_loosening_active,
     )
 
     s = settings or get_settings()
@@ -115,7 +115,7 @@ def open_rip_selector_lift_waiver(
         return True
     from app.engines.live_paper_parity import oct_paper_structural_pad_context
 
-    if trading_rules_match_paper(s) and oct_paper_structural_pad_context(
+    if oct_paper_entry_loosening_active(s) and oct_paper_structural_pad_context(
         alert,
         settings=s,
         readiness_reason=readiness_reason,

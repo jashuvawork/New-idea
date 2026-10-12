@@ -3393,11 +3393,11 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         from app.engines.open_rip_selector import open_rip_elite_tradeable_preserve
         from app.engines.live_paper_parity import (
             oct_paper_structural_pad_context,
-            trading_rules_match_paper,
+            oct_paper_entry_loosening_active,
         )
 
         open_rip_preserve = open_rip_elite_tradeable_preserve(alert_out, settings=_settings)
-        oct_paper_otm = trading_rules_match_paper(_settings) and oct_paper_structural_pad_context(
+        oct_paper_otm = oct_paper_entry_loosening_active(_settings) and oct_paper_structural_pad_context(
             alert_out,
             settings=_settings,
         )

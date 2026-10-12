@@ -222,11 +222,11 @@ def counter_trend_entry_allowed(
         return True
     from app.engines.live_paper_parity import (
         oct_paper_first_lift_small_lift_context,
-        trading_rules_match_paper,
+        oct_paper_entry_loosening_active,
     )
 
     settings = get_settings()
-    if trading_rules_match_paper(settings):
+    if oct_paper_entry_loosening_active(settings):
         evidence: dict[str, Any] = dict(alert) if isinstance(alert, dict) else {}
         if explosion_event is not None and not evidence:
             evidence = {

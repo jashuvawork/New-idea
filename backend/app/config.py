@@ -3254,6 +3254,10 @@ class Settings(BaseSettings):
     # Frozen Oct slide/rally: ITM rip may exceed ₹350 cap while still Oct 1 ATM/ITM capture.
     oct_paper_slide_explosion_max_premium_inr: float = 650.0
     oct_paper_slide_premium_waiver_enabled: bool = True
+    # Oct 1 / Oct 5 paper replica: radar, selection and entry as those sessions ran
+    # (no post-Oct 5 waivers, pad guard, ₹18–350 scan band or strict ATM/ITM execution).
+    # Exits stay current. Set in deploy/env.october-frozen.overlay.
+    oct_paper_replica_enabled: bool = False
     # Oct 1 first-lift / small-lift at pad — waive chase blockers (not negative_velocity).
     oct_paper_first_lift_small_lift_waiver_enabled: bool = True
     # Oct 1 / #730: near-base structural rip may enter while live 3s velocity is briefly negative.

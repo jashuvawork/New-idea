@@ -20,10 +20,10 @@ def oct1_open_moment_pad_waived(
     settings: Any = None,
 ) -> tuple[bool, str]:
     """09:15–09:45 open-window pad waivers only (no first-lift context — avoids recursion)."""
-    from app.engines.live_paper_parity import trading_rules_match_paper
+    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
 
     settings = settings or get_settings()
-    if not trading_rules_match_paper(settings):
+    if not oct_paper_entry_loosening_active(settings):
         return False, ""
     if not bool(getattr(settings, "oct_paper_open_moment_pad_waiver_enabled", True)):
         return False, ""
@@ -75,11 +75,11 @@ def oct1_pad_location_waived(
     """Open-window + first-lift waivers before session-high/low chase checks."""
     from app.engines.live_paper_parity import (
         oct_paper_first_lift_small_lift_context,
-        trading_rules_match_paper,
+        oct_paper_entry_loosening_active,
     )
 
     settings = settings or get_settings()
-    if not trading_rules_match_paper(settings):
+    if not oct_paper_entry_loosening_active(settings):
         return False, ""
     if oct_paper_first_lift_small_lift_context(
         evidence,

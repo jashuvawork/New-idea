@@ -276,7 +276,7 @@ def live_entry_score_blocks_entry(
     min_live = live_entry_score_min_for_tier(tier, settings=settings)
     meta["liveEntryMin"] = min_live
     if live < min_live:
-        from app.engines.live_paper_parity import trading_rules_match_paper
+        from app.engines.live_paper_parity import oct_paper_entry_loosening_active
 
         alert = _alert_dict(candidate)
         tier_u = tier.upper()
@@ -289,7 +289,7 @@ def live_entry_score_blocks_entry(
             getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0
         )
         oct_paper_floor_skip = (
-            trading_rules_match_paper(settings)
+            oct_paper_entry_loosening_active(settings)
             and tier_u in ("ELITE", "EXPLODING")
             and expl_score >= min_expl - 1e-6
         )

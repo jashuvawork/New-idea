@@ -21,7 +21,7 @@ Operational checklists for **live and paper** when [`env.october-frozen.overlay`
 | 0.2b | Entry gate parity | When live armed: `flags.entryGatesMatchPaper: true` (paper entry rules on live — Frozen Oct + auto, or explicit parity flags) |
 | 0.3 | Frozen October | `frozenOctoberProfile.profileOk: true`, `cePeSymmetricOk: true` |
 | 0.4 | Parity book | `livePaperProfile.profileOk: true`, `fallbackCapitalInr` = intended (e.g. 150000), `sizesFromPaperBook: true` |
-| 0.5 | Pad guard | `padEntryGuardEnabled: true` |
+| 0.5 | Pad guard / Oct paper replica | `octPaperReplicaEnabled: true` (Oct 1/5 radar + selection + entry; pad guard **off** by design) — otherwise `padEntryGuardEnabled: true` |
 | 0.6 | Symmetric capture | `symmetricBestTradeCaptureEnabled`, `indexRallySideFlipEnabled`, `directionalSideLockEnabled` all true |
 | 0.7 | Live vs paper intent | Paper: `enableLiveTrading: false`, `paperTrading: true`. Live: opposite + `readyForLive: true` after arm |
 | 0.8 | Upstox | Token valid pre-open (`/api/upstox/login-url` if expired) |

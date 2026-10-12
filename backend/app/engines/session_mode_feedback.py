@@ -768,12 +768,12 @@ def reentry_ml_win_prob_blocked(
 
     from app.engines.live_paper_parity import (
         oct_paper_structural_pad_context,
-        trading_rules_match_paper,
+        oct_paper_entry_loosening_active,
     )
 
     if (
         bool(getattr(settings, "oct_paper_reentry_ml_waiver_enabled", True))
-        and trading_rules_match_paper(settings)
+        and oct_paper_entry_loosening_active(settings)
         and isinstance(alert, dict)
         and oct_paper_structural_pad_context(alert, settings=settings)
     ):
