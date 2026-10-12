@@ -2183,6 +2183,56 @@ def multiple_touch_fast_fade_exit_reason(
     return "explosion_multiple_fast_fade_lock"
 
 
+def unified_profit_ladder_exit_reason(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+    hold_seconds: float,
+    live_velocity_3s: float = 0.0,
+) -> Optional[str]:
+    """Book when P&L breaks the unified ladder floor, or on an N× fast fade.
+
+    Same rule for CALL and PUT. A hot tick (v3 ≥ +2) defers one evaluation but never
+    lowers the floor; the ratchet in ``profit_ladder_floor`` only moves up.
+    """
+    settings = get_settings()
+    from app.engines.moment_stage_trail import profit_ladder_floor
+
+    ladder = profit_ladder_floor(trade, best, settings=settings)
+    if ladder is None:
+        return None
+    floor_pts, layer = ladder
+    pnl_pts = float(pnl_pts or 0)
+    if pnl_pts <= 0:
+        return None
+    live_v3, _ = _live_premium_heat(trade, live_velocity_3s=live_velocity_3s)
+    if live_v3 >= _cfg_float(settings, "unified_profit_ladder_hot_defer_velocity_3s", 2.0):
+        return None
+
+    if layer == "multiple":
+        entry = float(trade.entryPremium or 0)
+        peak_ltp = max(float(trade.maxLtp or 0), entry + float(best or 0))
+        min_gb = max(
+            _cfg_float(settings, "unified_profit_ladder_multiple_min_giveback_points", 3.0),
+            peak_ltp
+            * _cfg_float(settings, "unified_profit_ladder_multiple_min_giveback_pct_of_peak", 5.0)
+            / 100.0,
+        )
+        fade_v = _cfg_float(settings, "unified_profit_ladder_fast_fade_velocity_3s", 2.0)
+        if float(best or 0) - pnl_pts + 1e-6 >= min_gb and live_v3 <= -fade_v:
+            return "explosion_profit_ladder_multiple_fast_fade"
+        if pnl_pts <= floor_pts + 1e-6:
+            return "explosion_profit_ladder_multiple"
+        return None
+
+    if pnl_pts > floor_pts + 1e-6:
+        return None
+    if hold_seconds < _cfg_float(settings, "unified_profit_ladder_min_hold_seconds", 60.0):
+        return None
+    return f"explosion_profit_ladder_{layer}"
+
+
 def evaluate_explosion_exit(
     trade: PaperTrade,
     current_premium: float,
@@ -2368,6 +2418,12 @@ def evaluate_explosion_exit(
     )
     if halve_lock:
         return halve_lock, pnl_inr
+
+    ladder_exit = unified_profit_ladder_exit_reason(
+        trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
+    )
+    if ladder_exit:
+        return ladder_exit, pnl_inr
 
     reversal_keep = peak_velocity_reversal_keep_reason(
         trade, best=best, pnl_pts=pnl_pts, live_velocity_3s=v3,
