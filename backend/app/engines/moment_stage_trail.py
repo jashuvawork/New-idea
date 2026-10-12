@@ -132,8 +132,7 @@ def trade_uses_moment_stage_ladder(trade: PaperTrade) -> bool:
     paper_peak_keep = oct_paper_peak_keep_exit_parity_active()
     if ctx.get("momentStageLadder") or (ctx.get("exitPlan") or {}).get("momentStageLadder"):
         return True
-    if paper_peak_keep and ctx.get("maxProfitCapture"):
-        return True
+    # Oct 1 paper: maxProfitCapture legs still exited via peak-keep — not stage_trail scratches.
     if paper_peak_keep:
         return False
     moment = str(ctx.get("momentType") or "").lower()

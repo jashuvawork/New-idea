@@ -201,6 +201,26 @@ def test_oct_paper_peak_keep_exit_disables_implicit_stage_ladder():
         assert trade_uses_moment_stage_ladder(trade) is False
 
 
+def test_oct_paper_peak_keep_disables_stage_ladder_even_with_max_profit_capture():
+    """Oct 1 winners had maxProfitCapture but paper used peak-keep, not stage_trail."""
+    from types import SimpleNamespace
+
+    from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
+
+    trade = SimpleNamespace(
+        entryContext={
+            "momentType": "first_lift_local_base",
+            "maxProfitCapture": True,
+            "ictFirstLift": True,
+        },
+    )
+    with patch(
+        "app.engines.live_paper_parity.oct_paper_peak_keep_exit_parity_active",
+        return_value=True,
+    ):
+        assert trade_uses_moment_stage_ladder(trade) is False
+
+
 def test_oct_paper_waives_first_lift_quality_near_miss():
     s = _frozen_paper_settings()
     alert = {"tier": "ELITE", "explosionScore": 100.0, "side": "PUT", "strike": 72200.0}
