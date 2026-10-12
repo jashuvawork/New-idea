@@ -311,15 +311,20 @@ def _high_signal_pre_candidate_skip_reason(
                 and depth <= entry_steps
                 and tier_u in ("ELITE", "EXPLODING")
             )
+            from app.engines.live_paper_parity import oct_paper_first_lift_otm_entry_ok
             from app.engines.oct_open_index_flip_otm import oct_open_index_flip_otm_entry_ok
 
             open_flip_otm = oct_open_index_flip_otm_entry_ok(
                 alert, snap, settings=settings,
             )
+            oct_pad_otm = oct_paper_first_lift_otm_entry_ok(
+                alert, depth_steps=depth, settings=settings,
+            )
             if not (
                 coil_moneyness_ok
                 or shallow_elite_ok
                 or open_flip_otm
+                or oct_pad_otm
                 or (
                     (lift_ready or alert_has_early_radar_pad_capture(alert))
                     and pad_shallow_ok
@@ -708,15 +713,20 @@ def _explosion_candidates(
                     and abs(float(runner.strike or 0) - strike_v) <= strike_step(symbol) * 0.51
                 ):
                     shallow_elite_ok = True
+                from app.engines.live_paper_parity import oct_paper_first_lift_otm_entry_ok
                 from app.engines.oct_open_index_flip_otm import oct_open_index_flip_otm_entry_ok
 
                 open_flip_otm = oct_open_index_flip_otm_entry_ok(
                     alert, snap, settings=settings,
                 )
+                oct_pad_otm = oct_paper_first_lift_otm_entry_ok(
+                    alert, depth_steps=depth, settings=settings,
+                )
                 if not (
                     coil_moneyness_ok
                     or shallow_elite_ok
                     or open_flip_otm
+                    or oct_pad_otm
                     or (
                         (lift_ready or alert_has_early_radar_pad_capture(alert))
                         and pad_shallow_ok
