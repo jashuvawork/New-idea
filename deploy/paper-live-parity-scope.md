@@ -72,4 +72,8 @@ When adding gates: mirror **paired** PR behavior (table above), not a new symmet
 
 ## HUD
 
-`GET /api/deployment/status` → `flags.entryGatesMatchPaper`, `flags.tradingRulesMatchPaper`, `livePaperProfile.sizesFromPaperBook`.
+`GET /api/deployment/status` → `flags.entryGatesMatchPaper`, `flags.tradingRulesMatchPaper`, `livePaperProfile.octPaperBehaviorParity`, `livePaperProfile.bookMatchesOctPaperReferenceLots`.
+
+**HUD honesty:** `entryGatesMatchPaper` / `profileOk` mean **parity env + frozen overlay** — not “Oct 1 lot replay.” On **₹50k**, `sizesFromPaperBook` is **false**; pad cap **0.52** still applies unless structural **session_pad** waives (#722). Deploy **`main` past #736 + follow-up** for negative v3, Ichimoku/OTM selector, peak-keep exit, OTM stamp preserve (`explosion_not_tradeable` Oct 9 RCA).
+
+**Not stored on live:** Oct 1/5 paper fills, milestone resets — funnel truth stays in **radar ZIPs** only.

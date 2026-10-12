@@ -3391,20 +3391,33 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
         from app.engines.near_base_session_capture import otm_tradeable_preserved
         from app.engines.open_rip_selector import open_rip_elite_tradeable_preserve
+        from app.engines.live_paper_parity import (
+            oct_paper_structural_pad_context,
+            trading_rules_match_paper,
+        )
 
         open_rip_preserve = open_rip_elite_tradeable_preserve(alert_out, settings=_settings)
-        if open_rip_preserve:
+        oct_paper_otm = trading_rules_match_paper(_settings) and oct_paper_structural_pad_context(
+            alert_out,
+            settings=_settings,
+        )
+        preserve_otm = open_rip_preserve or oct_paper_otm
+        if preserve_otm:
             alert_out["openRipEliteStructural"] = True
+            if oct_paper_otm:
+                alert_out["octPaperOtmStructural"] = True
             tradeable = True
             alert_out["tradeable"] = True
-        if cheap_otm_stack_disabled(_settings) or not otm_tradeable_preserved(
-            alert_out, settings=_settings
+        if not preserve_otm and (
+            cheap_otm_stack_disabled(_settings)
+            or not otm_tradeable_preserved(alert_out, settings=_settings)
         ):
             tradeable = False
             first_lift = False
             alert_out["tradeable"] = False
             alert_out["ictFirstLift"] = False
             alert_out.pop("openRipEliteStructural", None)
+            alert_out.pop("octPaperOtmStructural", None)
     from app.engines.live_entry_score import stamp_alert_live_entry_scores
 
     alert_out = stamp_alert_live_entry_scores(alert_out)

@@ -588,16 +588,42 @@ def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
     s = settings or get_settings()
     parity = live_paper_parity_active(s)
     gates = entry_gates_match_paper(s)
+    rules = trading_rules_match_paper(s)
+    cap_inr = float(getattr(s, "fallback_capital_inr", 0) or 0)
     return {
         "active": parity,
         "entryGatesMatchPaper": gates,
-        "tradingRulesMatchPaper": trading_rules_match_paper(s),
+        "tradingRulesMatchPaper": rules,
+        "bookMatchesOctPaperReferenceLots": cap_inr
+        >= float(getattr(s, "oct_paper_reference_capital_inr", 149_000.0) or 149_000.0),
         "legacyLiveNarrowStackActive": legacy_live_narrow_stack_active(s),
         "liveBestTradesOnlyEnabled": bool(getattr(s, "live_best_trades_only_enabled", True)),
         "worstDayBlocksLive": bool(getattr(s, "worst_day_blocks_live", True)),
         "liveHoldToStructuralSl": bool(getattr(s, "live_hold_to_structural_sl", False)),
         "useUpstoxCapitalForSizing": bool(getattr(s, "use_upstox_capital_for_sizing", False)),
-        "sizesFromPaperBook": gates and not should_use_live_broker_capital_for_summary(s),
+        "sizesFromPaperBook": (
+            gates
+            and not should_use_live_broker_capital_for_summary(s)
+            and cap_inr
+            >= float(getattr(s, "oct_paper_reference_capital_inr", 149_000.0) or 149_000.0)
+        ),
+        "octPaperBehaviorParity": {
+            "negativeVelocityWaiver": bool(
+                getattr(s, "oct_paper_first_lift_negative_velocity_waiver_enabled", True)
+            )
+            and rules,
+            "peakKeepExitParity": oct_paper_peak_keep_exit_parity_active(s),
+            "execStrictBypass": bool(
+                getattr(s, "oct_paper_exec_strict_bypass_enabled", True)
+            )
+            and rules,
+            "structuralPadSelectorWaivers": rules,
+            "otmTradeablePreserveOnStamp": rules,
+        },
+        "parityHudNote": (
+            "entryGatesMatchPaper means parity env flags — not Oct 1 lot-for-lot replay. "
+            "See octPaperBehaviorParity and bookMatchesOctPaperReferenceLots."
+        ),
         "sep917LegacyProfileEnabled": bool(getattr(s, "sep917_legacy_profile_enabled", True)),
         "topMomentsOnlyEnabled": bool(getattr(s, "top_moments_only_enabled", False)),
         "paperSimpleProfitMode": bool(getattr(s, "paper_simple_profit_mode", False)),
