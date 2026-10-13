@@ -4559,16 +4559,25 @@ async def process(
                 getattr(settings, "ftv_ranked_allocation_enabled", True)
             )
             best_only = bool(getattr(settings, "selector_best_only_enabled", True))
+            dual_side = best_only and (
+                getattr(settings, "selector_best_only_dual_side_enabled", False) is True
+            )
+            open_explosive_sides = {
+                trade.side
+                for trade in state.openPaperTrades
+                if trade.strategyType == StrategyType.EXPLOSIVE
+            }
             max_positions = max(
                 1,
                 int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
             )
             if best_only:
-                max_positions = 1
+                max_positions = 2 if dual_side else 1
             # Non-FTV explosions are skipped without consuming a sleeve; inspect
             # enough ranked legs to reach genuine first-lift candidates farther down.
             if best_only:
-                attempt_limit = 1
+                # One side open: walk the ranked list to the best opposite-side leg.
+                attempt_limit = 10 if dual_side and open_explosive_sides else 1
             else:
                 attempt_limit = max_positions * 10 if allocation_enabled else 1
             excluded_keys: set[str] = set()
@@ -4598,6 +4607,23 @@ async def process(
                     f"{float(best.strike):g}"
                 )
                 excluded_keys.add(radar_key)
+                if dual_side and best.mode == "explosion" and any(
+                    trade.side == best.side
+                    for trade in state.openPaperTrades
+                    if trade.strategyType == StrategyType.EXPLOSIVE
+                ):
+                    skipped.append(
+                        {
+                            "symbol": best.symbol,
+                            "side": best.side.value,
+                            "strike": best.strike,
+                            "reason": "best_only_dual_side_same_side_open",
+                            "mode": best.mode,
+                            "score": best.score,
+                            "tier": getattr(best, "tier", None),
+                        }
+                    )
+                    continue
                 best.pretrade_meta = dict(best.pretrade_meta or {})
                 causal_ranking = dict(
                     best.pretrade_meta.get("causalRanking") or {}
@@ -4736,6 +4762,19 @@ async def process(
                         state,
                         allocation_rank,
                     )
+                    if dual_side:
+                        from app.engines.capital_allocator import (
+                            dual_side_allocation,
+                            one_lot_unit_cost_inr,
+                        )
+
+                        allocation = dual_side_allocation(
+                            allocation,
+                            state,
+                            unit_cost_inr=one_lot_unit_cost_inr(
+                                best.symbol, float(best.premium or 0),
+                            ),
+                        )
                     causal_ranking = dict(
                         (best.pretrade_meta or {}).get("causalRanking") or {}
                     )
