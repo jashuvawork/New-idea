@@ -2793,6 +2793,12 @@ class Settings(BaseSettings):
     tier_promotion_pad_chase_min_base_rel_pct: float = 8.0
     # Best-only selector — one top-ranked explosion per radar cycle; rank-1 at selection.
     selector_best_only_enabled: bool = True
+    # CE + PE same session at the same time: while one explosive leg is open, best-only may
+    # open ONE more on the opposite side (never a second same-side leg). The first leg
+    # leaves reserve_pct of the capital base free so the opposite leg can still buy;
+    # the opposite leg uses the remaining book. Reserve only applies with the flag on.
+    selector_best_only_dual_side_enabled: bool = False
+    selector_best_only_dual_side_reserve_pct: float = 0.30
     # Grade-A BUILDING armed_base_option_led_ready on live selector — enter at local
     # base before ELITE/EXPLODING promote (Aug28 NIFTY PUT 24200/24100 ~1h late).
     # Archive week in-window false-start rate ~7.5% (3/40); win rate ~75%.

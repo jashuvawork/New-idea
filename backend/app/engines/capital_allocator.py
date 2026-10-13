@@ -541,6 +541,44 @@ def one_lot_unit_cost_inr(symbol: str, premium: float) -> float:
     return max(0.0, float(premium or 0) * lot_multiplier(symbol))
 
 
+def dual_side_allocation(
+    allocation: RankedAllocation,
+    state: AutoTraderState,
+    *,
+    unit_cost_inr: float,
+) -> RankedAllocation:
+    """Best-only CE+PE book: the first leg leaves a reserve, the opposite leg uses the rest.
+
+    First leg (no explosive open): free cash is cut by
+    ``selector_best_only_dual_side_reserve_pct`` of the capital base so a later
+    opposite-side leg can still buy (never below one lot when one lot is affordable).
+    Opposite leg (one side already open): budget is the whole remaining book.
+    """
+    from dataclasses import replace
+
+    settings = get_settings()
+    explosive_open = any(
+        getattr(t, "strategyType", None) == StrategyType.EXPLOSIVE
+        for t in state.openPaperTrades
+    )
+    remaining = float(allocation.remainingBeforeInr or 0)
+    if explosive_open:
+        return replace(allocation, budgetInr=max(float(allocation.budgetInr or 0), remaining))
+    reserve_pct = max(
+        0.0,
+        min(0.5, float(getattr(settings, "selector_best_only_dual_side_reserve_pct", 0) or 0)),
+    )
+    if reserve_pct <= 0:
+        return allocation
+    reserved = float(allocation.capitalBaseInr or 0) * reserve_pct
+    capped = max(remaining - reserved, min(float(unit_cost_inr or 0), remaining), 0.0)
+    return replace(
+        allocation,
+        budgetInr=min(float(allocation.budgetInr or 0), capped),
+        remainingBeforeInr=capped,
+    )
+
+
 def capital_book_summary(
     state: AutoTraderState,
     *,
