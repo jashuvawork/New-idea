@@ -222,3 +222,53 @@ def test_sensex_opposite_leg_while_sensex_side_open(open_side):
     assert opened == [("SENSEX", OPPOSITE[open_side], 2)]
     reasons = [row.get("reason") for row in state.skipped or []]
     assert "best_only_dual_side_same_side_open" in reasons
+
+
+# --- Opposite leg sized from the real book passes the risk-engine margin cap (both indexes) ---
+
+
+@pytest.mark.parametrize("open_symbol,new_symbol", [
+    ("NIFTY", "NIFTY"), ("NIFTY", "SENSEX"), ("SENSEX", "SENSEX"), ("SENSEX", "NIFTY"),
+])
+@pytest.mark.parametrize("open_side", SIDES)
+def test_opposite_leg_budget_passes_risk_margin_cap(open_side, open_symbol, new_symbol):
+    import app.engines.capital_allocator as ca
+    from app.engines.risk_engine import RiskEngine
+
+    s = Settings(
+        auto_trading_enabled=True,
+        fallback_capital_inr=150_000,
+        max_sizing_capital_inr=150_000,
+        selector_best_only_dual_side_enabled=True,
+    )
+    with patch("app.config.get_settings", lambda: s), patch.object(
+        ca, "get_settings", lambda: s
+    ), patch("app.engines.risk_engine.get_settings", lambda: s), patch.object(
+        ca, "_capital", None
+    ), patch.object(ca, "_manual_capital_limit_inr", None):
+        first_prem, opp_prem = 120.0, 110.0
+        flat = AutoTraderState()
+        a1 = ca.dual_side_allocation(
+            ca.ranked_allocation_for_state(flat, 1), flat,
+            unit_cost_inr=ca.one_lot_unit_cost_inr(open_symbol, first_prem),
+        )
+        lots1 = int(a1.budgetInr // (first_prem * ca.lot_multiplier(open_symbol)))
+        state = AutoTraderState()
+        leg = _open(open_symbol, open_side)
+        leg.entryPremium = leg.currentPremium = first_prem
+        leg.lots = lots1
+        state.openPaperTrades.append(leg)
+
+        lm = ca.lot_multiplier(new_symbol)
+        a2 = ca.dual_side_allocation(
+            ca.ranked_allocation_for_state(state, 2), state,
+            unit_cost_inr=ca.one_lot_unit_cost_inr(new_symbol, opp_prem),
+        )
+        lots2 = int(a2.budgetInr // (opp_prem * lm))
+        fill = opp_prem + s.paper_slippage_entry_points * s.paper_slippage_explosion_mult
+        ok, reason = RiskEngine().check_new_entry(
+            state, new_symbol, OPPOSITE[open_side], lots2, fill, lot_multiplier=lm,
+            strategy_type=StrategyType.EXPLOSIVE, strike=74_000.0, ignore_per_trade_risk_cap=True,
+        )
+    assert lots2 >= 1
+    assert (ok, reason) == (True, "passed")
