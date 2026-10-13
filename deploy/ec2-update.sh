@@ -807,6 +807,10 @@ if [ -f "$REPO_DIR/deploy/apply-live-paper-parity-env.sh" ] && [ -f "$REPO_DIR/d
         echo "${REPO_DIR}/deploy/env.live-50k.overlay"
         return
       fi
+      if grep -q '^CAPITAL_SCALED_RISK_LIMITS_ENABLED=true' "$ENV_FILE" 2>/dev/null; then
+        echo "${REPO_DIR}/deploy/env.live-capital.overlay"
+        return
+      fi
       if [ "$fb" = "100000" ]; then
         echo "${REPO_DIR}/deploy/env.live-100k.overlay"
         return

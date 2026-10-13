@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.engines.capital_allocator import compute_lots
+from app.engines.capital_risk_limits import risk_limit_inr
 from app.engines.explosion_detector import ExplosionEvent
 from app.models.schemas import Breadth, PaperTrade, Side, SpotChart, StrategyType, SuggestedTrade, SymbolSnapshot
 
@@ -2757,7 +2758,7 @@ def _evaluate_explosion_exit_core(
     if (
         not hold_to_sl
         and settings.emergency_stop_enabled
-        and pnl_inr <= -settings.emergency_stop_inr
+        and pnl_inr <= -risk_limit_inr("emergency_stop_inr", settings)
     ):
         return "explosion_emergency_stop", pnl_inr
 

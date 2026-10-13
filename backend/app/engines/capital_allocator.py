@@ -1,9 +1,11 @@
 """Capital allocation from Upstox funds + static daily profit target/trail."""
 
+import json
 import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional, Sequence
 from zoneinfo import ZoneInfo
 
@@ -255,7 +257,10 @@ def _effective_capital_inr(available: float) -> float:
     settings = get_settings()
     cap = settings.max_sizing_capital_inr or settings.fallback_capital_inr
     if _manual_capital_limit_inr is not None:
-        cap = min(cap, _manual_capital_limit_inr) if cap > 0 else _manual_capital_limit_inr
+        if getattr(settings, "capital_scaled_risk_limits_enabled", False) is True:
+            cap = _manual_capital_limit_inr
+        else:
+            cap = min(cap, _manual_capital_limit_inr) if cap > 0 else _manual_capital_limit_inr
     if cap > 0:
         return min(available, cap)
     return available
@@ -946,6 +951,57 @@ def get_capital_snapshot() -> CapitalSnapshot:
     return _build_fallback_capital_snapshot()
 
 
+def manual_capital_limit_inr() -> Optional[float]:
+    return _manual_capital_limit_inr
+
+
+def _manual_capital_path() -> Path:
+    return Path(get_settings().trade_store_dir) / "manual_capital.json"
+
+
+def _env_capital_inr(settings: Any) -> float:
+    return float(settings.max_sizing_capital_inr or settings.fallback_capital_inr or 0)
+
+
+def _persist_manual_capital(value: float) -> None:
+    settings = get_settings()
+    if getattr(settings, "capital_scaled_risk_limits_enabled", False) is not True:
+        return
+    path = _manual_capital_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "allocatedInr": value,
+            "envCapitalInr": _env_capital_inr(settings),
+            "setAt": datetime.now(IST).isoformat(),
+        }))
+    except OSError as exc:
+        logger.warning("Could not persist manual capital: %s", exc)
+
+
+def restore_manual_capital_limit() -> Optional[float]:
+    """Reload the operator's day capital after a restart.
+
+    Only while the env capital is the one it was set against — a go-live / overlay that
+    changes FALLBACK_CAPITAL_INR wins over an older POST /api/capital.
+    """
+    settings = get_settings()
+    if getattr(settings, "capital_scaled_risk_limits_enabled", False) is not True:
+        return None
+    try:
+        saved = json.loads(_manual_capital_path().read_text())
+        value = float(saved.get("allocatedInr") or 0)
+        env_at_save = float(saved.get("envCapitalInr") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    if value <= 0 or abs(env_at_save - _env_capital_inr(settings)) > 1.0:
+        return None
+    global _manual_capital_limit_inr, _capital
+    _manual_capital_limit_inr = value
+    _capital = None
+    return value
+
+
 def set_manual_capital_limit(amount: float) -> CapitalSnapshot:
     """Set the operator sizing ceiling used by every capital calculation."""
     value = float(amount)
@@ -953,6 +1009,7 @@ def set_manual_capital_limit(amount: float) -> CapitalSnapshot:
         raise ValueError("Capital allocation must be positive")
     global _capital, _manual_capital_limit_inr
     _manual_capital_limit_inr = value
+    _persist_manual_capital(value)
     effective = _effective_capital_inr(value)
     settings = get_settings()
     min_l, tgt_l, max_l = _lot_tiers(effective)
@@ -1155,7 +1212,9 @@ def update_daily_profit_gate(
         stages=stages,
     )
 
-    loss_stop = float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
+    from app.engines.capital_risk_limits import risk_limit_inr
+
+    loss_stop = risk_limit_inr("daily_loss_stop_inr", settings)
     if loss_stop > 0 and session_pnl <= -abs(loss_stop):
         if snapshots:
             from app.engines.bad_day_routing import expiry_daily_loss_stop_bypass_active
