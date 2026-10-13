@@ -3623,7 +3623,7 @@ async def _process_open_trades(
                 if exit_reason == "explosion_emergency_stop"
                 else None
             )
-            record_explosion_stop(trade.symbol, cooldown_seconds=cooldown)
+            record_explosion_stop(trade.symbol, cooldown_seconds=cooldown, side=trade.side)
         from app.engines.entry_context import merge_close_context
 
         peak_profit_points = max(0.0, float(trade.maxLtp or 0) - float(trade.entryPremium or 0))

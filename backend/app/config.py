@@ -2048,6 +2048,10 @@ class Settings(BaseSettings):
     explosion_thesis_hold_skip_time_exit: bool = True  # no time_stop once thesis is green
     explosion_reentry_cooldown_seconds: int = 180
     explosion_emergency_cooldown_seconds: int = 300
+    # Oct 13 NIFTY: the 09:27 22300 PE stop put every NIFTY CE (the move's side, +120–311%
+    # MFE) into the 180s cooldown — 1,093 blocks. A stop cools only its own side (CALL or
+    # PUT on that index); the opposite side stays free to take its momentum.
+    explosion_cooldown_per_side_enabled: bool = False
     # A just-captured FTV peak remains exhausted until this exact CE/PE contract
     # builds a fresh post-close base and accelerates again.
     explosion_post_peak_reentry_guard_enabled: bool = True
