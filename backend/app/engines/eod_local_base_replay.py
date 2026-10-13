@@ -849,13 +849,17 @@ def evaluate_replay_live_explosion_gates(
     return True, "ok"
 
 
-def _replay_dual_side_budget(
+def _replay_allocator_budget(
     open_legs: dict[str, tuple[datetime, dict[str, Any]]],
     *,
     symbol: str,
     premium: float,
+    dual_side: bool,
 ) -> float:
-    """Live allocator budget for the next leg given the replay's open legs (entry cost)."""
+    """Live ranked-allocator budget for the next leg given the replay's open legs.
+
+    With ``dual_side`` the best-only CE+PE split applies (first leg keeps the reserve).
+    """
     from app.engines.capital_allocator import (
         dual_side_allocation,
         next_ranked_allocation_rank,
@@ -881,11 +885,13 @@ def _replay_dual_side_budget(
             )
         )
     rank = next_ranked_allocation_rank(state) or (len(open_legs) + 1)
-    allocation = dual_side_allocation(
-        ranked_allocation_for_state(state, rank),
-        state,
-        unit_cost_inr=one_lot_unit_cost_inr(symbol, premium),
-    )
+    allocation = ranked_allocation_for_state(state, rank)
+    if dual_side:
+        allocation = dual_side_allocation(
+            allocation,
+            state,
+            unit_cost_inr=one_lot_unit_cost_inr(symbol, premium),
+        )
     return float(allocation.budgetInr or 0)
 
 
@@ -1463,8 +1469,8 @@ def replay_local_base_day(
             "momentType": classify_top_moment_type(_alert_evidence(alert, snap)),
         }
         budget_inr = (
-            _replay_dual_side_budget(open_legs, symbol=sym, premium=ep)
-            if dual_side
+            _replay_allocator_budget(open_legs, symbol=sym, premium=ep, dual_side=dual_side)
+            if live_book
             else None
         )
         trade = _simulate_trade_from_entry(
@@ -1639,6 +1645,8 @@ def replay_local_base_day(
                 entry_reason=f"anchored:{a.get('source') or 'live'}",
             )
             trade["anchorSource"] = a.get("source")
+            if a.get("dailyLossStopBypass"):
+                trade["dailyLossStopBypass"] = True
             trade["anchorTs"] = a["ts"].strftime("%H:%M:%S")
             a["outcome"] = "entered"
             a["trade"] = trade

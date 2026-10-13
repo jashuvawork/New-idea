@@ -64,6 +64,9 @@ def _settings(profile: str, archives: Path, store: Path):
     env = _overlay_env()
     if profile == "before_oct13":
         env.update(OCT13_FLAGS_OFF)
+    elif profile.startswith("current-"):
+        flag = profile.removeprefix("current-")
+        env[flag] = OCT13_FLAGS_OFF[flag]
     env["EOD_REPLAY_LIVE_EXPLOSION_BOOK_ENABLED"] = "true"
     env["RADAR_ARCHIVE_DIR"] = str(archives)
     env["TRADE_STORE_DIR"] = str(store / profile)
