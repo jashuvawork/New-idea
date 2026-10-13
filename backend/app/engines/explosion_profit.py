@@ -2227,6 +2227,66 @@ def hard_loss_stop_reason(
     return None
 
 
+def breakeven_shakeout_hold(
+    trade: PaperTrade,
+    *,
+    pnl_pts: float,
+    stage_floor: Optional[float],
+    settings: Any = None,
+) -> bool:
+    """Stay in through a pullback to the bare green cushion while the index holds entry.
+
+    Oct 13 NIFTY 22250 CE: a +17.75pt peak against a 75pt stage left only the +1pt
+    cushion as the floor; premium dipped back to entry with NIFTY flat (22509 vs 22512
+    at entry), booked +0.9pt, then ran ~+45pt. The cushion is not a profit lock — no
+    stage was proven — so hold while the index has not broken the entry level against
+    the side (CALL: not below, PUT: not above), and exit once it does or the loss
+    reaches ``breakeven_shakeout_hold_max_loss_pct`` of entry premium.
+    """
+    settings = settings or get_settings()
+    if getattr(settings, "breakeven_shakeout_hold_enabled", False) is not True:
+        return False
+    if stage_floor is None:
+        return False
+    cushion = _cfg_float(settings, "moment_stage_min_remain_points", 1.0)
+    if float(stage_floor) > cushion + 0.01:
+        return False
+    entry = float(trade.entryPremium or 0)
+    if entry <= 0:
+        return False
+    max_loss = entry * _cfg_float(settings, "breakeven_shakeout_hold_max_loss_pct", 4.0) / 100.0
+    if float(pnl_pts or 0) <= -max_loss:
+        return False
+
+    ctx = trade.entryContext or {}
+    spot_entry = float(ctx.get("spotAtEntry") or 0)
+    from app.engines.index_tick_helpers import index_session_extremes
+
+    spot_now = float(index_session_extremes(trade.symbol).get("last") or 0)
+    if spot_entry <= 0 or spot_now <= 0:
+        return False
+    move_pct = (spot_now - spot_entry) / spot_entry * 100.0
+    tol = _cfg_float(settings, "breakeven_shakeout_hold_index_tolerance_pct", 0.05)
+    side = trade.side.value if isinstance(trade.side, Side) else str(trade.side).upper()
+    if side == "CALL":
+        holds = move_pct >= -tol
+    elif side == "PUT":
+        holds = move_pct <= tol
+    else:
+        return False
+    if holds:
+        ctx = dict(ctx)
+        ctx["breakevenShakeoutHold"] = {
+            "spotAtEntry": round(spot_entry, 2),
+            "spot": round(spot_now, 2),
+            "indexMovePct": round(move_pct, 3),
+            "pnlPts": round(float(pnl_pts or 0), 2),
+            "maxLossPts": round(max_loss, 2),
+        }
+        trade.entryContext = ctx
+    return holds
+
+
 def unified_profit_ladder_exit_reason(
     trade: PaperTrade,
     *,
@@ -2714,6 +2774,8 @@ def evaluate_explosion_exit(
             stage_ladder=stage_ladder,
             max_profit=max_profit,
             settings=settings,
+        ) and not breakeven_shakeout_hold(
+            trade, pnl_pts=pnl_pts, stage_floor=stage_floor, settings=settings,
         ):
             return "explosion_stage_trail", pnl_inr
 
