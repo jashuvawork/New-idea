@@ -603,6 +603,12 @@ class Settings(BaseSettings):
     never_green_hard_stop_min_hold_seconds: float = 5.0
     # Any leg (green or not) down this % of entry premium exits immediately. 0 = off.
     catastrophic_loss_stop_pct: float = 0.0
+    # Oct 13 NIFTY 22250 CE: peak +17.75pt (< 75pt stage) left only the +1pt cushion;
+    # booked +0.9pt on a flat-index dip, then the CE ran ~+45pt. Hold the cushion
+    # while the index holds entry (CE: not below / PE: not above, within tolerance).
+    breakeven_shakeout_hold_enabled: bool = False
+    breakeven_shakeout_hold_index_tolerance_pct: float = 0.05
+    breakeven_shakeout_hold_max_loss_pct: float = 4.0
     mid_rip_never_green_grace_seconds: float = 600.0
     # Sep15 NIFTY 23400 PE: ELITE v_rip_session_low at 20–27% off base blocked elite_v_rip_only + local cap.
     elite_mega_vertical_bypass_enabled: bool = True
