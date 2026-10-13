@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.engines.eod_trade_report import (
     _not_post_peak_chase,
     apply_portfolio_limits,
@@ -236,3 +238,24 @@ def test_portfolio_limit_halts_at_daily_loss_stop():
     # After two -6000 legs (cum -12000 <= -10000) the day halts; the later winner is skipped.
     assert len(taken) == 2
     assert sum(t["pnlInr"] for t in taken) == -12_000
+
+
+@pytest.mark.parametrize("side", ["CALL", "PUT"])
+def test_portfolio_limit_expiry_bypass_leg_enters_after_daily_loss_stop(side):
+    bypass = {**_pos(12, 13, side, 90_000), "dailyLossStopBypass": True}
+    cands = [_pos(10, 11, "CALL", -6000), _pos(11, 12, "PUT", -6000), bypass,
+             _pos(12, 13, side, 9000)]
+    s = SimpleNamespace(daily_loss_stop_inr=10_000.0, eod_report_max_concurrent=2,
+                        eod_report_same_side_cap=1, expiry_daily_loss_stop_bypass_enabled=True)
+    taken = apply_portfolio_limits(cands, settings=s)
+    assert [t["pnlInr"] for t in taken] == [-6000, -6000, 90_000]
+
+
+@pytest.mark.parametrize("side", ["CALL", "PUT"])
+def test_portfolio_limit_expiry_bypass_off_keeps_daily_loss_stop(side):
+    bypass = {**_pos(12, 13, side, 90_000), "dailyLossStopBypass": True}
+    cands = [_pos(10, 11, "CALL", -6000), _pos(11, 12, "PUT", -6000), bypass]
+    s = SimpleNamespace(daily_loss_stop_inr=10_000.0, eod_report_max_concurrent=1,
+                        eod_report_same_side_cap=2, expiry_daily_loss_stop_bypass_enabled=False)
+    taken = apply_portfolio_limits(cands, settings=s)
+    assert [t["pnlInr"] for t in taken] == [-6000, -6000]

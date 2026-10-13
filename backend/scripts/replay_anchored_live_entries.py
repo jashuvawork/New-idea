@@ -37,6 +37,7 @@ from replay_current_book_all_sessions import _settings  # noqa: E402
 RANKED_OUT_DEDUPE_SECONDS = 300
 TIER_LOOKBACK_SECONDS = 120
 TIER_RANK = {"WATCH": 1, "BUILDING": 2, "EXPLODING": 3, "ELITE": 4}
+EXPIRY_WEEKDAY = {"NIFTY": 1, "SENSEX": 3}
 RUNS = (
     ("before_oct13", "entered"),
     ("current", "entered"),
@@ -57,6 +58,11 @@ def _ts(raw: Any) -> datetime | None:
         return datetime.fromisoformat(str(raw))
     except ValueError:
         return None
+
+
+def _is_expiry_day(symbol: str, ts: datetime) -> bool:
+    """Weekly expiry by weekday (the tape carries no option expiry); holidays not shifted."""
+    return ts.weekday() == EXPIRY_WEEKDAY.get(symbol.upper(), -1)
 
 
 def _best_recent_tier(seen: list[tuple[datetime, str]], ts: datetime) -> str | None:
@@ -91,6 +97,9 @@ def live_anchors(events: list[dict[str, Any]], *, with_opposite: bool) -> list[d
                 "source": "live_entered",
                 "tradeId": ev.get("tradeId"),
                 "liveGated": True,
+                # Live already judged these top trades; on the expiring index they may
+                # bypass the daily loss stop (expiry_daily_loss_stop_bypass_enabled).
+                "dailyLossStopBypass": _is_expiry_day(str(ev.get("symbol") or ""), ts),
             })
         elif with_opposite and kind == "RANKED_OUT":
             leader_side = str(ev.get("leaderKey") or "::").split(":")[1]
@@ -217,6 +226,12 @@ def main() -> int:
     ap.add_argument("--out", default="/opt/cursor/artifacts/anchored_replay")
     ap.add_argument("--dates", default="")
     ap.add_argument(
+        "--runs",
+        default="",
+        help="profile|variant list; profile current-<FLAG> reverts one Oct 13 flag "
+        "(e.g. current-NEVER_GREEN_HARD_STOP_ENABLED|entered)",
+    )
+    ap.add_argument(
         "--aggregate",
         action="store_true",
         help="only rebuild summary.json from the per-session files already in --out",
@@ -231,6 +246,7 @@ def main() -> int:
     dates = [d for d in args.dates.split(",") if d] or sorted(
         p.stem.replace("radar-", "") for p in archives.glob("radar-*.zip")
     )
+    runs = [tuple(r.split("|", 1)) for r in args.runs.split(",") if r] or list(RUNS)
     rows: list[dict[str, Any]] = []
     if args.aggregate:
         rows = [
@@ -241,7 +257,7 @@ def main() -> int:
         dates = []
     for date in dates:
         events = _funnel_events(archives / f"radar-{date}.zip")
-        for profile, variant in RUNS:
+        for profile, variant in runs:
             day = _run(date, profile, variant, archives, store, events)
             rows.append(day)
             (out / f"{date}.{profile}.{variant}.json").write_text(
@@ -253,6 +269,8 @@ def main() -> int:
                 f"conc={day['concurrentLegs']} {day['outcomes']} ({day['seconds']}s)",
                 flush=True,
             )
+    if args.aggregate:
+        runs = sorted({(r["profile"], r["variant"]) for r in rows})
     summary = {
         "runAt": datetime.now().isoformat(),
         "runs": {
@@ -260,7 +278,7 @@ def main() -> int:
                 [r for r in rows if r["profile"] == profile and r["variant"] == variant
                  and r["status"] == "ok"]
             )
-            for profile, variant in RUNS
+            for profile, variant in runs
         },
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
