@@ -95,10 +95,15 @@ class RiskEngine:
         # mixed NIFTY(75)/SENSEX(20) book computes true exposure.
         from app.engines.capital_allocator import lot_multiplier as _symbol_lot_mult
 
-        exposure = sum(
-            (t.currentPremium or t.entryPremium) * t.lots * _symbol_lot_mult(t.symbol)
-            for t in open_trades
-        )
+        if getattr(settings, "capital_commit_at_entry_cost_enabled", False) is True:
+            from app.engines.capital_allocator import trade_exposure_inr
+
+            exposure = sum(trade_exposure_inr(t) for t in open_trades)
+        else:
+            exposure = sum(
+                (t.currentPremium or t.entryPremium) * t.lots * _symbol_lot_mult(t.symbol)
+                for t in open_trades
+            )
         if exposure + new_exposure > cap.availableMarginInr * 0.98:
             return False, "total_margin_exceeded"
 

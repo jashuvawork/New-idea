@@ -2803,6 +2803,10 @@ class Settings(BaseSettings):
     # the opposite leg uses the remaining book. Reserve only applies with the flag on.
     selector_best_only_dual_side_enabled: bool = False
     selector_best_only_dual_side_reserve_pct: float = 0.30
+    # A long option ties up only the premium paid. On, open legs count at entry cost
+    # (never a winner's mark) in the sizing book and risk-engine margin check, so a CE
+    # runner up 40%+ no longer leaves the opposite PE leg ₹0 (Oct 13 dual-side audit).
+    capital_commit_at_entry_cost_enabled: bool = False
     # Grade-A BUILDING armed_base_option_led_ready on live selector — enter at local
     # base before ELITE/EXPLODING promote (Aug28 NIFTY PUT 24200/24100 ~1h late).
     # Archive week in-window false-start rate ~7.5% (3/40); win rate ~75%.
