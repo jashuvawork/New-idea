@@ -621,6 +621,7 @@ class Settings(BaseSettings):
     # PUT: slide off session high, with aligned RSI / MACD / mom5).
     smart_ichimoku_index_rally_bypass_enabled: bool = False
     deep_itm_runner_pullback_hold_enabled: bool = False
+    # NIFTY premium; × symbol_premium_scale per index (SENSEX ₹300 at the default 3×).
     deep_itm_runner_pullback_hold_min_entry_premium: float = 100.0
     deep_itm_runner_pullback_hold_min_best_pct: float = 5.0
     deep_itm_runner_pullback_hold_max_pullback_pct: float = 8.0
