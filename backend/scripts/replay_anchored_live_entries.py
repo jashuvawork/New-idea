@@ -216,6 +216,11 @@ def main() -> int:
     ap.add_argument("--archives", default="/tmp/hist/zips")
     ap.add_argument("--out", default="/opt/cursor/artifacts/anchored_replay")
     ap.add_argument("--dates", default="")
+    ap.add_argument(
+        "--aggregate",
+        action="store_true",
+        help="only rebuild summary.json from the per-session files already in --out",
+    )
     args = ap.parse_args()
 
     archives = Path(args.archives)
@@ -227,6 +232,13 @@ def main() -> int:
         p.stem.replace("radar-", "") for p in archives.glob("radar-*.zip")
     )
     rows: list[dict[str, Any]] = []
+    if args.aggregate:
+        rows = [
+            json.loads(p.read_text())
+            for p in sorted(out.glob("20*.json"))
+            if p.name.split(".")[0] in dates
+        ]
+        dates = []
     for date in dates:
         events = _funnel_events(archives / f"radar-{date}.zip")
         for profile, variant in RUNS:

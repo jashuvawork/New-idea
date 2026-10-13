@@ -19,6 +19,7 @@ the rolling spot tape so coil-breakout prediction matches live detection/ranking
 
 from __future__ import annotations
 
+import bisect
 import json
 import zipfile
 from collections import defaultdict, deque
@@ -1395,10 +1396,27 @@ def replay_local_base_day(
             a_ts = a_ts.replace(tzinfo=IST) if a_ts.tzinfo is None else a_ts.astimezone(IST)
             anchors.append({**raw, "ts": a_ts, "outcome": None})
         anchors.sort(key=lambda a: a["ts"])
+        batch_times: list[datetime] = []
+        for batch in batches:
+            try:
+                bt = datetime.fromisoformat(str(batch.get("ts") or ""))
+            except ValueError:
+                continue
+            batch_times.append(bt.replace(tzinfo=IST) if bt.tzinfo is None else bt.astimezone(IST))
+        batch_times.sort()
+        # Enter on the tape sample nearest the live fill (the tape can gap for minutes).
+        for a in anchors:
+            i = bisect.bisect_left(batch_times, a["ts"])
+            near = [batch_times[j] for j in (i - 1, i) if 0 <= j < len(batch_times)]
+            best = min(near, key=lambda bt: abs((bt - a["ts"]).total_seconds()), default=None)
+            if best is None or abs((best - a["ts"]).total_seconds()) > anchor_max_lag_seconds:
+                a["outcome"] = "anchor_no_tape_near_entry"
+            else:
+                a["dueTs"] = best
 
     def _block_due_anchors(now: datetime, reason: str) -> None:
         for a in anchors or []:
-            if a["outcome"] is None and a["ts"] <= now:
+            if a["outcome"] is None and a["dueTs"] <= now:
                 a["outcome"] = reason
 
     def _take_trade(
@@ -1537,10 +1555,7 @@ def replay_local_base_day(
         """Enter the live funnel's entries on the replay clock, gated by the current book."""
         taken_sides: set[str] = set()
         for a in anchors or []:
-            if a["outcome"] is not None or a["ts"] > ts:
-                continue
-            if (ts - a["ts"]).total_seconds() > anchor_max_lag_seconds:
-                a["outcome"] = "anchor_no_tape_near_entry"
+            if a["outcome"] is not None or a["dueTs"] > ts:
                 continue
             sym = str(a.get("symbol") or "").upper()
             side = str(a.get("side") or "").upper()

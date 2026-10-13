@@ -178,6 +178,15 @@ def test_anchor_without_tape_near_entry_is_reported(side):
 
 
 @pytest.mark.parametrize("side", ["CALL", "PUT"])
+def test_anchor_enters_on_nearest_tape_sample_across_a_gap(side):
+    gapped = [b for b in _tape(lambda s, i: 100.0 + 0.2 * i) if not ("10:05:10" <= b["ts"][11:19] < "10:08:00")]
+    report = _replay(gapped, [_anchor(side, "10:05:04")], _settings())
+
+    assert _outcomes(report) == [(side, "entered")]
+    assert report["trades"][0]["entryAt"] == "10:05:00"
+
+
+@pytest.mark.parametrize("side", ["CALL", "PUT"])
 def test_exit_walk_sees_tape_index_and_scaled_velocity(side):
     entry = _at("10:00:00")
     forward = [(entry + timedelta(seconds=12 * k), 100.0 + 12.0 * k) for k in range(4)]
