@@ -12,6 +12,7 @@ AUDIT = ROOT / "deploy" / "audit-live-paper-env.sh"
 APPLY = ROOT / "deploy" / "apply-env-overlay.sh"
 RULES = ROOT / "deploy" / "env.october-frozen.overlay"
 LIVE_150K = ROOT / "deploy" / "env.live-150k.overlay"
+LIVE_100K = ROOT / "deploy" / "env.live-100k.overlay"
 
 ARM_PATHS = [
     GO_LIVE,
@@ -26,19 +27,36 @@ def test_arm_live_paths_do_not_purge_trade_logs(path: Path):
     assert "purge-logs" not in path.read_text()
 
 
-@pytest.mark.parametrize("path", ARM_PATHS[1:], ids=lambda p: p.name)
-def test_arm_live_workflows_use_150k_capital(path: Path):
+@pytest.mark.parametrize(
+    "path",
+    [ROOT / ".github" / "workflows" / n for n in ("arm-live-on-push.yml", "deploy-ec2.yml")],
+    ids=lambda p: p.name,
+)
+def test_arm_live_on_push_uses_100k_capital(path: Path):
     text = path.read_text()
-    assert "env.live-150k.overlay" in text
+    assert "LIVE_OVERLAY=deploy/env.live-100k.overlay LIVE_CAPITAL_INR=100000" in text
+    assert "env.live-150k.overlay" not in text
     assert "env.live-50k.overlay" not in text
-    assert "LIVE_CAPITAL_INR=50000" not in text
 
 
-def test_ec2_update_preserves_150k_live_overlay(tmp_path: Path):
+def test_manual_arm_defaults_100k_and_matches_overlay_to_capital():
+    text = (ROOT / ".github" / "workflows" / "arm-live-ec2.yml").read_text()
+    assert 'default: "100000"' in text
+    assert "100000) OVERLAY=env.live-100k.overlay" in text
+    assert "150000) OVERLAY=env.live-150k.overlay" in text
+    assert "LIVE_OVERLAY=deploy/${OVERLAY} LIVE_CAPITAL_INR=${CAP}" in text
+
+
+@pytest.mark.parametrize(
+    "capital,overlay",
+    [("150000", "env.live-150k.overlay"), ("100000", "env.live-100k.overlay"),
+     ("50000", "env.live-50k.overlay")],
+)
+def test_ec2_update_preserves_live_capital_overlay(tmp_path: Path, capital: str, overlay: str):
     script = (ROOT / "deploy" / "ec2-update.sh").read_text()
     fn = script.split("_parity_cap_overlay() {", 1)[1].split("\n  }\n", 1)[0]
     env_file = tmp_path / "env"
-    env_file.write_text("ENABLE_LIVE_TRADING=true\nFALLBACK_CAPITAL_INR=150000\n")
+    env_file.write_text(f"ENABLE_LIVE_TRADING=true\nFALLBACK_CAPITAL_INR={capital}\n")
     out = subprocess.run(
         ["bash", "-c", f'_f() {{{fn}\n}}; _f'],
         env={**os.environ, "ENV_FILE": str(env_file), "REPO_DIR": "/repo"},
@@ -46,7 +64,18 @@ def test_ec2_update_preserves_150k_live_overlay(tmp_path: Path):
         text=True,
         check=True,
     ).stdout.strip()
-    assert out == "/repo/deploy/env.live-150k.overlay"
+    assert out == f"/repo/deploy/{overlay}"
+
+
+def test_live_100k_overlay_scales_risk_to_10pct_daily_stop():
+    vals = dict(
+        line.split("=", 1) for line in LIVE_100K.read_text().splitlines()
+        if line and not line.startswith("#")
+    )
+    assert vals["FALLBACK_CAPITAL_INR"] == "100000"
+    assert vals["MAX_SIZING_CAPITAL_INR"] == "100000"
+    assert vals["DAILY_LOSS_STOP_INR"] == "10000"
+    assert vals["ENABLE_LIVE_TRADING"] == "false"
 
 
 def test_arm_live_audits_env_before_setting_live_flags():
@@ -67,14 +96,15 @@ def test_arm_live_dry_run_reports_audit_and_no_purge():
         check=True,
     ).stdout
     assert "[dry-run] audit" in out
-    assert "env.live-150k.overlay" in out
+    assert "env.live-100k.overlay" in out
+    assert "₹100000" in out
     assert "ENABLE_LIVE_TRADING=true" in out
     assert out.index("[dry-run] audit") < out.index("ENABLE_LIVE_TRADING=true")
 
 
-def _build_env(tmp_path: Path) -> Path:
+def _build_env(tmp_path: Path, capital: Path = LIVE_150K) -> Path:
     env_file = tmp_path / "env"
-    for overlay in (RULES, LIVE_150K):
+    for overlay in (RULES, capital):
         subprocess.run(
             ["bash", str(APPLY), str(overlay)],
             env={**os.environ, "ENV_FILE": str(env_file)},
@@ -84,7 +114,7 @@ def _build_env(tmp_path: Path) -> Path:
     return env_file
 
 
-def _audit(env_file: Path) -> subprocess.CompletedProcess:
+def _audit(env_file: Path, capital: Path = LIVE_150K) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", str(AUDIT)],
         env={
@@ -92,7 +122,7 @@ def _audit(env_file: Path) -> subprocess.CompletedProcess:
             "ENV_FILE": str(env_file),
             "REPO_DIR": str(ROOT),
             "RULES_OVERLAY": str(RULES),
-            "CAPITAL_OVERLAY": str(LIVE_150K),
+            "CAPITAL_OVERLAY": str(capital),
         },
         capture_output=True,
         text=True,
@@ -102,6 +132,12 @@ def _audit(env_file: Path) -> subprocess.CompletedProcess:
 def test_audit_passes_on_frozen_october_plus_live_150k(tmp_path: Path):
     result = _audit(_build_env(tmp_path))
     assert result.returncode == 0, result.stdout
+
+
+def test_audit_passes_on_frozen_october_plus_live_100k(tmp_path: Path):
+    result = _audit(_build_env(tmp_path, LIVE_100K), LIVE_100K)
+    assert result.returncode == 0, result.stdout
+    assert _audit(_build_env(tmp_path / "x", LIVE_150K), LIVE_100K).returncode == 1
 
 
 @pytest.mark.parametrize(

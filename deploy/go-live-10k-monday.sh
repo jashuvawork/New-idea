@@ -19,10 +19,11 @@
 #   ENV_FILE=     Override env path (default /opt/nexusquant/env)
 #   REPO_DIR=     Override repo path (default /opt/nexusquant/New-idea)
 #   RULES_OVERLAY= Frozen October rules (default deploy/env.october-frozen.overlay)
-#   LIVE_OVERLAY= Capital + execution overlay (default deploy/env.live-150k.overlay)
-#   LIVE_CAPITAL_INR= Runtime capital ceiling when arming (default 150000)
+#   LIVE_OVERLAY= Capital + execution overlay (default deploy/env.live-100k.overlay)
+#   LIVE_CAPITAL_INR= Runtime capital ceiling when arming (default 100000)
 #   PAPER_CAPITAL_INR= Paper capital when disarming (default 150000)
 #   PAPER_OVERLAY=  Capital/risk overlay on --paper (default deploy/env.paper-150k.overlay)
+#   ₹1L live (default): LIVE_OVERLAY=deploy/env.live-100k.overlay LIVE_CAPITAL_INR=100000
 #   ₹1.5L live: LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000
 #   ₹50k + Oct frozen: LIVE_OVERLAY=deploy/env.live-50k.overlay LIVE_CAPITAL_INR=50000 \
 #     PAPER_OVERLAY=deploy/env.paper-50k.overlay PAPER_CAPITAL_INR=50000
@@ -43,13 +44,13 @@ fi
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 RULES_OVERLAY="${RULES_OVERLAY:-${REPO_DIR}/deploy/env.october-frozen.overlay}"
-OVERLAY="${LIVE_OVERLAY:-${REPO_DIR}/deploy/env.live-150k.overlay}"
+OVERLAY="${LIVE_OVERLAY:-${REPO_DIR}/deploy/env.live-100k.overlay}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
 STATUS_URL="${STATUS_URL:-http://127.0.0.1:8000/api/deployment/status}"
 READINESS_URL="${READINESS_URL:-http://127.0.0.1:8000/api/deployment/readiness}"
 CAPITAL_URL="${CAPITAL_URL:-http://127.0.0.1:8000/api/auto-trader/capital}"
 PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-150000}"
-LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-150000}"
+LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-100000}"
 PAPER_OVERLAY="${PAPER_OVERLAY:-${REPO_DIR}/deploy/env.paper-150k.overlay}"
 
 MODE=""
@@ -239,7 +240,7 @@ if [ "$MODE" = "arm-live" ]; then
 import json, os, sys
 d = json.load(sys.stdin)
 f = d.get('flags') or {}
-expect_cap = float(os.environ.get('EXPECT_CAPITAL', '150000') or 150000)
+expect_cap = float(os.environ.get('EXPECT_CAPITAL', '100000') or 100000)
 expect_loss = expect_cap * 0.10
 print('  commit:', d.get('commit'))
 if not d.get('commit'):

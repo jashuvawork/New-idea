@@ -162,7 +162,7 @@ jobs:
               "REPO=/opt/nexusquant/New-idea",
               "cd $REPO",
               "curl -sf -X POST http://127.0.0.1:8000/api/execution/stop || true",
-              "sudo LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000 bash deploy/go-live-10k-monday.sh --arm-live || true",
+              "sudo LIVE_OVERLAY=deploy/env.live-100k.overlay LIVE_CAPITAL_INR=100000 bash deploy/go-live-10k-monday.sh --arm-live || true",
               "curl -sf http://127.0.0.1:8000/api/deployment/status | python3 -m json.tool | head -25 || true",
               "curl -sf -X POST http://127.0.0.1:8000/api/execution/resume || true"
             ]' \
