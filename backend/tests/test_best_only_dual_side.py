@@ -111,7 +111,10 @@ def test_dual_side_opens_opposite_leg_and_skips_same_side(open_side):
     opened, state = _run_cycle(state, candidates, _settings(True))
     assert [(s, k) for s, k, _ in opened] == [(other, 22250.0)]
     assert opened[0][2].rank == 2
-    assert opened[0][2].budgetInr == pytest.approx(opened[0][2].remainingBeforeInr)
+    alloc = opened[0][2]
+    assert alloc.budgetInr == pytest.approx(
+        min(alloc.remainingBeforeInr, alloc.capitalBaseInr * 0.95 - alloc.committedInr)
+    )
     reasons = [row.get("reason") for row in state.skipped or []]
     assert "best_only_dual_side_same_side_open" in reasons
 
@@ -160,7 +163,7 @@ def test_first_leg_reserve_and_one_lot_floor():
         assert small.budgetInr == pytest.approx(17_000.0)
 
 
-def test_opposite_leg_uses_whole_remaining_book():
+def test_opposite_leg_uses_remaining_book_below_risk_margin_cap():
     s = Settings(selector_best_only_dual_side_reserve_pct=0.30)
     state = AutoTraderState()
     state.openPaperTrades.append(_open_trade(Side.PUT))
@@ -168,7 +171,7 @@ def test_opposite_leg_uses_whole_remaining_book():
         a = dual_side_allocation(
             _alloc(remaining=45_000.0, budget=4_050.0, rank=2), state, unit_cost_inr=17_000.0,
         )
-    assert a.budgetInr == pytest.approx(45_000.0)
+    assert a.budgetInr == pytest.approx(150_000.0 * 0.95 - 105_000.0)
     assert a.rank == 2
 
 

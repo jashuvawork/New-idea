@@ -2318,7 +2318,12 @@ def deep_itm_runner_pullback_hold(
     entry = float(trade.entryPremium or 0)
     best = float(best or 0)
     pnl = float(pnl_pts or 0)
-    if entry < _cfg_float(settings, "deep_itm_runner_pullback_hold_min_entry_premium", 100.0):
+    from app.engines.symbol_premium_bands import symbol_premium_scale
+
+    min_entry = _cfg_float(
+        settings, "deep_itm_runner_pullback_hold_min_entry_premium", 100.0
+    ) * symbol_premium_scale(trade.symbol, settings)
+    if entry < min_entry:
         return False
     if pnl <= 0 or best <= 0:
         return False

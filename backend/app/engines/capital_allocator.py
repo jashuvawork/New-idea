@@ -545,6 +545,11 @@ def one_lot_unit_cost_inr(symbol: str, premium: float) -> float:
     return max(0.0, float(premium or 0) * lot_multiplier(symbol))
 
 
+# RiskEngine rejects total exposure above 98% of margin; the extra 3% absorbs entry
+# fill slippage so a fine-lot (SENSEX 20) opposite leg sized to the book still passes.
+_OPPOSITE_LEG_MAX_BOOK_USE = 0.95
+
+
 def dual_side_allocation(
     allocation: RankedAllocation,
     state: AutoTraderState,
@@ -556,7 +561,8 @@ def dual_side_allocation(
     First leg (no explosive open): free cash is cut by
     ``selector_best_only_dual_side_reserve_pct`` of the capital base so a later
     opposite-side leg can still buy (never below one lot when one lot is affordable).
-    Opposite leg (one side already open): budget is the whole remaining book.
+    Opposite leg (one side already open): budget is the remaining book, capped at
+    ``_OPPOSITE_LEG_MAX_BOOK_USE`` of the capital base including open legs.
     """
     from dataclasses import replace
 
@@ -567,7 +573,12 @@ def dual_side_allocation(
     )
     remaining = float(allocation.remainingBeforeInr or 0)
     if explosive_open:
-        return replace(allocation, budgetInr=max(float(allocation.budgetInr or 0), remaining))
+        margin_room = max(
+            0.0,
+            float(allocation.capitalBaseInr or 0) * _OPPOSITE_LEG_MAX_BOOK_USE
+            - float(allocation.committedInr or 0),
+        )
+        return replace(allocation, budgetInr=min(remaining, margin_room))
     reserve_pct = max(
         0.0,
         min(0.5, float(getattr(settings, "selector_best_only_dual_side_reserve_pct", 0) or 0)),
