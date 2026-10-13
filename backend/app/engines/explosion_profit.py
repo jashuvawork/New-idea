@@ -578,43 +578,47 @@ def afternoon_capture_peak_halve_lock_reason(
     return None
 
 
-def record_explosion_stop(symbol: str, cooldown_seconds: Optional[int] = None) -> None:
+def _cooldown_key(symbol: str, side: Optional[Side | str]) -> str:
+    """Symbol-wide key, or ``SYMBOL:SIDE`` when a stop only cools its own side."""
     sym = symbol.upper()
-    _explosion_stop_at[sym] = datetime.now(IST)
+    if side is None or getattr(get_settings(), "explosion_cooldown_per_side_enabled", False) is not True:
+        return sym
+    side_v = side.value if isinstance(side, Side) else str(side).upper()
+    return f"{sym}:{side_v}" if side_v in ("CALL", "PUT") else sym
+
+
+def record_explosion_stop(
+    symbol: str,
+    cooldown_seconds: Optional[int] = None,
+    *,
+    side: Optional[Side | str] = None,
+) -> None:
+    key = _cooldown_key(symbol, side)
+    _explosion_stop_at[key] = datetime.now(IST)
     if cooldown_seconds is not None:
-        _explosion_stop_cooldown_sec[sym] = cooldown_seconds
+        _explosion_stop_cooldown_sec[key] = cooldown_seconds
     else:
-        _explosion_stop_cooldown_sec.pop(sym, None)
+        _explosion_stop_cooldown_sec.pop(key, None)
 
 
-def explosion_in_cooldown(symbol: str) -> bool:
+def cooldown_remaining_seconds(symbol: str, side: Optional[Side | str] = None) -> int:
     settings = get_settings()
-    ts = _explosion_stop_at.get(symbol.upper())
-    if not ts:
-        return False
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=IST)
-    elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
-    cooldown = _explosion_stop_cooldown_sec.get(
-        symbol.upper(),
-        int(_cfg_float(settings, "explosion_reentry_cooldown_seconds", 90)),
-    )
-    return elapsed < cooldown
-
-
-def cooldown_remaining_seconds(symbol: str) -> int:
-    settings = get_settings()
-    ts = _explosion_stop_at.get(symbol.upper())
+    key = _cooldown_key(symbol, side)
+    ts = _explosion_stop_at.get(key)
     if not ts:
         return 0
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=IST)
     elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
     cooldown = _explosion_stop_cooldown_sec.get(
-        symbol.upper(),
+        key,
         int(_cfg_float(settings, "explosion_reentry_cooldown_seconds", 90)),
     )
     return max(0, int(cooldown - elapsed))
+
+
+def explosion_in_cooldown(symbol: str, side: Optional[Side | str] = None) -> bool:
+    return cooldown_remaining_seconds(symbol, side) > 0
 
 
 def check_explosion_entry(
@@ -635,8 +639,8 @@ def check_explosion_entry(
     from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
 
     if is_extreme_explosion_all_in_bypass(event=event):
-        if explosion_in_cooldown(event.symbol):
-            return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
+        if explosion_in_cooldown(event.symbol, event.side):
+            return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol, event.side)}s"
         return True, "extreme_all_in_explosion_confirmed"
 
     # Require chart align — but honor the same capture/structure bypasses as
@@ -710,8 +714,8 @@ def check_explosion_entry(
         if blocked:
             return False, reason
 
-    if explosion_in_cooldown(event.symbol):
-        return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
+    if explosion_in_cooldown(event.symbol, event.side):
+        return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol, event.side)}s"
 
     if event.tier not in ("EXPLODING", "ELITE"):
         from app.engines.morning_premium_capture import is_premium_capture_event
