@@ -453,10 +453,10 @@ def _failed_launch_reentry_exit_reasons(settings: Any) -> set[str]:
     raw = getattr(
         settings,
         "explosion_failed_launch_reentry_exit_reasons_csv",
-        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss",
+        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss,explosion_never_green_hard_stop",
     )
     if not isinstance(raw, str) or not raw.strip():
-        raw = "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
+        raw = "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss,explosion_never_green_hard_stop"
     return {part.strip() for part in raw.split(",") if part.strip()}
 
 

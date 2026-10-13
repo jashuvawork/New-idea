@@ -3615,6 +3615,8 @@ async def _process_open_trades(
             "explosion_trail_sl",
             "adaptive_stop_loss",
             "adaptive_trail_sl",
+            "explosion_never_green_hard_stop",
+            "explosion_catastrophic_loss_stop",
         ) and pnl < 0:
             cooldown = (
                 settings.explosion_emergency_cooldown_seconds
