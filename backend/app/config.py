@@ -2175,6 +2175,11 @@ class Settings(BaseSettings):
     eod_replay_structural_gates_enabled: bool = True
     # Optional full validate_candidate stack — heavier; default off.
     eod_replay_pretrade_enabled: bool = False
+    # Replay the live explosion book: check_explosion_entry (chart/breadth/Smart Ichimoku
+    # + index-rally bypass), open-side confirmation, the explosion stop cooldown
+    # (per side when explosion_cooldown_per_side_enabled) and, with
+    # selector_best_only_dual_side_enabled, one leg per side sized like the live allocator.
+    eod_replay_live_explosion_book_enabled: bool = False
     # Full-tape replay tuning (NOT wired to live auto-trader). Profile A/B showed
     # entry caps + legacyBypass blocks drop winners without improving net P&L — keep
     # exit-side fixes in explosion_profit and use these only for explicit research.
