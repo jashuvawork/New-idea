@@ -312,7 +312,11 @@ def trade_exposure_inr(trade: Any) -> float:
     """Cash committed to a long option; a losing mark never frees entry capital."""
     entry_premium = float(getattr(trade, "entryPremium", 0) or 0)
     current_premium = float(getattr(trade, "currentPremium", 0) or 0)
-    premium = max(entry_premium, current_premium)
+    commit_at_entry = getattr(get_settings(), "capital_commit_at_entry_cost_enabled", False)
+    if commit_at_entry is True and entry_premium > 0:
+        premium = entry_premium
+    else:
+        premium = max(entry_premium, current_premium)
     lots = max(0, int(getattr(trade, "lots", 0) or 0))
     symbol = str(getattr(trade, "symbol", "") or "")
     return max(0.0, premium * lots * lot_multiplier(symbol))
