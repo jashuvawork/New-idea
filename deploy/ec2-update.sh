@@ -811,6 +811,10 @@ if [ -f "$REPO_DIR/deploy/apply-live-paper-parity-env.sh" ] && [ -f "$REPO_DIR/d
         echo "${REPO_DIR}/deploy/env.live-capital.overlay"
         return
       fi
+      if [ "$fb" = "100000" ]; then
+        echo "${REPO_DIR}/deploy/env.live-100k.overlay"
+        return
+      fi
       echo "${REPO_DIR}/deploy/env.live-150k.overlay"
       return
     fi

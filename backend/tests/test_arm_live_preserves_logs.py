@@ -51,6 +51,11 @@ def test_manual_arm_takes_any_day_capital():
     [
         ("FALLBACK_CAPITAL_INR=150000\n", "env.live-150k.overlay"),
         ("FALLBACK_CAPITAL_INR=50000\n", "env.live-50k.overlay"),
+        ("FALLBACK_CAPITAL_INR=100000\n", "env.live-100k.overlay"),
+        (
+            "FALLBACK_CAPITAL_INR=100000\nCAPITAL_SCALED_RISK_LIMITS_ENABLED=true\n",
+            "env.live-capital.overlay",
+        ),
         (
             "FALLBACK_CAPITAL_INR=123000\nCAPITAL_SCALED_RISK_LIMITS_ENABLED=true\n",
             "env.live-capital.overlay",
