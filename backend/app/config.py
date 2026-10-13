@@ -3024,6 +3024,12 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
+    # 09:15 → open_caution_until: entry side must be confirmed by today's index tape
+    # (move off session open + side half of session range). Mirrored CE / PE.
+    open_side_confirmation_enabled: bool = False
+    open_side_confirmation_min_minutes: float = 5.0
+    open_side_confirmation_min_index_move_pct: float = 0.10
+    open_side_confirmation_min_range_position: float = 0.6
     open_caution_min_explosion_score: int = 45
     open_caution_score_bonus: int = 0
     open_caution_min_rank_score: float = 55.0

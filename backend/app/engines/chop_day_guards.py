@@ -811,6 +811,17 @@ def _session_side_alignment_hud(
     )
 
 
+def _open_side_confirmation_hud(snapshots: dict[str, SymbolSnapshot]) -> dict[str, Any]:
+    from app.engines.open_side_confirmation import open_side_confirmation_summary
+
+    try:
+        return open_side_confirmation_summary(
+            {s: snap for s, snap in snapshots.items() if snap.dataAvailable}
+        )
+    except Exception:
+        return {"enabled": False, "symbols": {}}
+
+
 def _index_dominant_trend_hud(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
@@ -910,6 +921,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "controlledDailyCapSource": cap_source,
         "whipsawGuards": whipsaw_guard_summary(state, snapshots),
         "directionalLock": directional_lock_summary(snapshots),
+        "openSideConfirmation": _open_side_confirmation_hud(snapshots),
         "indexSessionDominantTrend": _index_dominant_trend_hud(state, snapshots),
         "symmetricBestTradeCapture": bool(
             getattr(settings, "symmetric_best_trade_capture_enabled", True)
