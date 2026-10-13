@@ -13,6 +13,7 @@ from the V-base — premium tape alone was too late.
 
 from __future__ import annotations
 
+import contextvars
 import time
 from collections import defaultdict, deque
 from dataclasses import asdict, dataclass, field
@@ -36,6 +37,9 @@ _ltp_history: dict[str, deque[tuple[float, float]]] = defaultdict(deque)
 # Per-symbol intraday session extremes from the live index tape (no REST lag). Reset daily.
 # {symbol: {"date": date, "open": float, "hi": float, "lo": float, "last": float}}
 _session_extremes: dict[str, dict[str, Any]] = {}
+_replay_session_extremes: contextvars.ContextVar[
+    Optional[dict[str, dict[str, Any]]]
+] = contextvars.ContextVar("replay_session_extremes", default=None)
 # Pending wake flags — building_ltp_monitor_due consumes these.
 _pending_wake_symbols: set[str] = set()
 _observer_registered: bool = False
@@ -43,7 +47,20 @@ _observer_registered: bool = False
 
 def index_session_extremes(symbol: str) -> dict[str, Any]:
     """Live intraday index session open/high/low/last for one symbol (tick-maintained)."""
-    return dict(_session_extremes.get(str(symbol or "").upper()) or {})
+    replay = _replay_session_extremes.get()
+    source = replay if replay is not None else _session_extremes
+    return dict(source.get(str(symbol or "").upper()) or {})
+
+
+def install_replay_session_extremes(
+    extremes: dict[str, dict[str, Any]],
+) -> contextvars.Token:
+    """EOD replay: serve index extremes from the tape in this context only (live untouched)."""
+    return _replay_session_extremes.set(extremes)
+
+
+def restore_replay_session_extremes(token: contextvars.Token) -> None:
+    _replay_session_extremes.reset(token)
 
 
 def _snap_session_extremes(snap: Any) -> tuple[float, float]:
