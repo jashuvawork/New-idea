@@ -609,6 +609,17 @@ class Settings(BaseSettings):
     breakeven_shakeout_hold_enabled: bool = False
     breakeven_shakeout_hold_index_tolerance_pct: float = 0.05
     breakeven_shakeout_hold_max_loss_pct: float = 4.0
+    # Oct 13 NIFTY 22250 CE (entry 264): best +40.8pt, a 305→295 dip (−3% premium) hit the
+    # 75% points-keep floor while NIFTY held entry; the CE then ran to 495. On deep-ITM
+    # premiums a points-keep floor is index noise, so green profit locks defer while the
+    # premium is within max_pullback_pct of its peak, keeps min_keep_ratio of the best,
+    # and the index holds entry (CALL: not below / PUT: not above, within tolerance).
+    deep_itm_runner_pullback_hold_enabled: bool = False
+    deep_itm_runner_pullback_hold_min_entry_premium: float = 100.0
+    deep_itm_runner_pullback_hold_min_best_pct: float = 5.0
+    deep_itm_runner_pullback_hold_max_pullback_pct: float = 8.0
+    deep_itm_runner_pullback_hold_min_keep_ratio: float = 0.35
+    deep_itm_runner_pullback_hold_index_tolerance_pct: float = 0.05
     mid_rip_never_green_grace_seconds: float = 600.0
     # Sep15 NIFTY 23400 PE: ELITE v_rip_session_low at 20–27% off base blocked elite_v_rip_only + local cap.
     elite_mega_vertical_bypass_enabled: bool = True

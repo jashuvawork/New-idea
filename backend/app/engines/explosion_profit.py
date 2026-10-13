@@ -2287,6 +2287,79 @@ def breakeven_shakeout_hold(
     return holds
 
 
+_RUNNER_PULLBACK_HOLD_EXEMPT = frozenset({"explosion_target_hit", "explosion_emergency_stop"})
+
+
+def deep_itm_runner_pullback_hold(
+    trade: PaperTrade,
+    *,
+    reason: Optional[str],
+    best: float,
+    pnl_pts: float,
+    settings: Any = None,
+) -> bool:
+    """Defer a green profit-lock exit on a deep-ITM runner during a shallow pullback.
+
+    Oct 13 NIFTY 22250 CE (entry 264.25): best +40.8pt, then 305→295 (−3% premium) hit
+    the 75% points-keep floor with NIFTY still above entry; the CE ran to 495. Holds
+    only while still green, the premium is within ``max_pullback_pct`` of its peak,
+    ``min_keep_ratio`` of the best gain remains, and the index has not broken the
+    entry level against the side (CALL: not below, PUT: not above).
+    """
+    settings = settings or get_settings()
+    if getattr(settings, "deep_itm_runner_pullback_hold_enabled", False) is not True:
+        return False
+    if not reason or reason in _RUNNER_PULLBACK_HOLD_EXEMPT:
+        return False
+    entry = float(trade.entryPremium or 0)
+    best = float(best or 0)
+    pnl = float(pnl_pts or 0)
+    if entry < _cfg_float(settings, "deep_itm_runner_pullback_hold_min_entry_premium", 100.0):
+        return False
+    if pnl <= 0 or best <= 0:
+        return False
+    if best / entry * 100.0 + 1e-6 < _cfg_float(
+        settings, "deep_itm_runner_pullback_hold_min_best_pct", 5.0
+    ):
+        return False
+    if pnl + 1e-6 < best * _cfg_float(settings, "deep_itm_runner_pullback_hold_min_keep_ratio", 0.35):
+        return False
+    peak = entry + best
+    pullback_pct = (best - pnl) / peak * 100.0
+    if pullback_pct > _cfg_float(settings, "deep_itm_runner_pullback_hold_max_pullback_pct", 8.0):
+        return False
+
+    ctx = trade.entryContext or {}
+    spot_entry = float(ctx.get("spotAtEntry") or 0)
+    from app.engines.index_tick_helpers import index_session_extremes
+
+    spot_now = float(index_session_extremes(trade.symbol).get("last") or 0)
+    if spot_entry <= 0 or spot_now <= 0:
+        return False
+    move_pct = (spot_now - spot_entry) / spot_entry * 100.0
+    tol = _cfg_float(settings, "deep_itm_runner_pullback_hold_index_tolerance_pct", 0.05)
+    side = trade.side.value if isinstance(trade.side, Side) else str(trade.side).upper()
+    if side == "CALL":
+        holds = move_pct >= -tol
+    elif side == "PUT":
+        holds = move_pct <= tol
+    else:
+        return False
+    if holds:
+        ctx = dict(ctx)
+        ctx["runnerPullbackHold"] = {
+            "deferredExit": reason,
+            "pullbackPct": round(pullback_pct, 2),
+            "pnlPts": round(pnl, 2),
+            "bestPts": round(best, 2),
+            "spotAtEntry": round(spot_entry, 2),
+            "spot": round(spot_now, 2),
+            "indexMovePct": round(move_pct, 3),
+        }
+        trade.entryContext = ctx
+    return holds
+
+
 def unified_profit_ladder_exit_reason(
     trade: PaperTrade,
     *,
@@ -2350,6 +2423,33 @@ def evaluate_explosion_exit(
     Explosion exits: hard SL when losing, trailing SL + TP while winning.
     Lets runners extend; locks profit as peak builds.
     """
+    reason, pnl_inr = _evaluate_explosion_exit_core(
+        trade, current_premium, event_tier, lot_multiplier, params,
+        live_velocity_3s=live_velocity_3s,
+    )
+    if reason:
+        from app.engines.moment_stage_trail import effective_best_pnl
+
+        pnl_pts = current_premium - trade.entryPremium
+        if deep_itm_runner_pullback_hold(
+            trade,
+            reason=reason,
+            best=effective_best_pnl(trade, pnl_pts),
+            pnl_pts=pnl_pts,
+        ):
+            return None, pnl_inr
+    return reason, pnl_inr
+
+
+def _evaluate_explosion_exit_core(
+    trade: PaperTrade,
+    current_premium: float,
+    event_tier: str = "EXPLODING",
+    lot_multiplier: int = 25,
+    params: Optional[ExplosionExitParams] = None,
+    *,
+    live_velocity_3s: float = 0.0,
+) -> tuple[Optional[str], float]:
     settings = get_settings()
     from app.engines.risk_stops import live_hold_to_structural_sl
 
