@@ -67,6 +67,10 @@ def _settings(profile: str, archives: Path, store: Path):
     elif profile.startswith("current-"):
         flag = profile.removeprefix("current-")
         env[flag] = OCT13_FLAGS_OFF[flag]
+    elif profile.startswith("current@"):
+        for pair in profile.removeprefix("current@").split("+"):
+            key, _, value = pair.partition("=")
+            env[key] = value
     env["EOD_REPLAY_LIVE_EXPLOSION_BOOK_ENABLED"] = "true"
     env["RADAR_ARCHIVE_DIR"] = str(archives)
     env["TRADE_STORE_DIR"] = str(store / profile)
