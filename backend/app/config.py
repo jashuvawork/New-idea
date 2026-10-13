@@ -614,6 +614,12 @@ class Settings(BaseSettings):
     # premiums a points-keep floor is index noise, so green profit locks defer while the
     # premium is within max_pullback_pct of its peak, keeps min_keep_ratio of the best,
     # and the index holds entry (CALL: not below / PUT: not above, within tolerance).
+    # Oct 13 NIFTY open V-rip: every ELITE score-100 CE (22250–22350, +155–251% MFE) was
+    # gated smart_ichimoku_cloud_below_not_above for 09:17–09:27 while NIFTY ripped off
+    # its session low — the lagging cloud cannot confirm a reversal. Waive the cloud gate
+    # when index_rally_side_flip_bypass confirms the move (CALL: rally off session low,
+    # PUT: slide off session high, with aligned RSI / MACD / mom5).
+    smart_ichimoku_index_rally_bypass_enabled: bool = False
     deep_itm_runner_pullback_hold_enabled: bool = False
     deep_itm_runner_pullback_hold_min_entry_premium: float = 100.0
     deep_itm_runner_pullback_hold_min_best_pct: float = 5.0

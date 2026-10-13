@@ -396,6 +396,14 @@ def ichimoku_break_supports_side(
         return True, "smart_ichimoku_confirm_disabled"
     if snap is None:
         return True, "no_snap"
+    if getattr(settings, "smart_ichimoku_index_rally_bypass_enabled", False) is True:
+        from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
+
+        waived, why, _metrics = index_rally_side_flip_bypass(
+            str(getattr(snap, "symbol", "") or ""), side, snap, settings=settings,
+        )
+        if waived:
+            return True, f"smart_ichimoku_waived_{why}"
     analysis = getattr(snap, "chartAnalysis", None)
     ich = getattr(analysis, "ichimoku", None) if analysis is not None else None
     if not isinstance(ich, dict) or not ich:
