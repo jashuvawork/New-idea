@@ -2183,6 +2183,50 @@ def multiple_touch_fast_fade_exit_reason(
     return "explosion_multiple_fast_fade_lock"
 
 
+def hard_loss_stop_reason(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+    hold_seconds: float,
+    stop_points: float,
+    settings: Any = None,
+) -> Optional[str]:
+    """Stops that no min-hold, defer, or SL-only mode may postpone (CE and PE alike).
+
+    * never-green hard stop — the leg never printed real green and is through its
+      adaptive stop: the entry thesis is wrong, exit now.
+    * catastrophic stop — any leg down ``catastrophic_loss_stop_pct`` of entry premium.
+    """
+    settings = settings or get_settings()
+    entry = float(trade.entryPremium or 0)
+    if entry <= 0:
+        return None
+    pnl_pts = float(pnl_pts or 0)
+    if pnl_pts >= 0:
+        return None
+
+    cat_pct = _cfg_float(settings, "catastrophic_loss_stop_pct", 0.0)
+    if cat_pct > 0 and pnl_pts <= -entry * cat_pct / 100.0:
+        return "explosion_catastrophic_loss_stop"
+
+    if getattr(settings, "never_green_hard_stop_enabled", False) is not True:
+        return None
+    stop_points = float(stop_points or 0)
+    if stop_points <= 0:
+        return None
+    if hold_seconds < _cfg_float(settings, "never_green_hard_stop_min_hold_seconds", 5.0):
+        return None
+    green_max = max(
+        0.5, entry * _cfg_float(settings, "never_green_hard_stop_max_best_pct", 2.0) / 100.0
+    )
+    if float(best or 0) > green_max:
+        return None
+    if pnl_pts <= -stop_points:
+        return "explosion_never_green_hard_stop"
+    return None
+
+
 def unified_profit_ladder_exit_reason(
     trade: PaperTrade,
     *,
@@ -2290,6 +2334,17 @@ def evaluate_explosion_exit(
         trade.entryContext = {}
     if v3 or "liveVelocity3s" not in trade.entryContext:
         trade.entryContext["liveVelocity3s"] = round(v3, 3)
+
+    hard_stop = hard_loss_stop_reason(
+        trade,
+        best=best,
+        pnl_pts=pnl_pts,
+        hold_seconds=hold,
+        stop_points=_effective_stop_points(trade, exit_params.stop_points),
+        settings=settings,
+    )
+    if hard_stop:
+        return hard_stop, pnl_inr
 
     from app.engines.explosion_entry_guards import faded_rip_no_green_exit_reason
 

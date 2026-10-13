@@ -595,6 +595,14 @@ class Settings(BaseSettings):
     # Minimum hold before adaptive SL on executed entries — Sep15 23500 PE exited @77s.
     executed_entry_min_hold_before_loss_seconds: int = 300
     executed_entry_elite_min_hold_before_loss_seconds: int = 600
+    # Hard stops that ignore every min-hold / defer above. Oct 13 NIFTY 22300 PE: ELITE
+    # 600s min-hold kept a never-green ₹68 leg open through its ₹56 stop to ₹15 (−₹37.9k).
+    never_green_hard_stop_enabled: bool = False
+    # "Never green" = best ≤ max(0.5pt, this % of entry premium).
+    never_green_hard_stop_max_best_pct: float = 2.0
+    never_green_hard_stop_min_hold_seconds: float = 5.0
+    # Any leg (green or not) down this % of entry premium exits immediately. 0 = off.
+    catastrophic_loss_stop_pct: float = 0.0
     mid_rip_never_green_grace_seconds: float = 600.0
     # Sep15 NIFTY 23400 PE: ELITE v_rip_session_low at 20–27% off base blocked elite_v_rip_only + local cap.
     elite_mega_vertical_bypass_enabled: bool = True
@@ -3451,7 +3459,8 @@ class Settings(BaseSettings):
     # Exit reasons that arm the cooldown (never-green hard cut often lacks v3<0).
     # adaptive_stop_loss counts only when best ≤ explosion_failed_launch_max_best_points.
     explosion_failed_launch_reentry_exit_reasons_csv: str = (
-        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
+        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss,"
+        "explosion_never_green_hard_stop"
     )
     # Same symbol+side cooldown after a red close that had a material peak (trail giveback).
     peak_fade_same_side_reentry_enabled: bool = True
