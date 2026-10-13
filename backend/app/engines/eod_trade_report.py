@@ -436,6 +436,7 @@ def apply_portfolio_limits(
     """
     s = settings or get_settings()
     daily_stop = _f(getattr(s, "daily_loss_stop_inr", 20_000.0), 20_000.0)
+    expiry_bypass = getattr(s, "expiry_daily_loss_stop_bypass_enabled", True) is True
     max_conc = max(1, int(_f(getattr(s, "eod_report_max_concurrent", 1), 1)))
     same_side_cap = max(1, int(_f(getattr(s, "eod_report_same_side_cap", 2), 2)))
     ordered = sorted(candidates, key=lambda t: t.get("_entryDt") or datetime.now(IST))
@@ -448,7 +449,10 @@ def apply_portfolio_limits(
         xdt = t.get("_exitDt")
         side = str(t.get("side") or "").upper()
         if daily_stop > 0 and cum <= -abs(daily_stop):
-            break  # daily loss stop hit — no more entries today
+            # Daily loss stop hit — only legs flagged for the expiry top-trade bypass
+            # (expiry_daily_loss_stop_bypass_enabled) may still enter.
+            if not (t.get("dailyLossStopBypass") and expiry_bypass):
+                continue
         if edt is not None:
             open_positions = [(xu, sd) for (xu, sd) in open_positions if xu is None or xu > edt]
         if len(open_positions) >= max_conc:

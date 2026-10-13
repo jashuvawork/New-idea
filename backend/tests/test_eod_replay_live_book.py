@@ -165,6 +165,24 @@ def test_symbol_wide_stop_cooldown_blocks_both_sides_when_per_side_off(stopped):
     assert _outcomes(report) == [(stopped, "entered"), (OPPOSITE[stopped], "explosion_cooldown")]
 
 
+@pytest.mark.parametrize("stopped", ["CALL", "PUT"])
+def test_daily_loss_stop_admits_only_expiry_bypass_anchors(stopped):
+    other = OPPOSITE[stopped]
+    bypass = {**_anchor(stopped, "10:20:00"), "dailyLossStopBypass": True}
+    report = _replay(
+        _tape(_crash_side(stopped)),
+        [_anchor(stopped, "10:04:00"), _anchor(other, "10:08:00"), bypass],
+        _settings(daily_loss_stop_inr=100.0, expiry_daily_loss_stop_bypass_enabled=True),
+    )
+
+    assert _outcomes(report) == [
+        (stopped, "entered"),
+        (other, "portfolio_limit_or_daily_loss_stop"),
+        (stopped, "entered"),
+    ]
+    assert [t["anchorTs"] for t in report["trades"]] == ["10:04:00", "10:20:00"]
+
+
 @pytest.mark.parametrize("side", ["CALL", "PUT"])
 def test_anchor_without_tape_near_entry_is_reported(side):
     report = _replay(
