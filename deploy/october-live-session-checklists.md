@@ -20,7 +20,7 @@ Operational checklists for **live and paper** when [`env.october-frozen.overlay`
 | 0.2 | Rules deployed | `commit` on `/api/deployment/status` = merged `main` (includes Oct 1 **pad guard on live+frozen**, #707+). **Do not arm live** if commit is behind `main` or pad/timing parity fixes are missing. |
 | 0.2b | Entry gate parity | When live armed: `flags.entryGatesMatchPaper: true` (paper entry rules on live — Frozen Oct + auto, or explicit parity flags) |
 | 0.3 | Frozen October | `frozenOctoberProfile.profileOk: true`, `cePeSymmetricOk: true` |
-| 0.4 | Parity book | `livePaperProfile.profileOk: true`, `fallbackCapitalInr` = intended (e.g. 150000), `sizesFromPaperBook: true` |
+| 0.4 | Parity book | `livePaperProfile.profileOk: true`, `fallbackCapitalInr` = intended (e.g. 100000), `sizesFromPaperBook: true` at ≥ ₹1.49L (false on ₹1L / ₹50k by design — smaller lots) |
 | 0.5 | Pad guard / Oct paper replica | `octPaperReplicaEnabled: true` (Oct 1/5 radar + selection + entry; pad guard **off** by design) — otherwise `padEntryGuardEnabled: true` |
 | 0.6 | Symmetric capture | `symmetricBestTradeCaptureEnabled`, `indexRallySideFlipEnabled`, `directionalSideLockEnabled` all true |
 | 0.7 | Live vs paper intent | Paper: `enableLiveTrading: false`, `paperTrading: true`. Live: opposite + `readyForLive: true` after arm |
@@ -31,7 +31,7 @@ Operational checklists for **live and paper** when [`env.october-frozen.overlay`
 # EC2
 sudo EXPECT_LIVE=false bash deploy/verify-oct-live-ready.sh
 # After arm-live
-sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=150000 bash deploy/verify-oct-live-ready.sh
+sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=100000 bash deploy/verify-oct-live-ready.sh
 # ₹50k live: CAPITAL_OVERLAY=deploy/env.live-50k.overlay and LIVE_CAPITAL_INR=50000
 ```
 

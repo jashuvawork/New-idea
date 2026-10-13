@@ -6,7 +6,7 @@ on:
       capital_inr:
         description: Live capital ceiling (INR)
         required: false
-        default: "150000"
+        default: "100000"
 
 env:
   AWS_REGION: ap-south-1
@@ -29,6 +29,13 @@ jobs:
         run: |
           set -euo pipefail
           CAP="${{ inputs.capital_inr }}"
+          case "$CAP" in
+            50000) OVERLAY=env.live-50k.overlay ;;
+            100000) OVERLAY=env.live-100k.overlay ;;
+            150000) OVERLAY=env.live-150k.overlay ;;
+            200000) OVERLAY=env.live-200k.overlay ;;
+            *) echo "No live overlay for capital ${CAP}" >&2; exit 1 ;;
+          esac
           CMD_ID=$(aws ssm send-command \
             --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
@@ -42,7 +49,7 @@ jobs:
               \"git pull --ff-only origin main || git reset --hard origin/main\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/execution/stop || true\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/auto-trader/reset || true\",
-              \"sudo LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=${CAP} bash deploy/go-live-10k-monday.sh --arm-live\",
+              \"sudo LIVE_OVERLAY=deploy/${OVERLAY} LIVE_CAPITAL_INR=${CAP} bash deploy/go-live-10k-monday.sh --arm-live\",
               \"curl -sf http://127.0.0.1:8000/api/deployment/status | python3 -m json.tool | head -40\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/execution/resume || true\"
             ]" \

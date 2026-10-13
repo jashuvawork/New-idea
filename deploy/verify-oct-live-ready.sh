@@ -5,7 +5,7 @@
 #   sudo EXPECT_LIVE=false bash deploy/verify-oct-live-ready.sh
 #
 #   # After --arm-live (require readyForLive):
-#   sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=150000 bash deploy/verify-oct-live-ready.sh
+#   sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=100000 bash deploy/verify-oct-live-ready.sh
 #
 #   # From laptop (API only, no env file):
 #   BASE_URL=https://api.jashuvatrade.xyz EXPECT_LIVE=false bash deploy/verify-oct-live-ready.sh
@@ -16,11 +16,14 @@ REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 EXPECT_LIVE="${EXPECT_LIVE:-false}"
-LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-150000}"
-CAPITAL_OVERLAY="${CAPITAL_OVERLAY:-${REPO_DIR}/deploy/env.live-150k.overlay}"
-if [ "$LIVE_CAPITAL_INR" = "200000" ]; then
-  CAPITAL_OVERLAY="${CAPITAL_OVERLAY:-${REPO_DIR}/deploy/env.live-200k.overlay}"
-fi
+LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-100000}"
+case "$LIVE_CAPITAL_INR" in
+  50000) _default_overlay="env.live-50k.overlay" ;;
+  100000) _default_overlay="env.live-100k.overlay" ;;
+  200000) _default_overlay="env.live-200k.overlay" ;;
+  *) _default_overlay="env.live-150k.overlay" ;;
+esac
+CAPITAL_OVERLAY="${CAPITAL_OVERLAY:-${REPO_DIR}/deploy/${_default_overlay}}"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -62,7 +65,7 @@ import json, os, sys
 status = json.load(open(os.path.join(os.environ["TMP"], "status.json")))
 ready = json.load(open(os.path.join(os.environ["TMP"], "readiness.json")))
 expect_live = os.environ.get("EXPECT_LIVE", "false").lower() == "true"
-expect_cap = float(os.environ.get("LIVE_CAPITAL_INR", "150000"))
+expect_cap = float(os.environ.get("LIVE_CAPITAL_INR", "100000"))
 expect_loss = expect_cap * 0.10
 
 commit = status.get("commit")

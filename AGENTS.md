@@ -21,7 +21,7 @@ Reference: `backend/app/engines/index_rally_side_flip.py` (`_call_rally_bypass` 
 
 ## Frozen October (symmetric CE + PE)
 
-For the rest of October, **trading rules** live in one file: [`deploy/env.october-frozen.overlay`](deploy/env.october-frozen.overlay). **Capital** is separate: [`deploy/env.paper-150k.overlay`](deploy/env.paper-150k.overlay) (paper) or [`deploy/env.live-150k.overlay`](deploy/env.live-150k.overlay) (live arm).
+For the rest of October, **trading rules** live in one file: [`deploy/env.october-frozen.overlay`](deploy/env.october-frozen.overlay). **Capital** is separate: [`deploy/env.paper-150k.overlay`](deploy/env.paper-150k.overlay) (paper) or [`deploy/env.live-100k.overlay`](deploy/env.live-100k.overlay) (live arm, ₹1L; `env.live-150k.overlay` for ₹1.5L).
 
 - Do **not** stack reactive gate PRs after bad sessions — edit the frozen overlay + **one PR** only when the stabilization bar is met.
 - Any side-specific gate change requires **CE + PE** paired tests and both bypass paths wired (see table above).
@@ -33,9 +33,9 @@ For the rest of October, **trading rules** live in one file: [`deploy/env.octobe
 1. `main` deployed — `/api/deployment/status` `commit` matches merged `main`.
 2. `sudo bash deploy/verify-oct-live-ready.sh` (or `EXPECT_LIVE=false` before arm).
 3. Upstox OAuth valid (`/api/upstox/login-url` if needed).
-4. `sudo LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000 bash deploy/go-live-10k-monday.sh --prepare`
-5. `sudo LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000 bash deploy/go-live-10k-monday.sh --arm-live` (includes session `reset`).
-6. `sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=150000 bash deploy/verify-oct-live-ready.sh` — `/api/deployment/readiness` `readyForLive: true`.
+4. `sudo LIVE_OVERLAY=deploy/env.live-100k.overlay LIVE_CAPITAL_INR=100000 bash deploy/go-live-10k-monday.sh --prepare`
+5. `sudo LIVE_OVERLAY=deploy/env.live-100k.overlay LIVE_CAPITAL_INR=100000 bash deploy/go-live-10k-monday.sh --arm-live` (includes session `reset`).
+6. `sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=100000 bash deploy/verify-oct-live-ready.sh` — `/api/deployment/readiness` `readyForLive: true`.
 
 After live loss + return to paper: `go-live --paper` **and** `POST /api/auto-trader/reset` so daily loss stop does not block paper entries.
 
