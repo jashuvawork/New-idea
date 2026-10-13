@@ -3433,6 +3433,13 @@ class Settings(BaseSettings):
     # strongest approved contracts first instead of spending the whole book on one leg.
     fallback_capital_inr: float = 200_000
     max_sizing_capital_inr: float = 200_000
+    # Daily budget: the book set via POST /api/capital (or FALLBACK_CAPITAL_INR) is the
+    # sizing capital, and the INR risk limits below follow it as % of that book.
+    capital_scaled_risk_limits_enabled: bool = False
+    daily_loss_stop_capital_pct: float = 10.0
+    emergency_stop_capital_pct: float = 10.0
+    max_risk_per_trade_capital_pct: float = 2.0
+    session_large_loss_pause_capital_pct: float = 4.0
     per_trade_capital_pct: float = 0.90
     ftv_ranked_allocation_enabled: bool = True
     ftv_allocation_weights_csv: str = "0.60,0.25,0.10"

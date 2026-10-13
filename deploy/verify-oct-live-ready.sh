@@ -17,13 +17,7 @@ BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 EXPECT_LIVE="${EXPECT_LIVE:-false}"
 LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-100000}"
-case "$LIVE_CAPITAL_INR" in
-  50000) _default_overlay="env.live-50k.overlay" ;;
-  100000) _default_overlay="env.live-100k.overlay" ;;
-  200000) _default_overlay="env.live-200k.overlay" ;;
-  *) _default_overlay="env.live-150k.overlay" ;;
-esac
-CAPITAL_OVERLAY="${CAPITAL_OVERLAY:-${REPO_DIR}/deploy/${_default_overlay}}"
+CAPITAL_OVERLAY="${CAPITAL_OVERLAY:-${REPO_DIR}/deploy/env.live-capital.overlay}"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -83,6 +77,7 @@ print(f"  livePaperProfileOk: {prof.get('profileOk')}")
 print(f"  enableLiveTrading: {f.get('enableLiveTrading')}")
 print(f"  paperTrading: {f.get('paperTrading')}")
 print(f"  fallbackCapitalInr: {f.get('fallbackCapitalInr')}")
+print(f"  bookCapitalInr: {f.get('bookCapitalInr')}")
 print(f"  dailyLossStopInr: {f.get('dailyLossStopInr')}")
 
 if frozen.get("profileOk") is not True:
@@ -103,7 +98,7 @@ if expect_live:
     if not live or paper:
         print("expected LIVE armed but flags disagree", file=sys.stderr)
         sys.exit(1)
-    cap = float(f.get("fallbackCapitalInr") or 0)
+    cap = float(f.get("bookCapitalInr") or f.get("fallbackCapitalInr") or 0)
     loss = float(f.get("dailyLossStopInr") or 0)
     if abs(cap - expect_cap) > 1:
         print(f"capital {cap} != expected {expect_cap}", file=sys.stderr)

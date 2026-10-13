@@ -3940,7 +3940,9 @@ def _elite_preentry_risk_cap_lots(
     settings: Any,
 ) -> int:
     """Shrink lots so stop×units fits max_risk_per_trade_inr before hard reject."""
-    max_loss = float(getattr(settings, "max_risk_per_trade_inr", 0) or 0)
+    from app.engines.capital_risk_limits import risk_limit_inr
+
+    max_loss = risk_limit_inr("max_risk_per_trade_inr", settings)
     if max_loss <= 0 or stop_points <= 0 or lot_mult <= 0:
         return lots
     from app.engines.risk_engine import profile_stop_points
