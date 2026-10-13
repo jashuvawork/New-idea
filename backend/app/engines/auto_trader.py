@@ -4656,6 +4656,25 @@ async def process(
                         }
                     )
                     break
+                from app.engines.open_side_confirmation import open_side_confirmation
+
+                open_blocked, open_reason, open_meta = open_side_confirmation(
+                    best.symbol, best.side, snapshots.get(best.symbol), settings=settings,
+                )
+                if open_blocked:
+                    skipped.append(
+                        {
+                            "symbol": best.symbol,
+                            "side": best.side.value,
+                            "strike": best.strike,
+                            "reason": open_reason,
+                            "mode": best.mode,
+                            "score": best.score,
+                            "tier": getattr(best, "tier", None),
+                            "openSideConfirmation": open_meta,
+                        }
+                    )
+                    continue
                 if loss_streak_elite_only:
                     elite_ok = (
                         is_large_loss_pause_elite_candidate(best, snapshots)
