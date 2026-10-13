@@ -130,6 +130,37 @@ def test_catastrophic_stop_cuts_any_leg_ce_pe(side):
 
 
 @pytest.mark.parametrize("side", SIDES)
+def test_frozen_grace_holds_early_dip_then_cuts_ce_pe(side):
+    """Sep 24 SENSEX 73800 PE: −36.6pt at 77s on a 145 entry, then +388pt."""
+    s = _settings(never_green_hard_stop_min_hold_seconds=300.0)
+    trade = _oct13(side, seconds=77, current=55.0)
+    assert hard_loss_stop_reason(
+        trade, best=0.15, pnl_pts=-13.25, hold_seconds=77, stop_points=12.29, settings=s,
+    ) is None
+    assert hard_loss_stop_reason(
+        trade, best=0.15, pnl_pts=-13.25, hold_seconds=301, stop_points=12.29, settings=s,
+    ) == "explosion_never_green_hard_stop"
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_frozen_grace_keeps_catastrophic_stop_ce_pe(side):
+    s = _settings(never_green_hard_stop_min_hold_seconds=300.0)
+    trade = _oct13(side, seconds=77, current=45.0)
+    assert hard_loss_stop_reason(
+        trade, best=0.15, pnl_pts=-23.25, hold_seconds=77, stop_points=12.29, settings=s,
+    ) == "explosion_catastrophic_loss_stop"
+
+
+def test_frozen_overlay_never_green_grace():
+    from pathlib import Path
+
+    overlay = Path(__file__).resolve().parents[2] / "deploy" / "env.october-frozen.overlay"
+    text = overlay.read_text()
+    assert "NEVER_GREEN_HARD_STOP_ENABLED=true" in text
+    assert "NEVER_GREEN_HARD_STOP_MIN_HOLD_SECONDS=300" in text
+
+
+@pytest.mark.parametrize("side", SIDES)
 def test_defaults_off_ce_pe(side):
     s = Settings()
     assert s.never_green_hard_stop_enabled is False
