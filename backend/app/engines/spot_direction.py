@@ -90,13 +90,17 @@ def build_spot_chart(
     profile: MarketProfile,
     *,
     indicator_candles_1m: list | None = None,
+    indicator_closes: list[float] | None = None,
 ) -> SpotChart:
     """
     Index chart read from 5m candles: direction, EMA9/21, RSI, MACD.
     RSI/MACD use extended 5m series resampled from 1m when available (MACD warmup).
     """
     opens, _, _, closes = _candle_rows(candles_5m)
-    ind_closes = _indicator_closes(candles_5m, indicator_candles_1m)
+    if indicator_closes:
+        ind_closes = [float(c) for c in indicator_closes]
+    else:
+        ind_closes = _indicator_closes(candles_5m, indicator_candles_1m)
     closes = _patch_live_close(closes, spot)
     ind_closes = _patch_live_close(ind_closes, spot)
 
@@ -295,8 +299,19 @@ def refresh_spot_chart_live(
             )
         return updated
 
+    indicator: list[float] = []
+    if chart_analysis is not None:
+        indicator = list(getattr(chart_analysis, "indicatorCloses", None) or [])
+        if not indicator and isinstance(chart_analysis, dict):
+            indicator = list(chart_analysis.get("indicatorCloses") or [])
+
     candles_5m = _closes_to_synthetic_candles(recent)
-    refreshed = build_spot_chart(candles_5m, live_spot, profile)
+    refreshed = build_spot_chart(
+        candles_5m,
+        live_spot,
+        profile,
+        indicator_closes=indicator if len(indicator) > len(recent) else None,
+    )
     if chart_analysis:
         return reconcile_spot_chart_with_mtf(
             refreshed, chart_analysis, breadth_bias=breadth_bias, from_open_pct=from_open_pct,
