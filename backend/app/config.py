@@ -112,6 +112,15 @@ class Settings(BaseSettings):
     chop_live_armed_base_max_local_pad_pct: float = 20.0
     # Sep917 / Oct paper: v_rip + FTV/V near-base on chop days skip extra live-only hard blocks.
     chop_live_waive_near_base_sep917_shape: bool = True
+    # Chop/WORST intraday CE↔PE flip: surface V/FTV/armed-base on new legs; block extended re-tag chase.
+    chop_worst_flip_capture_enabled: bool = True
+    chop_worst_flip_selector_preserve_enabled: bool = True
+    chop_worst_flip_directional_bypass_enabled: bool = True
+    chop_worst_flip_rank_bonus: float = 18.0
+    chop_worst_flip_rank_flip_bonus: float = 8.0
+    chop_worst_flip_min_velocity_3s: float = 1.2
+    chop_worst_flip_extended_session_move_pct: float = 24.0
+    chop_worst_flip_min_regime_pending: int = 2
     # Sep08: second 23650 PE after morning loss — one explosion attempt per strike after loss.
     session_same_strike_loss_reentry_enabled: bool = True
     session_same_strike_loss_reentry_min_loss_inr: float = 500.0

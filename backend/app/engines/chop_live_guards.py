@@ -379,16 +379,13 @@ def chop_live_entry_blocked(
         return False, "ok", meta
 
     if bool(getattr(settings, "chop_live_waive_near_base_sep917_shape", True)):
-        alert = getattr(candidate, "alert", None)
-        alert_map = alert if isinstance(alert, dict) else {}
-        pretrade = getattr(candidate, "pretrade_meta", None) or {}
-        ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
-        from app.engines.best_trade_policy import symmetric_best_trade_at_base_capture
+        from app.engines.chop_worst_flip_capture import chop_worst_flip_chop_live_waive_ok
 
-        near_ok, near_reason = symmetric_best_trade_at_base_capture(
-            alert_map,
-            alert_map,
-            ranking=ranking if isinstance(ranking, dict) else None,
+        near_ok, near_reason = chop_worst_flip_chop_live_waive_ok(
+            candidate,
+            snap,
+            state,
+            snapshots=snapshots,
             settings=settings,
         )
         if near_ok:

@@ -3396,7 +3396,9 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
             oct_paper_entry_loosening_active,
         )
 
-        open_rip_preserve = open_rip_elite_tradeable_preserve(alert_out, settings=_settings)
+        open_rip_preserve = open_rip_elite_tradeable_preserve(
+            alert_out, settings=_settings, snap=snap,
+        )
         oct_paper_otm = oct_paper_entry_loosening_active(_settings) and oct_paper_structural_pad_context(
             alert_out,
             settings=_settings,
