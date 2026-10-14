@@ -47,6 +47,23 @@ sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=150000 bash deploy/verify-oct-live-ready.
 
 **HUD must show:** `frozenOctoberProfile.profileOk`, `livePaperProfile.profileOk`, `flags.entryGatesMatchPaper: true`, `flags.tradingRulesMatchPaper: true`, `enableLiveTrading: true`, `paperTrading: false`.
 
+## ₹1L live (Frozen Oct + scaled risk)
+
+```bash
+sudo PAPER_OVERLAY=deploy/env.paper-100k.overlay PAPER_CAPITAL_INR=100000 \
+  LIVE_OVERLAY=deploy/env.live-100k.overlay LIVE_CAPITAL_INR=100000 \
+  bash deploy/go-live-10k-monday.sh --prepare
+
+sudo LIVE_OVERLAY=deploy/env.live-100k.overlay LIVE_CAPITAL_INR=100000 \
+  bash deploy/go-live-10k-monday.sh --arm-live
+
+sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=100000 \
+  CAPITAL_OVERLAY=deploy/env.live-100k.overlay \
+  bash deploy/verify-oct-live-ready.sh
+```
+
+Daily loss stop should be **10% of book** (₹10k on ₹1L).
+
 ## ₹50k live (Frozen Oct + scaled risk)
 
 ```bash

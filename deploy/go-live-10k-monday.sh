@@ -26,6 +26,8 @@
 #   ₹1.5L live: LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000
 #   ₹50k + Oct frozen: LIVE_OVERLAY=deploy/env.live-50k.overlay LIVE_CAPITAL_INR=50000 \
 #     PAPER_OVERLAY=deploy/env.paper-50k.overlay PAPER_CAPITAL_INR=50000
+#   ₹1L live: LIVE_OVERLAY=deploy/env.live-100k.overlay LIVE_CAPITAL_INR=100000 \
+#     PAPER_OVERLAY=deploy/env.paper-100k.overlay PAPER_CAPITAL_INR=100000
 #   Small-cap legacy (NOT Oct frozen stack): LIVE_OVERLAY=deploy/env.live-10k.overlay LIVE_CAPITAL_INR=10000
 #
 set -euo pipefail
