@@ -58,6 +58,9 @@ def open_rip_elite_tradeable_preserve(
     alert: Mapping[str, Any],
     *,
     settings: Any = None,
+    snap: SymbolSnapshot | None = None,
+    state: AutoTraderState | None = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
 ) -> bool:
     """
     Sep917 clears OTM tradeable at stamp time — preserve open rip ELITE for selector feed.
@@ -82,6 +85,12 @@ def open_rip_elite_tradeable_preserve(
     )
 
     if oct_paper_entry_loosening_active(s) and oct_paper_structural_pad_context(alert, settings=s):
+        return True
+    from app.engines.chop_worst_flip_capture import chop_worst_flip_selector_preserve
+
+    if snap is not None and chop_worst_flip_selector_preserve(
+        alert, snap, state, snapshots, settings=s,
+    ):
         return True
     try:
         from app.engines.session_timing import in_open_premium_window
@@ -111,7 +120,7 @@ def open_rip_selector_lift_waiver(
     s = settings or get_settings()
     if not isinstance(alert, dict):
         return False
-    if open_rip_elite_tradeable_preserve(alert, settings=s):
+    if open_rip_elite_tradeable_preserve(alert, settings=s, snap=snap, state=state):
         return True
     from app.engines.live_paper_parity import oct_paper_structural_pad_context
 

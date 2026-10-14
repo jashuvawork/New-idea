@@ -2173,6 +2173,9 @@ def find_best_entry(
         from app.engines.index_session_dominant_trend import index_trend_rank_adjustment
 
         c.score += index_trend_rank_adjustment(c, snapshots, state)
+        from app.engines.chop_worst_flip_capture import chop_worst_flip_rank_bonus
+
+        c.score += chop_worst_flip_rank_bonus(c, state, snapshots)
         from app.engines.best_trade_policy import best_trade_base_rank_adjustment
 
         c.score += best_trade_base_rank_adjustment(c)
