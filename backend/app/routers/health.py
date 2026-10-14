@@ -4,6 +4,11 @@ from fastapi import APIRouter
 
 from app.config import audit_week_local_base_overrides, get_settings
 from app.engines.capital_allocator import get_lot_sizes_meta
+from app.engines.capital_risk_limits import (
+    book_capital_inr,
+    capital_risk_limits_summary,
+    risk_limit_inr,
+)
 from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.engines.sep917_legacy_profile import sep917_legacy_profile_summary as _sep917_legacy_profile_summary
 from app.engines.structural_guard_settings import structural_guard_summary
@@ -71,6 +76,16 @@ async def health():
     return {"status": "ok", "loopWatchdog": watchdog_status()}
 
 
+@router.get("/api/deployment/loop-stalls")
+async def loop_stalls(limit: int = 10):
+    """Event-loop stalls (blocked-thread stacks) recorded by the watchdog, newest first."""
+    import asyncio
+
+    from app.loop_watchdog import recent_stalls
+
+    return {"stalls": await asyncio.to_thread(recent_stalls, min(max(limit, 1), 50))}
+
+
 @router.get("/api/deployment/status")
 async def deployment_status():
     from app.loop_watchdog import watchdog_status
@@ -132,10 +147,12 @@ async def deployment_status():
             "perTradeCapitalPct": settings.per_trade_capital_pct,
             "fallbackCapitalInr": settings.fallback_capital_inr,
             "maxSizingCapitalInr": settings.max_sizing_capital_inr,
+            "bookCapitalInr": book_capital_inr(settings),
+            "capitalRiskLimits": capital_risk_limits_summary(settings),
             "aggressiveLotSizing": settings.aggressive_lot_sizing,
             "maxLotsPerTrade": settings.max_lots_per_trade,
             "emergencyStopEnabled": settings.emergency_stop_enabled,
-            "emergencyStopInr": settings.emergency_stop_inr,
+            "emergencyStopInr": risk_limit_inr("emergency_stop_inr", settings),
             "emergencyStopScaleWithPosition": settings.emergency_stop_scale_with_position,
             "scalpStopPoints": settings.scalp_stop_points,
             "explosionInitialStopPoints": settings.explosion_initial_stop_points,
@@ -156,7 +173,7 @@ async def deployment_status():
             "constituentStockBreadthOverrideEnabled": settings.constituent_stock_breadth_override_enabled,
             "indexPinPutBlockEnabled": settings.index_pin_put_block_enabled,
             "indexMomentumEnabled": settings.index_momentum_enabled,
-            "dailyLossStopInr": settings.daily_loss_stop_inr,
+            "dailyLossStopInr": risk_limit_inr("daily_loss_stop_inr", settings),
             "dailyMaxTradesChop": settings.daily_max_trades_chop,
             "primaryWindowStartIst": f"{settings.primary_window_start_hour:02d}:{settings.primary_window_start_minute:02d}",
             "sureShotModeEnabled": settings.sure_shot_mode_enabled,

@@ -26,10 +26,14 @@ class RiskEngine:
 
     @property
     def safe_mode(self) -> bool:
+        from app.engines.capital_risk_limits import risk_limit_inr
+
         settings = get_settings()
-        if settings.emergency_stop_enabled and self._daily_pnl <= -settings.emergency_stop_inr:
+        if settings.emergency_stop_enabled and self._daily_pnl <= -risk_limit_inr(
+            "emergency_stop_inr", settings
+        ):
             return True
-        loss_stop = float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
+        loss_stop = risk_limit_inr("daily_loss_stop_inr", settings)
         if loss_stop > 0 and self._daily_pnl <= -abs(loss_stop):
             return True
         return self.profile.safeMode
@@ -95,10 +99,15 @@ class RiskEngine:
         # mixed NIFTY(75)/SENSEX(20) book computes true exposure.
         from app.engines.capital_allocator import lot_multiplier as _symbol_lot_mult
 
-        exposure = sum(
-            (t.currentPremium or t.entryPremium) * t.lots * _symbol_lot_mult(t.symbol)
-            for t in open_trades
-        )
+        if getattr(settings, "capital_commit_at_entry_cost_enabled", False) is True:
+            from app.engines.capital_allocator import trade_exposure_inr
+
+            exposure = sum(trade_exposure_inr(t) for t in open_trades)
+        else:
+            exposure = sum(
+                (t.currentPremium or t.entryPremium) * t.lots * _symbol_lot_mult(t.symbol)
+                for t in open_trades
+            )
         if exposure + new_exposure > cap.availableMarginInr * 0.98:
             return False, "total_margin_exceeded"
 
@@ -113,7 +122,13 @@ class RiskEngine:
             and not is_swing
         )
         if not ignore_per_trade_risk_cap and not live_structural_hold:
-            max_loss = settings.swing_max_loss_inr if is_swing else settings.max_risk_per_trade_inr
+            from app.engines.capital_risk_limits import risk_limit_inr
+
+            max_loss = (
+                settings.swing_max_loss_inr
+                if is_swing
+                else risk_limit_inr("max_risk_per_trade_inr", settings)
+            )
             if max_loss > 0:
                 stop_pts = max(0.0, float(stop_points or (8.0 if is_swing else 3.0)))
                 potential_loss = profile_stop_points(lots, lot_multiplier, stop_pts)

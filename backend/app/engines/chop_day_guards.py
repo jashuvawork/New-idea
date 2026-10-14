@@ -38,7 +38,9 @@ def record_session_trade_close(pnl_inr: float) -> None:
         return
     _reset_session_if_new_day()
     now = datetime.now(IST)
-    if pnl_inr <= -settings.session_large_loss_pause_inr:
+    from app.engines.capital_risk_limits import risk_limit_inr
+
+    if pnl_inr <= -risk_limit_inr("session_large_loss_pause_inr", settings):
         _large_loss_pause_until = now + timedelta(seconds=settings.session_large_loss_pause_seconds)
     if pnl_inr < -50:
         _session_loss_streak += 1
@@ -811,6 +813,17 @@ def _session_side_alignment_hud(
     )
 
 
+def _open_side_confirmation_hud(snapshots: dict[str, SymbolSnapshot]) -> dict[str, Any]:
+    from app.engines.open_side_confirmation import open_side_confirmation_summary
+
+    try:
+        return open_side_confirmation_summary(
+            {s: snap for s, snap in snapshots.items() if snap.dataAvailable}
+        )
+    except Exception:
+        return {"enabled": False, "symbols": {}}
+
+
 def _index_dominant_trend_hud(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
@@ -910,6 +923,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "controlledDailyCapSource": cap_source,
         "whipsawGuards": whipsaw_guard_summary(state, snapshots),
         "directionalLock": directional_lock_summary(snapshots),
+        "openSideConfirmation": _open_side_confirmation_hud(snapshots),
         "indexSessionDominantTrend": _index_dominant_trend_hud(state, snapshots),
         "symmetricBestTradeCapture": bool(
             getattr(settings, "symmetric_best_trade_capture_enabled", True)

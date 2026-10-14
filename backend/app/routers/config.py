@@ -10,7 +10,13 @@ router = APIRouter(prefix="/api", tags=["config"])
 @router.post("/capital")
 async def set_capital_endpoint(config: CapitalConfig):
     set_capital(config.allocatedInr)
-    return {"status": "ok", **config.model_dump()}
+    from app.engines.capital_risk_limits import capital_risk_limits_summary
+
+    return {
+        "status": "ok",
+        **config.model_dump(),
+        "capitalRiskLimits": capital_risk_limits_summary(),
+    }
 
 
 @router.post("/risk/profile")

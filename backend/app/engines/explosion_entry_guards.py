@@ -377,6 +377,7 @@ def tier_promotion_pad_chase_blocked(
     *,
     ict: Any = None,
     alert: Optional[dict[str, Any]] = None,
+    snap: Any = None,
 ) -> tuple[bool, str]:
     """Block ELITE/EXPLODING entries promoted off the pad without a pad stamp.
 
@@ -407,6 +408,27 @@ def tier_promotion_pad_chase_blocked(
     )
     base_rel = effective_local_base_move_pct(explosion_event, ict)
     if base_rel > threshold + 1e-6:
+        from app.engines.oct_open_index_flip_otm import oct_open_index_flip_pad_chase_waived
+
+        if oct_open_index_flip_pad_chase_waived(
+            resolved,
+            explosion_event,
+            ict,
+            snap,
+            base_rel=base_rel,
+            settings=settings,
+        ):
+            return False, ""
+        from app.engines.live_paper_parity import (
+            oct_paper_structural_pad_context,
+            oct_paper_entry_loosening_active,
+        )
+
+        if oct_paper_entry_loosening_active(settings) and oct_paper_structural_pad_context(
+            resolved,
+            settings=settings,
+        ):
+            return False, ""
         return True, f"tier_promotion_pad_chase_blocked_{base_rel:.1f}%"
     return False, ""
 
@@ -418,6 +440,8 @@ def explosion_entry_window_blocked(
     top_must_take: bool = False,
     squeeze_early_base: bool = False,
     bullish_local_base: bool = False,
+    alert: Optional[dict[str, Any]] = None,
+    snap: Any = None,
 ) -> tuple[bool, str]:
     """Hard-block EXPLOSIVE entries outside the active early window.
 
@@ -515,9 +539,43 @@ def explosion_entry_window_blocked(
     # Primary: local pad / off-low — never day% when a pad exists.
     pad = effective_local_base_move_pct(explosion_event, ict)
     if pad > 0:
-        if pad < lo:
+        effective_lo = lo
+        if alert is not None:
+            from app.engines.live_paper_parity import (
+                oct_paper_first_lift_entry_window_lo_relax,
+            )
+
+            effective_lo = oct_paper_first_lift_entry_window_lo_relax(
+                alert,
+                default_lo=lo,
+                settings=settings,
+            )
+            if snap is not None:
+                from app.engines.oct_open_index_flip_otm import (
+                    oct_open_index_flip_entry_window_lo_relax,
+                )
+
+                effective_lo = oct_open_index_flip_entry_window_lo_relax(
+                    alert,
+                    snap,
+                    explosion_event,
+                    default_lo=effective_lo,
+                    settings=settings,
+                )
+        if pad < effective_lo:
             return True, f"entry_window_local_low_{pad:.0f}%"
-        if pad > hi:
+        effective_hi = hi
+        if alert is not None:
+            from app.engines.live_paper_parity import (
+                oct_paper_first_lift_entry_window_hi_relax,
+            )
+
+            effective_hi = oct_paper_first_lift_entry_window_hi_relax(
+                alert,
+                default_hi=hi,
+                settings=settings,
+            )
+        if pad > effective_hi:
             return True, f"entry_window_local_high_{pad:.0f}%"
         return False, ""
 
@@ -1190,13 +1248,16 @@ def _near_strike_armed_alert_active(
     tier = str(alert.get("tier") or "").upper()
     if tier not in ("ELITE", "EXPLODING"):
         return False
+    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
+
     money = str(alert.get("moneyness") or "").upper()
-    if money == "OTM":
+    excluded = near_strike_waiver_excluded_moneyness()
+    if money == excluded:
         return False
     steps = float(alert.get("strikeStepsFromAtm") or 0)
     if steps > max_steps + 1e-6:
         return False
-    if steps <= 0 and money != "ATM":
+    if steps <= 0 and (excluded == "ITM" or money != "ATM"):
         return False
     return bool(
         alert.get("ictArmedBaseLaunch")
@@ -1265,6 +1326,9 @@ def deep_itm_near_strike_substitute_blocked(
     max_otm = int(
         getattr(s, "explosion_deep_itm_substitute_near_strike_max_steps", 2) or 2
     )
+    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
+
+    excluded_alt = near_strike_waiver_excluded_moneyness(s)
     for alt in snap.explosionAlerts or []:
         if str(alt.get("side") or "").upper() != side_v:
             continue
@@ -1272,7 +1336,7 @@ def deep_itm_near_strike_substitute_blocked(
         if alt_strike <= 0:
             continue
         _, alt_money, _ = _strike_depth(side, alt_strike, snap)
-        if alt_money not in ("ATM", "ITM"):
+        if alt_money == excluded_alt or alt_money not in ("ATM", "ITM", "OTM"):
             continue
         alt_depth, _, _ = _strike_depth(side, alt_strike, snap)
         if alt_depth > max_otm:

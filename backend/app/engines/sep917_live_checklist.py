@@ -490,9 +490,9 @@ def sep917_live_checklist_entry_blocked(
     """Hard gate: explosion entries must pass the Sep 9–17 four-step checklist."""
     settings = settings or get_settings()
     meta: dict[str, Any] = {"sep917Enforcement": True}
-    from app.engines.live_paper_parity import trading_rules_match_paper
+    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
 
-    if trading_rules_match_paper(settings):
+    if oct_paper_entry_loosening_active(settings):
         meta["sep917Enforcement"] = False
         meta["octPaperSep917ChecklistSkipped"] = True
         return False, "", meta

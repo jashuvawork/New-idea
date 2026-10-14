@@ -202,9 +202,9 @@ def _high_signal_pre_candidate_skip_reason(
     )
     oct_first_lift_pad = False
     if isinstance(alert, dict):
-        from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+        from app.engines.live_paper_parity import oct_paper_structural_pad_context
 
-        oct_first_lift_pad = oct_paper_first_lift_small_lift_context(
+        oct_first_lift_pad = oct_paper_structural_pad_context(
             alert,
             settings=settings,
             readiness_reason=first_lift_readiness_reason,
@@ -311,9 +311,20 @@ def _high_signal_pre_candidate_skip_reason(
                 and depth <= entry_steps
                 and tier_u in ("ELITE", "EXPLODING")
             )
+            from app.engines.live_paper_parity import oct_paper_first_lift_otm_entry_ok
+            from app.engines.oct_open_index_flip_otm import oct_open_index_flip_otm_entry_ok
+
+            open_flip_otm = oct_open_index_flip_otm_entry_ok(
+                alert, snap, settings=settings,
+            )
+            oct_pad_otm = oct_paper_first_lift_otm_entry_ok(
+                alert, depth_steps=depth, settings=settings,
+            )
             if not (
                 coil_moneyness_ok
                 or shallow_elite_ok
+                or open_flip_otm
+                or oct_pad_otm
                 or (
                     (lift_ready or alert_has_early_radar_pad_capture(alert))
                     and pad_shallow_ok
@@ -444,7 +455,12 @@ def _building_aligned_ict_alert_ok(
     # GainzAlgo-style Smart Ichimoku break-P on index chart.
     from app.engines.smart_ichimoku import ichimoku_break_supports_side
 
-    ok, _ = ichimoku_break_supports_side(Side(side_raw), snap, require_confirmed=True)
+    ok, _ = ichimoku_break_supports_side(
+        Side(side_raw),
+        snap,
+        require_confirmed=True,
+        alert=alert if isinstance(alert, dict) else None,
+    )
     return ok
 
 
@@ -541,9 +557,9 @@ def _explosion_candidates(
         )
         oct_first_lift_pad = False
         if isinstance(alert, dict):
-            from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+            from app.engines.live_paper_parity import oct_paper_structural_pad_context
 
-            oct_first_lift_pad = oct_paper_first_lift_small_lift_context(
+            oct_first_lift_pad = oct_paper_structural_pad_context(
                 alert,
                 settings=settings,
                 readiness_reason=first_lift_readiness_reason,
@@ -702,9 +718,20 @@ def _explosion_candidates(
                     and abs(float(runner.strike or 0) - strike_v) <= strike_step(symbol) * 0.51
                 ):
                     shallow_elite_ok = True
+                from app.engines.live_paper_parity import oct_paper_first_lift_otm_entry_ok
+                from app.engines.oct_open_index_flip_otm import oct_open_index_flip_otm_entry_ok
+
+                open_flip_otm = oct_open_index_flip_otm_entry_ok(
+                    alert, snap, settings=settings,
+                )
+                oct_pad_otm = oct_paper_first_lift_otm_entry_ok(
+                    alert, depth_steps=depth, settings=settings,
+                )
                 if not (
                     coil_moneyness_ok
                     or shallow_elite_ok
+                    or open_flip_otm
+                    or oct_pad_otm
                     or (
                         (lift_ready or alert_has_early_radar_pad_capture(alert))
                         and pad_shallow_ok
@@ -871,7 +898,26 @@ def _explosion_candidates(
                 candlestick_ok = ftv_candlestick_chart_bypass(
                     side_v, snap, alert=alert,
                 )
-                if not local_base_ok and not pad_lane_ok and not grade_a_ok and not candlestick_ok:
+                oct_chart_ok = False
+                from app.engines.live_paper_parity import (
+                    oct_paper_structural_pad_context,
+                    oct_paper_entry_loosening_active,
+                )
+
+                if oct_paper_entry_loosening_active(settings):
+
+                    oct_chart_ok = oct_paper_structural_pad_context(
+                        alert,
+                        settings=settings,
+                        readiness_reason=first_lift_readiness_reason,
+                    )
+                if (
+                    not local_base_ok
+                    and not pad_lane_ok
+                    and not grade_a_ok
+                    and not candlestick_ok
+                    and not oct_chart_ok
+                ):
                     _maybe_record_high_signal_explosion_skip(
                         symbol, alert, "chart_not_aligned",
                     )
@@ -1235,6 +1281,7 @@ def _explosion_candidates(
             event,
             ict=ict,
             alert=alert,
+            snap=snap,
         )
         if chase_blocked and not first_lift_ready and not early_pad:
             continue
@@ -1254,9 +1301,13 @@ def _explosion_candidates(
         from app.engines.advanced_indicators import squeeze_early_base_active
 
         window_blocked, _window_reason = explosion_entry_window_blocked(
-            event, ict=ict, top_must_take=must_take,
+            event,
+            ict=ict,
+            top_must_take=must_take,
             squeeze_early_base=squeeze_early_base_active(event, snap),
             bullish_local_base=bool(bullish_base.get("active")),
+            alert=alert if isinstance(alert, dict) else None,
+            snap=snap,
         )
         if window_blocked and not first_lift_ready:
             continue
@@ -2380,7 +2431,7 @@ def find_best_entry(
             kept_candidates.append(c)
             continue
         if ranking.get("grade") == "REJECT":
-            from app.engines.live_paper_parity import trading_rules_match_paper
+            from app.engines.live_paper_parity import oct_paper_entry_loosening_active
             from app.engines.trade_ranking import selector_rejection_reason
 
             tier_u = str(
@@ -2402,7 +2453,7 @@ def find_best_entry(
 
             rank_evidence = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
             oct_keep = (
-                trading_rules_match_paper(settings)
+                oct_paper_entry_loosening_active(settings)
                 and tier_u in ("ELITE", "EXPLODING")
                 and expl_score >= min_score - 1e-6
             ) or oct_paper_elite_rip_context(

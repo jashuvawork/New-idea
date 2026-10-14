@@ -5,7 +5,7 @@
 #   sudo EXPECT_LIVE=false bash deploy/verify-oct-live-ready.sh
 #
 #   # After --arm-live (require readyForLive):
-#   sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=150000 bash deploy/verify-oct-live-ready.sh
+#   sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=100000 bash deploy/verify-oct-live-ready.sh
 #
 #   # From laptop (API only, no env file):
 #   BASE_URL=https://api.jashuvatrade.xyz EXPECT_LIVE=false bash deploy/verify-oct-live-ready.sh
@@ -16,11 +16,8 @@ REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 EXPECT_LIVE="${EXPECT_LIVE:-false}"
-LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-150000}"
-CAPITAL_OVERLAY="${CAPITAL_OVERLAY:-${REPO_DIR}/deploy/env.live-150k.overlay}"
-if [ "$LIVE_CAPITAL_INR" = "200000" ]; then
-  CAPITAL_OVERLAY="${CAPITAL_OVERLAY:-${REPO_DIR}/deploy/env.live-200k.overlay}"
-fi
+LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-100000}"
+CAPITAL_OVERLAY="${CAPITAL_OVERLAY:-${REPO_DIR}/deploy/env.live-capital.overlay}"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -62,7 +59,7 @@ import json, os, sys
 status = json.load(open(os.path.join(os.environ["TMP"], "status.json")))
 ready = json.load(open(os.path.join(os.environ["TMP"], "readiness.json")))
 expect_live = os.environ.get("EXPECT_LIVE", "false").lower() == "true"
-expect_cap = float(os.environ.get("LIVE_CAPITAL_INR", "150000"))
+expect_cap = float(os.environ.get("LIVE_CAPITAL_INR", "100000"))
 expect_loss = expect_cap * 0.10
 
 commit = status.get("commit")
@@ -80,6 +77,7 @@ print(f"  livePaperProfileOk: {prof.get('profileOk')}")
 print(f"  enableLiveTrading: {f.get('enableLiveTrading')}")
 print(f"  paperTrading: {f.get('paperTrading')}")
 print(f"  fallbackCapitalInr: {f.get('fallbackCapitalInr')}")
+print(f"  bookCapitalInr: {f.get('bookCapitalInr')}")
 print(f"  dailyLossStopInr: {f.get('dailyLossStopInr')}")
 
 if frozen.get("profileOk") is not True:
@@ -88,9 +86,11 @@ if frozen.get("profileOk") is not True:
 if prof.get("profileOk") is not True:
     print("live paper profile issues:", prof.get("profileIssues"), file=sys.stderr)
     sys.exit(1)
-if not frozen.get("padEntryGuardEnabled"):
+if not frozen.get("padEntryGuardEnabled") and not frozen.get("octPaperReplicaEnabled"):
     print("pad entry guard disabled", file=sys.stderr)
     sys.exit(1)
+if frozen.get("octPaperReplicaEnabled"):
+    print("  octPaperReplicaEnabled: True (Oct 1/5 radar+selection+entry; pad guard off by design)")
 
 live = bool(f.get("enableLiveTrading"))
 paper = bool(f.get("paperTrading"))
@@ -98,7 +98,7 @@ if expect_live:
     if not live or paper:
         print("expected LIVE armed but flags disagree", file=sys.stderr)
         sys.exit(1)
-    cap = float(f.get("fallbackCapitalInr") or 0)
+    cap = float(f.get("bookCapitalInr") or f.get("fallbackCapitalInr") or 0)
     loss = float(f.get("dailyLossStopInr") or 0)
     if abs(cap - expect_cap) > 1:
         print(f"capital {cap} != expected {expect_cap}", file=sys.stderr)

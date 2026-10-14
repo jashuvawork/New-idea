@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.engines.capital_allocator import compute_lots
+from app.engines.capital_risk_limits import risk_limit_inr
 from app.engines.explosion_detector import ExplosionEvent
 from app.models.schemas import Breadth, PaperTrade, Side, SpotChart, StrategyType, SuggestedTrade, SymbolSnapshot
 
@@ -578,43 +579,47 @@ def afternoon_capture_peak_halve_lock_reason(
     return None
 
 
-def record_explosion_stop(symbol: str, cooldown_seconds: Optional[int] = None) -> None:
+def _cooldown_key(symbol: str, side: Optional[Side | str]) -> str:
+    """Symbol-wide key, or ``SYMBOL:SIDE`` when a stop only cools its own side."""
     sym = symbol.upper()
-    _explosion_stop_at[sym] = datetime.now(IST)
+    if side is None or getattr(get_settings(), "explosion_cooldown_per_side_enabled", False) is not True:
+        return sym
+    side_v = side.value if isinstance(side, Side) else str(side).upper()
+    return f"{sym}:{side_v}" if side_v in ("CALL", "PUT") else sym
+
+
+def record_explosion_stop(
+    symbol: str,
+    cooldown_seconds: Optional[int] = None,
+    *,
+    side: Optional[Side | str] = None,
+) -> None:
+    key = _cooldown_key(symbol, side)
+    _explosion_stop_at[key] = datetime.now(IST)
     if cooldown_seconds is not None:
-        _explosion_stop_cooldown_sec[sym] = cooldown_seconds
+        _explosion_stop_cooldown_sec[key] = cooldown_seconds
     else:
-        _explosion_stop_cooldown_sec.pop(sym, None)
+        _explosion_stop_cooldown_sec.pop(key, None)
 
 
-def explosion_in_cooldown(symbol: str) -> bool:
+def cooldown_remaining_seconds(symbol: str, side: Optional[Side | str] = None) -> int:
     settings = get_settings()
-    ts = _explosion_stop_at.get(symbol.upper())
-    if not ts:
-        return False
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=IST)
-    elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
-    cooldown = _explosion_stop_cooldown_sec.get(
-        symbol.upper(),
-        int(_cfg_float(settings, "explosion_reentry_cooldown_seconds", 90)),
-    )
-    return elapsed < cooldown
-
-
-def cooldown_remaining_seconds(symbol: str) -> int:
-    settings = get_settings()
-    ts = _explosion_stop_at.get(symbol.upper())
+    key = _cooldown_key(symbol, side)
+    ts = _explosion_stop_at.get(key)
     if not ts:
         return 0
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=IST)
     elapsed = (datetime.now(IST) - ts.astimezone(IST)).total_seconds()
     cooldown = _explosion_stop_cooldown_sec.get(
-        symbol.upper(),
+        key,
         int(_cfg_float(settings, "explosion_reentry_cooldown_seconds", 90)),
     )
     return max(0, int(cooldown - elapsed))
+
+
+def explosion_in_cooldown(symbol: str, side: Optional[Side | str] = None) -> bool:
+    return cooldown_remaining_seconds(symbol, side) > 0
 
 
 def check_explosion_entry(
@@ -635,8 +640,8 @@ def check_explosion_entry(
     from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
 
     if is_extreme_explosion_all_in_bypass(event=event):
-        if explosion_in_cooldown(event.symbol):
-            return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
+        if explosion_in_cooldown(event.symbol, event.side):
+            return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol, event.side)}s"
         return True, "extreme_all_in_explosion_confirmed"
 
     # Require chart align — but honor the same capture/structure bypasses as
@@ -710,8 +715,8 @@ def check_explosion_entry(
         if blocked:
             return False, reason
 
-    if explosion_in_cooldown(event.symbol):
-        return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol)}s"
+    if explosion_in_cooldown(event.symbol, event.side):
+        return False, f"explosion_cooldown_{cooldown_remaining_seconds(event.symbol, event.side)}s"
 
     if event.tier not in ("EXPLODING", "ELITE"):
         from app.engines.morning_premium_capture import is_premium_capture_event
@@ -2183,6 +2188,238 @@ def multiple_touch_fast_fade_exit_reason(
     return "explosion_multiple_fast_fade_lock"
 
 
+def hard_loss_stop_reason(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+    hold_seconds: float,
+    stop_points: float,
+    settings: Any = None,
+) -> Optional[str]:
+    """Stops that no min-hold, defer, or SL-only mode may postpone (CE and PE alike).
+
+    * never-green hard stop — the leg never printed real green and is through its
+      adaptive stop: the entry thesis is wrong, exit now.
+    * catastrophic stop — any leg down ``catastrophic_loss_stop_pct`` of entry premium.
+    """
+    settings = settings or get_settings()
+    entry = float(trade.entryPremium or 0)
+    if entry <= 0:
+        return None
+    pnl_pts = float(pnl_pts or 0)
+    if pnl_pts >= 0:
+        return None
+
+    cat_pct = _cfg_float(settings, "catastrophic_loss_stop_pct", 0.0)
+    if cat_pct > 0 and pnl_pts <= -entry * cat_pct / 100.0:
+        return "explosion_catastrophic_loss_stop"
+
+    if getattr(settings, "never_green_hard_stop_enabled", False) is not True:
+        return None
+    stop_points = float(stop_points or 0)
+    if stop_points <= 0:
+        return None
+    if hold_seconds < _cfg_float(settings, "never_green_hard_stop_min_hold_seconds", 5.0):
+        return None
+    green_max = max(
+        0.5, entry * _cfg_float(settings, "never_green_hard_stop_max_best_pct", 2.0) / 100.0
+    )
+    if float(best or 0) > green_max:
+        return None
+    if pnl_pts <= -stop_points:
+        return "explosion_never_green_hard_stop"
+    return None
+
+
+def breakeven_shakeout_hold(
+    trade: PaperTrade,
+    *,
+    pnl_pts: float,
+    stage_floor: Optional[float],
+    settings: Any = None,
+) -> bool:
+    """Stay in through a pullback to the bare green cushion while the index holds entry.
+
+    Oct 13 NIFTY 22250 CE: a +17.75pt peak against a 75pt stage left only the +1pt
+    cushion as the floor; premium dipped back to entry with NIFTY flat (22509 vs 22512
+    at entry), booked +0.9pt, then ran ~+45pt. The cushion is not a profit lock — no
+    stage was proven — so hold while the index has not broken the entry level against
+    the side (CALL: not below, PUT: not above), and exit once it does or the loss
+    reaches ``breakeven_shakeout_hold_max_loss_pct`` of entry premium.
+    """
+    settings = settings or get_settings()
+    if getattr(settings, "breakeven_shakeout_hold_enabled", False) is not True:
+        return False
+    if stage_floor is None:
+        return False
+    cushion = _cfg_float(settings, "moment_stage_min_remain_points", 1.0)
+    if float(stage_floor) > cushion + 0.01:
+        return False
+    entry = float(trade.entryPremium or 0)
+    if entry <= 0:
+        return False
+    max_loss = entry * _cfg_float(settings, "breakeven_shakeout_hold_max_loss_pct", 4.0) / 100.0
+    if float(pnl_pts or 0) <= -max_loss:
+        return False
+
+    ctx = trade.entryContext or {}
+    spot_entry = float(ctx.get("spotAtEntry") or 0)
+    from app.engines.index_tick_helpers import index_session_extremes
+
+    spot_now = float(index_session_extremes(trade.symbol).get("last") or 0)
+    if spot_entry <= 0 or spot_now <= 0:
+        return False
+    move_pct = (spot_now - spot_entry) / spot_entry * 100.0
+    tol = _cfg_float(settings, "breakeven_shakeout_hold_index_tolerance_pct", 0.05)
+    side = trade.side.value if isinstance(trade.side, Side) else str(trade.side).upper()
+    if side == "CALL":
+        holds = move_pct >= -tol
+    elif side == "PUT":
+        holds = move_pct <= tol
+    else:
+        return False
+    if holds:
+        ctx = dict(ctx)
+        ctx["breakevenShakeoutHold"] = {
+            "spotAtEntry": round(spot_entry, 2),
+            "spot": round(spot_now, 2),
+            "indexMovePct": round(move_pct, 3),
+            "pnlPts": round(float(pnl_pts or 0), 2),
+            "maxLossPts": round(max_loss, 2),
+        }
+        trade.entryContext = ctx
+    return holds
+
+
+_RUNNER_PULLBACK_HOLD_EXEMPT = frozenset({"explosion_target_hit", "explosion_emergency_stop"})
+
+
+def deep_itm_runner_pullback_hold(
+    trade: PaperTrade,
+    *,
+    reason: Optional[str],
+    best: float,
+    pnl_pts: float,
+    settings: Any = None,
+) -> bool:
+    """Defer a green profit-lock exit on a deep-ITM runner during a shallow pullback.
+
+    Oct 13 NIFTY 22250 CE (entry 264.25): best +40.8pt, then 305→295 (−3% premium) hit
+    the 75% points-keep floor with NIFTY still above entry; the CE ran to 495. Holds
+    only while still green, the premium is within ``max_pullback_pct`` of its peak,
+    ``min_keep_ratio`` of the best gain remains, and the index has not broken the
+    entry level against the side (CALL: not below, PUT: not above).
+    """
+    settings = settings or get_settings()
+    if getattr(settings, "deep_itm_runner_pullback_hold_enabled", False) is not True:
+        return False
+    if not reason or reason in _RUNNER_PULLBACK_HOLD_EXEMPT:
+        return False
+    entry = float(trade.entryPremium or 0)
+    best = float(best or 0)
+    pnl = float(pnl_pts or 0)
+    from app.engines.symbol_premium_bands import symbol_premium_scale
+
+    min_entry = _cfg_float(
+        settings, "deep_itm_runner_pullback_hold_min_entry_premium", 100.0
+    ) * symbol_premium_scale(trade.symbol, settings)
+    if entry < min_entry:
+        return False
+    if pnl <= 0 or best <= 0:
+        return False
+    if best / entry * 100.0 + 1e-6 < _cfg_float(
+        settings, "deep_itm_runner_pullback_hold_min_best_pct", 5.0
+    ):
+        return False
+    if pnl + 1e-6 < best * _cfg_float(settings, "deep_itm_runner_pullback_hold_min_keep_ratio", 0.35):
+        return False
+    peak = entry + best
+    pullback_pct = (best - pnl) / peak * 100.0
+    if pullback_pct > _cfg_float(settings, "deep_itm_runner_pullback_hold_max_pullback_pct", 8.0):
+        return False
+
+    ctx = trade.entryContext or {}
+    spot_entry = float(ctx.get("spotAtEntry") or 0)
+    from app.engines.index_tick_helpers import index_session_extremes
+
+    spot_now = float(index_session_extremes(trade.symbol).get("last") or 0)
+    if spot_entry <= 0 or spot_now <= 0:
+        return False
+    move_pct = (spot_now - spot_entry) / spot_entry * 100.0
+    tol = _cfg_float(settings, "deep_itm_runner_pullback_hold_index_tolerance_pct", 0.05)
+    side = trade.side.value if isinstance(trade.side, Side) else str(trade.side).upper()
+    if side == "CALL":
+        holds = move_pct >= -tol
+    elif side == "PUT":
+        holds = move_pct <= tol
+    else:
+        return False
+    if holds:
+        ctx = dict(ctx)
+        ctx["runnerPullbackHold"] = {
+            "deferredExit": reason,
+            "pullbackPct": round(pullback_pct, 2),
+            "pnlPts": round(pnl, 2),
+            "bestPts": round(best, 2),
+            "spotAtEntry": round(spot_entry, 2),
+            "spot": round(spot_now, 2),
+            "indexMovePct": round(move_pct, 3),
+        }
+        trade.entryContext = ctx
+    return holds
+
+
+def unified_profit_ladder_exit_reason(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+    hold_seconds: float,
+    live_velocity_3s: float = 0.0,
+) -> Optional[str]:
+    """Book when P&L breaks the unified ladder floor, or on an N× fast fade.
+
+    Same rule for CALL and PUT. A hot tick (v3 ≥ +2) defers one evaluation but never
+    lowers the floor; the ratchet in ``profit_ladder_floor`` only moves up.
+    """
+    settings = get_settings()
+    from app.engines.moment_stage_trail import profit_ladder_floor
+
+    ladder = profit_ladder_floor(trade, best, settings=settings)
+    if ladder is None:
+        return None
+    floor_pts, layer = ladder
+    pnl_pts = float(pnl_pts or 0)
+    if pnl_pts <= 0:
+        return None
+    live_v3, _ = _live_premium_heat(trade, live_velocity_3s=live_velocity_3s)
+    if live_v3 >= _cfg_float(settings, "unified_profit_ladder_hot_defer_velocity_3s", 2.0):
+        return None
+
+    if layer == "multiple":
+        entry = float(trade.entryPremium or 0)
+        peak_ltp = max(float(trade.maxLtp or 0), entry + float(best or 0))
+        min_gb = max(
+            _cfg_float(settings, "unified_profit_ladder_multiple_min_giveback_points", 3.0),
+            peak_ltp
+            * _cfg_float(settings, "unified_profit_ladder_multiple_min_giveback_pct_of_peak", 5.0)
+            / 100.0,
+        )
+        fade_v = _cfg_float(settings, "unified_profit_ladder_fast_fade_velocity_3s", 2.0)
+        if float(best or 0) - pnl_pts + 1e-6 >= min_gb and live_v3 <= -fade_v:
+            return "explosion_profit_ladder_multiple_fast_fade"
+        if pnl_pts <= floor_pts + 1e-6:
+            return "explosion_profit_ladder_multiple"
+        return None
+
+    if pnl_pts > floor_pts + 1e-6:
+        return None
+    if hold_seconds < _cfg_float(settings, "unified_profit_ladder_min_hold_seconds", 60.0):
+        return None
+    return f"explosion_profit_ladder_{layer}"
+
+
 def evaluate_explosion_exit(
     trade: PaperTrade,
     current_premium: float,
@@ -2196,6 +2433,33 @@ def evaluate_explosion_exit(
     Explosion exits: hard SL when losing, trailing SL + TP while winning.
     Lets runners extend; locks profit as peak builds.
     """
+    reason, pnl_inr = _evaluate_explosion_exit_core(
+        trade, current_premium, event_tier, lot_multiplier, params,
+        live_velocity_3s=live_velocity_3s,
+    )
+    if reason:
+        from app.engines.moment_stage_trail import effective_best_pnl
+
+        pnl_pts = current_premium - trade.entryPremium
+        if deep_itm_runner_pullback_hold(
+            trade,
+            reason=reason,
+            best=effective_best_pnl(trade, pnl_pts),
+            pnl_pts=pnl_pts,
+        ):
+            return None, pnl_inr
+    return reason, pnl_inr
+
+
+def _evaluate_explosion_exit_core(
+    trade: PaperTrade,
+    current_premium: float,
+    event_tier: str = "EXPLODING",
+    lot_multiplier: int = 25,
+    params: Optional[ExplosionExitParams] = None,
+    *,
+    live_velocity_3s: float = 0.0,
+) -> tuple[Optional[str], float]:
     settings = get_settings()
     from app.engines.risk_stops import live_hold_to_structural_sl
 
@@ -2240,6 +2504,17 @@ def evaluate_explosion_exit(
         trade.entryContext = {}
     if v3 or "liveVelocity3s" not in trade.entryContext:
         trade.entryContext["liveVelocity3s"] = round(v3, 3)
+
+    hard_stop = hard_loss_stop_reason(
+        trade,
+        best=best,
+        pnl_pts=pnl_pts,
+        hold_seconds=hold,
+        stop_points=_effective_stop_points(trade, exit_params.stop_points),
+        settings=settings,
+    )
+    if hard_stop:
+        return hard_stop, pnl_inr
 
     from app.engines.explosion_entry_guards import faded_rip_no_green_exit_reason
 
@@ -2369,6 +2644,12 @@ def evaluate_explosion_exit(
     if halve_lock:
         return halve_lock, pnl_inr
 
+    ladder_exit = unified_profit_ladder_exit_reason(
+        trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
+    )
+    if ladder_exit:
+        return ladder_exit, pnl_inr
+
     reversal_keep = peak_velocity_reversal_keep_reason(
         trade, best=best, pnl_pts=pnl_pts, live_velocity_3s=v3,
     )
@@ -2477,7 +2758,7 @@ def evaluate_explosion_exit(
     if (
         not hold_to_sl
         and settings.emergency_stop_enabled
-        and pnl_inr <= -settings.emergency_stop_inr
+        and pnl_inr <= -risk_limit_inr("emergency_stop_inr", settings)
     ):
         return "explosion_emergency_stop", pnl_inr
 
@@ -2603,6 +2884,8 @@ def evaluate_explosion_exit(
             stage_ladder=stage_ladder,
             max_profit=max_profit,
             settings=settings,
+        ) and not breakeven_shakeout_hold(
+            trade, pnl_pts=pnl_pts, stage_floor=stage_floor, settings=settings,
         ):
             return "explosion_stage_trail", pnl_inr
 

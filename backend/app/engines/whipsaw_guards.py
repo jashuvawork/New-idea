@@ -313,9 +313,9 @@ def check_session_whipsaw_pause(
     if not settings.whipsaw_guards_enabled:
         return False, "ok", {}
 
-    from app.engines.live_paper_parity import trading_rules_match_paper
+    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
 
-    if trading_rules_match_paper(settings):
+    if oct_paper_entry_loosening_active(settings):
         return False, "oct_paper_whipsaw_skipped", {"octPaperWhipsawSkipped": True}
 
     if momentum_rally_bypass_whipsaw(snapshots):

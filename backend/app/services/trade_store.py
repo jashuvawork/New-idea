@@ -1,9 +1,11 @@
 """Persistent trade storage — daily JSON archives + append-only trade log for paper and live."""
 
+import copy
 import json
 import logging
 import os
 import re
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -74,22 +76,73 @@ def _day_file(date: str) -> Path:
     return get_store_dir() / f"{date}.json"
 
 
-def _load_day(date: str) -> dict[str, Any]:
-    path = _day_file(date)
-    if not path.exists():
-        return {"date": date, "trades": [], "events": [], "summary": {}}
+# Session gates read today's record dozens of times per trader pass on the event loop, so
+# disk reads must not happen per call. Single-process write-through cache, revalidated
+# against the file's (mtime_ns, size) at most every _CACHE_REVALIDATE_SECONDS.
+_CACHE_REVALIDATE_SECONDS = 30.0
+_day_cache: dict[str, tuple[Optional[tuple[int, int]], float, dict[str, Any]]] = {}
+_session_reset_cache: dict[str, Any] = {}
+
+
+def _file_sig(path: Path) -> Optional[tuple[int, int]]:
     try:
-        return json.loads(path.read_text())
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def reset_trade_store_cache() -> None:
+    _day_cache.clear()
+    _session_reset_cache.clear()
+
+
+def _empty_day(date: str) -> dict[str, Any]:
+    return {"date": date, "trades": [], "events": [], "summary": {}}
+
+
+def _read_day_from_disk(date: str) -> tuple[Optional[tuple[int, int]], dict[str, Any]]:
+    path = _day_file(date)
+    sig = _file_sig(path)
+    if sig is None:
+        return None, _empty_day(date)
+    try:
+        return sig, json.loads(path.read_text())
     except Exception as e:
         logger.warning("Failed to load trades for %s: %s", date, e)
-        return {"date": date, "trades": [], "events": [], "summary": {}}
+        return sig, _empty_day(date)
+
+
+def _load_day_shared(date: str) -> dict[str, Any]:
+    """Cached day record shared between callers — treat as read-only."""
+    key = f"{get_store_dir()}|{date}"
+    now = time.monotonic()
+    cached = _day_cache.get(key)
+    if cached is not None:
+        sig, checked_at, data = cached
+        if now - checked_at < _CACHE_REVALIDATE_SECONDS:
+            return data
+        if _file_sig(_day_file(date)) == sig:
+            _day_cache[key] = (sig, now, data)
+            return data
+    sig, data = _read_day_from_disk(date)
+    if len(_day_cache) > 16:
+        _day_cache.clear()
+    _day_cache[key] = (sig, now, data)
+    return data
+
+
+def _load_day(date: str) -> dict[str, Any]:
+    return copy.deepcopy(_load_day_shared(date))
 
 
 def _save_day(date: str, data: dict[str, Any]) -> None:
     path = _day_file(date)
     tmp = path.with_suffix(f"{path.suffix}.tmp")
-    tmp.write_text(json.dumps(data, indent=2, default=str))
+    text = json.dumps(data, indent=2, default=str)
+    tmp.write_text(text)
     os.replace(tmp, path)
+    _day_cache[f"{get_store_dir()}|{date}"] = (_file_sig(path), time.monotonic(), json.loads(text))
 
 
 def _enum_val(value: Any) -> Any:
@@ -658,8 +711,8 @@ def get_history(days: int = 30) -> list[dict[str, Any]]:
 
 
 def get_day_detail(date: str) -> dict[str, Any]:
-    """Full trade + event log for a specific day."""
-    return _load_day(date)
+    """Full trade + event log for a specific day (cached, shared — do not mutate)."""
+    return _load_day_shared(date)
 
 
 def get_all_closed_trades(limit: int = 200) -> list[dict[str, Any]]:
@@ -729,6 +782,7 @@ def purge_all_trade_data() -> dict[str, Any]:
         except OSError as e:
             logger.warning("Failed to remove %s: %s", session_meta, e)
 
+    reset_trade_store_cache()
     _append_log("PURGE_ALL", {"removedFiles": len(removed), "storeDir": str(store)})
     logger.warning("Purged all trade data — %d paths touched", len(removed))
     return {
@@ -755,12 +809,31 @@ def set_session_reset_at(ts: Optional[datetime] = None) -> str:
     ts = ts or _now()
     meta = {"lastResetAt": ts.isoformat(), "sessionDate": _today()}
     _session_meta_path().write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    _session_reset_cache.clear()
     return meta["lastResetAt"]
 
 
 def get_session_reset_at() -> Optional[datetime]:
-    """Last manual/session reset time, or None if never reset today."""
+    """Last manual/session reset time, or None if never reset today (cached, see _day_cache)."""
     path = _session_meta_path()
+    key = (str(path), _today())
+    now = time.monotonic()
+    cached = _session_reset_cache.get("entry")
+    if cached is not None and cached[0] == key:
+        _, sig, checked_at, value, log_sig = cached
+        if now - checked_at < _CACHE_REVALIDATE_SECONDS:
+            return value
+        if _file_sig(path) == sig and _file_sig(get_log_path()) == log_sig:
+            _session_reset_cache["entry"] = (key, sig, now, value, log_sig)
+            return value
+    sig = _file_sig(path)
+    log_sig = _file_sig(get_log_path())
+    value = _read_session_reset_at(path)
+    _session_reset_cache["entry"] = (key, sig, now, value, log_sig)
+    return value
+
+
+def _read_session_reset_at(path: Path) -> Optional[datetime]:
     if path.exists():
         try:
             meta = json.loads(path.read_text(encoding="utf-8"))
@@ -965,7 +1038,7 @@ def load_open_trades() -> list[dict[str, Any]]:
 
 def count_today_trades() -> dict[str, int]:
     """Quick counts for readiness dashboard."""
-    data = _load_day(_today())
+    data = _load_day_shared(_today())
     trades = data.get("trades", [])
     return {
         "open": len([t for t in trades if t.get("status") == "OPEN"]),

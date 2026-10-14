@@ -19,10 +19,12 @@
 #   ENV_FILE=     Override env path (default /opt/nexusquant/env)
 #   REPO_DIR=     Override repo path (default /opt/nexusquant/New-idea)
 #   RULES_OVERLAY= Frozen October rules (default deploy/env.october-frozen.overlay)
-#   LIVE_OVERLAY= Capital + execution overlay (default deploy/env.live-150k.overlay)
-#   LIVE_CAPITAL_INR= Runtime capital ceiling when arming (default 150000)
+#   LIVE_OVERLAY= Capital + execution overlay (default deploy/env.live-capital.overlay)
+#   LIVE_CAPITAL_INR= Day capital when arming — any amount ≥ 45000 (default 100000); risk
+#                    limits follow it as % of the book (env.live-capital.overlay)
 #   PAPER_CAPITAL_INR= Paper capital when disarming (default 150000)
 #   PAPER_OVERLAY=  Capital/risk overlay on --paper (default deploy/env.paper-150k.overlay)
+#   Any day budget (default): LIVE_CAPITAL_INR=120000 (env.live-capital.overlay)
 #   ₹1.5L live: LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000
 #   ₹50k + Oct frozen: LIVE_OVERLAY=deploy/env.live-50k.overlay LIVE_CAPITAL_INR=50000 \
 #     PAPER_OVERLAY=deploy/env.paper-50k.overlay PAPER_CAPITAL_INR=50000
@@ -45,13 +47,13 @@ fi
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 RULES_OVERLAY="${RULES_OVERLAY:-${REPO_DIR}/deploy/env.october-frozen.overlay}"
-OVERLAY="${LIVE_OVERLAY:-${REPO_DIR}/deploy/env.live-150k.overlay}"
+OVERLAY="${LIVE_OVERLAY:-${REPO_DIR}/deploy/env.live-capital.overlay}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
 STATUS_URL="${STATUS_URL:-http://127.0.0.1:8000/api/deployment/status}"
 READINESS_URL="${READINESS_URL:-http://127.0.0.1:8000/api/deployment/readiness}"
 CAPITAL_URL="${CAPITAL_URL:-http://127.0.0.1:8000/api/auto-trader/capital}"
 PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-150000}"
-LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-150000}"
+LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-100000}"
 PAPER_OVERLAY="${PAPER_OVERLAY:-${REPO_DIR}/deploy/env.paper-150k.overlay}"
 
 MODE=""
@@ -87,6 +89,16 @@ fi
 if [ "$MODE" != "paper" ] && [ ! -f "$OVERLAY" ] && [ "$MODE" = "arm-live" ]; then
   echo "ERROR: capital overlay not found at $OVERLAY" >&2
   exit 1
+fi
+SCALED_CAPITAL_OVERLAY=0
+if grep -q '^CAPITAL_SCALED_RISK_LIMITS_ENABLED=true' "$OVERLAY" 2>/dev/null; then
+  SCALED_CAPITAL_OVERLAY=1
+fi
+if [ "$MODE" = "arm-live" ] && [ "$SCALED_CAPITAL_OVERLAY" -eq 1 ]; then
+  if ! [[ "$LIVE_CAPITAL_INR" =~ ^[0-9]+$ ]] || [ "$LIVE_CAPITAL_INR" -lt 45000 ]; then
+    echo "ERROR: LIVE_CAPITAL_INR must be a whole rupee amount ≥ 45000 (got '$LIVE_CAPITAL_INR')" >&2
+    exit 1
+  fi
 fi
 
 _set_env_key() {
@@ -128,6 +140,11 @@ if [ "$MODE" != "paper" ]; then
     _apply_overlay_file "$PAPER_OVERLAY"
   elif [ -f "$OVERLAY" ]; then
     _apply_overlay_file "$OVERLAY"
+    if [ "$MODE" = "arm-live" ] && [ "$SCALED_CAPITAL_OVERLAY" -eq 1 ]; then
+      echo "Day capital ₹${LIVE_CAPITAL_INR} (risk limits scale with it)..."
+      _set_env_key FALLBACK_CAPITAL_INR "$LIVE_CAPITAL_INR"
+      _set_env_key MAX_SIZING_CAPITAL_INR "$LIVE_CAPITAL_INR"
+    fi
   fi
 fi
 
@@ -241,7 +258,7 @@ if [ "$MODE" = "arm-live" ]; then
 import json, os, sys
 d = json.load(sys.stdin)
 f = d.get('flags') or {}
-expect_cap = float(os.environ.get('EXPECT_CAPITAL', '150000') or 150000)
+expect_cap = float(os.environ.get('EXPECT_CAPITAL', '100000') or 100000)
 expect_loss = expect_cap * 0.10
 print('  commit:', d.get('commit'))
 if not d.get('commit'):
@@ -288,7 +305,7 @@ if d.get('readyForLive') is not True:
     steps = d.get('armLiveSteps') or []
     for s in steps[:6]:
         print('   -', s)
-    raise SystemExit('ERROR: readyForLive is false — fix armLiveSteps before session')
+    print('WARN: readyForLive false (expected when market closed) — re-check before 9:15 IST')
 " 2>/dev/null || echo "  (readiness endpoint not ready yet)"
 fi
 

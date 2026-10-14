@@ -87,6 +87,7 @@ if [ "${SKIP_ENV_MERGE:-0}" != "1" ] && [ -f deploy/env.production.template ]; t
     SYMBOLS
     RADAR_PREMIUM_TAPE_SAMPLE_SECONDS
     RADAR_ARCHIVE_RETENTION_DAYS
+    RADAR_TELEMETRY_RETENTION_DAYS
     RADAR_RESTORE_TAIL_MAX_BYTES
     RADAR_REPORT_TAPE_MAX_BYTES
     EOD_NEAR_BASE_MIN_OFF_PCT
@@ -797,10 +798,39 @@ fi
 
 # Oct 1/5 paper go-live keys — template sync must not leave WORST_DAY_BLOCKS_LIVE=true etc.
 if [ -f "$REPO_DIR/deploy/apply-live-paper-parity-env.sh" ] && [ -f "$REPO_DIR/deploy/env.live-200k.overlay" ]; then
-  echo "Applying Frozen October rules + paper-150k capital (preserving execution mode) ..."
-  ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" bash "$REPO_DIR/deploy/apply-live-paper-parity-env.sh"
+  _parity_cap_overlay() {
+    local fb=""
+    fb="$(grep -E '^FALLBACK_CAPITAL_INR=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+    fb="${fb%%.*}"
+    if grep -q '^ENABLE_LIVE_TRADING=true' "$ENV_FILE" 2>/dev/null; then
+      if [ "$fb" = "50000" ]; then
+        echo "${REPO_DIR}/deploy/env.live-50k.overlay"
+        return
+      fi
+      if grep -q '^CAPITAL_SCALED_RISK_LIMITS_ENABLED=true' "$ENV_FILE" 2>/dev/null; then
+        echo "${REPO_DIR}/deploy/env.live-capital.overlay"
+        return
+      fi
+      if [ "$fb" = "100000" ]; then
+        echo "${REPO_DIR}/deploy/env.live-100k.overlay"
+        return
+      fi
+      echo "${REPO_DIR}/deploy/env.live-150k.overlay"
+      return
+    fi
+    if [ "$fb" = "50000" ]; then
+      echo "${REPO_DIR}/deploy/env.paper-50k.overlay"
+      return
+    fi
+    echo "${REPO_DIR}/deploy/env.paper-150k.overlay"
+  }
+  CAP_OVERLAY="$(_parity_cap_overlay)"
+  echo "Applying Frozen October rules + $(basename "$CAP_OVERLAY") (preserving execution mode) ..."
+  ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" LIVE_OVERLAY="$CAP_OVERLAY" \
+    bash "$REPO_DIR/deploy/apply-live-paper-parity-env.sh"
   if [ -f "$REPO_DIR/deploy/audit-live-paper-env.sh" ]; then
-    ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" bash "$REPO_DIR/deploy/audit-live-paper-env.sh" || {
+    ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" CAPITAL_OVERLAY="$CAP_OVERLAY" \
+      bash "$REPO_DIR/deploy/audit-live-paper-env.sh" || {
       echo "WARN: live paper env audit failed — check /opt/nexusquant/env"
     }
   fi

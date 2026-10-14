@@ -31,12 +31,15 @@ def effective_emergency_stop_inr(
     INR emergency cap — never wider than the point-stop budget.
     Prevents 60-lot trades from bleeding ₹20K+ when SL is ~2.5pt.
     """
+    from app.engines.capital_risk_limits import risk_limit_inr
+
     settings = get_settings()
     if not settings.emergency_stop_enabled:
         return float("inf")
+    emergency = risk_limit_inr("emergency_stop_inr", settings)
     if lots <= 0 or lot_multiplier <= 0 or stop_points <= 0:
-        return settings.emergency_stop_inr
+        return emergency
     point_budget = lots * lot_multiplier * stop_points
     if settings.emergency_stop_scale_with_position:
-        return min(settings.emergency_stop_inr, point_budget)
-    return settings.emergency_stop_inr
+        return min(emergency, point_budget)
+    return emergency

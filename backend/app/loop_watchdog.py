@@ -10,10 +10,15 @@ brings the API back without waiting for cron.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import sys
 import threading
 import time
+import traceback
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -25,6 +30,71 @@ _thread: Optional[threading.Thread] = None
 _beat_task: Optional[asyncio.Task] = None
 _stale_seconds: float = 20.0
 _exit_fn: Callable[[int], None] = os._exit
+_loop_thread_id: Optional[int] = None
+_last_stall: Optional[dict[str, Any]] = None
+_STALL_LOG_MAX_BYTES = 2_000_000
+
+
+def _stall_log_path() -> Optional[Path]:
+    try:
+        from app.config import get_settings
+
+        root = str(getattr(get_settings(), "trade_store_dir", "") or "")
+    except Exception:
+        return None
+    if not root:
+        return None
+    return Path(root) / "diagnostics" / "loop-stalls.jsonl"
+
+
+def _loop_stack() -> list[str]:
+    frame = sys._current_frames().get(_loop_thread_id) if _loop_thread_id else None
+    if frame is None:
+        return []
+    return [line.rstrip() for line in traceback.format_stack(frame)][-40:]
+
+
+def _record_stall(age: float, *, fatal: bool) -> dict[str, Any]:
+    """Capture the event-loop thread's stack while it is blocked (survives the restart)."""
+    global _last_stall
+    stack = _loop_stack()
+    stall = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "ageSeconds": round(age, 2),
+        "fatal": fatal,
+        "stack": stack,
+    }
+    _last_stall = stall
+    logger.error(
+        "event_loop_watchdog: loop blocked %.1fs%s — stack:\n%s",
+        age,
+        " (exiting)" if fatal else "",
+        "\n".join(stack) or "<unavailable>",
+    )
+    path = _stall_log_path()
+    if path is not None:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() and path.stat().st_size > _STALL_LOG_MAX_BYTES:
+                path.replace(path.with_suffix(".jsonl.1"))
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(stall) + "\n")
+        except OSError:
+            pass
+    return stall
+
+
+def recent_stalls(limit: int = 10) -> list[dict[str, Any]]:
+    path = _stall_log_path()
+    if path is None or not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines()[-max(1, limit):]:
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return list(reversed(rows))
 
 
 def last_beat_age_seconds() -> Optional[float]:
@@ -40,6 +110,9 @@ def watchdog_status() -> dict[str, Any]:
         "staleSeconds": _stale_seconds,
         "lastBeatAgeSeconds": round(age, 3) if age is not None else None,
         "threadAlive": bool(_thread and _thread.is_alive()),
+        "lastStall": (
+            {**_last_stall, "stack": _last_stall["stack"][-8:]} if _last_stall else None
+        ),
     }
 
 
@@ -63,8 +136,11 @@ def _watcher_loop(
             return
         _stop.wait(check_seconds)
 
+    warn_seconds = max(2.0, stale_seconds / 4.0)
+    warned_beat = 0.0
     while not _stop.is_set():
-        age = time.monotonic() - _last_beat_mono
+        beat = _last_beat_mono
+        age = time.monotonic() - beat
         if age > stale_seconds:
             logger.error(
                 "event_loop_watchdog: loop hung age=%.1fs (limit=%.1fs) — "
@@ -72,8 +148,12 @@ def _watcher_loop(
                 age,
                 stale_seconds,
             )
+            _record_stall(age, fatal=True)
             _exit_fn(1)
             return
+        if age > warn_seconds and beat != warned_beat:
+            warned_beat = beat
+            _record_stall(age, fatal=False)
         _stop.wait(check_seconds)
 
 
@@ -95,6 +175,7 @@ def start_loop_watchdog(
 ) -> None:
     """Start asyncio heartbeat + daemon killer thread."""
     global _started, _thread, _beat_task, _stale_seconds, _last_beat_mono, _exit_fn
+    global _loop_thread_id
 
     if not enabled:
         logger.info("event_loop_watchdog: disabled")
@@ -109,6 +190,7 @@ def start_loop_watchdog(
 
     _stale_seconds = float(stale_seconds)
     _last_beat_mono = 0.0
+    _loop_thread_id = threading.get_ident()
     _stop.clear()
     _beat_task = asyncio.create_task(
         _heartbeat_loop(max(0.2, float(beat_interval_seconds))),

@@ -955,6 +955,7 @@ async def _open_from_candidate(
             candidate.explosion_event,
             ict=pre_ict,
             alert=alert_row if alert_row else None,
+            snap=snap,
         )
         if pad_chase and not (early_base_entry_ready and not post_session_win):
             return False, pad_reason
@@ -3019,10 +3020,10 @@ async def _open_from_candidate(
         chop_second_same_side_leg_blocked,
     )
 
-    from app.engines.live_paper_parity import trading_rules_match_paper
+    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
 
     chop_live_wire = (
-        not trading_rules_match_paper(settings)
+        not oct_paper_entry_loosening_active(settings)
         and (
             chop_live_guard_day_active(state, snap, snapshots)
             or legacy_live_narrow_stack_active(settings)
@@ -3614,13 +3615,15 @@ async def _process_open_trades(
             "explosion_trail_sl",
             "adaptive_stop_loss",
             "adaptive_trail_sl",
+            "explosion_never_green_hard_stop",
+            "explosion_catastrophic_loss_stop",
         ) and pnl < 0:
             cooldown = (
                 settings.explosion_emergency_cooldown_seconds
                 if exit_reason == "explosion_emergency_stop"
                 else None
             )
-            record_explosion_stop(trade.symbol, cooldown_seconds=cooldown)
+            record_explosion_stop(trade.symbol, cooldown_seconds=cooldown, side=trade.side)
         from app.engines.entry_context import merge_close_context
 
         peak_profit_points = max(0.0, float(trade.maxLtp or 0) - float(trade.entryPremium or 0))
@@ -3937,7 +3940,9 @@ def _elite_preentry_risk_cap_lots(
     settings: Any,
 ) -> int:
     """Shrink lots so stop×units fits max_risk_per_trade_inr before hard reject."""
-    max_loss = float(getattr(settings, "max_risk_per_trade_inr", 0) or 0)
+    from app.engines.capital_risk_limits import risk_limit_inr
+
+    max_loss = risk_limit_inr("max_risk_per_trade_inr", settings)
     if max_loss <= 0 or stop_points <= 0 or lot_mult <= 0:
         return lots
     from app.engines.risk_engine import profile_stop_points
@@ -4556,16 +4561,25 @@ async def process(
                 getattr(settings, "ftv_ranked_allocation_enabled", True)
             )
             best_only = bool(getattr(settings, "selector_best_only_enabled", True))
+            dual_side = best_only and (
+                getattr(settings, "selector_best_only_dual_side_enabled", False) is True
+            )
+            open_explosive_sides = {
+                trade.side
+                for trade in state.openPaperTrades
+                if trade.strategyType == StrategyType.EXPLOSIVE
+            }
             max_positions = max(
                 1,
                 int(getattr(settings, "ftv_allocation_max_positions", 3) or 3),
             )
             if best_only:
-                max_positions = 1
+                max_positions = 2 if dual_side else 1
             # Non-FTV explosions are skipped without consuming a sleeve; inspect
             # enough ranked legs to reach genuine first-lift candidates farther down.
             if best_only:
-                attempt_limit = 1
+                # One side open: walk the ranked list to the best opposite-side leg.
+                attempt_limit = 10 if dual_side and open_explosive_sides else 1
             else:
                 attempt_limit = max_positions * 10 if allocation_enabled else 1
             excluded_keys: set[str] = set()
@@ -4595,6 +4609,23 @@ async def process(
                     f"{float(best.strike):g}"
                 )
                 excluded_keys.add(radar_key)
+                if dual_side and best.mode == "explosion" and any(
+                    trade.side == best.side
+                    for trade in state.openPaperTrades
+                    if trade.strategyType == StrategyType.EXPLOSIVE
+                ):
+                    skipped.append(
+                        {
+                            "symbol": best.symbol,
+                            "side": best.side.value,
+                            "strike": best.strike,
+                            "reason": "best_only_dual_side_same_side_open",
+                            "mode": best.mode,
+                            "score": best.score,
+                            "tier": getattr(best, "tier", None),
+                        }
+                    )
+                    continue
                 best.pretrade_meta = dict(best.pretrade_meta or {})
                 causal_ranking = dict(
                     best.pretrade_meta.get("causalRanking") or {}
@@ -4653,6 +4684,25 @@ async def process(
                         }
                     )
                     break
+                from app.engines.open_side_confirmation import open_side_confirmation
+
+                open_blocked, open_reason, open_meta = open_side_confirmation(
+                    best.symbol, best.side, snapshots.get(best.symbol), settings=settings,
+                )
+                if open_blocked:
+                    skipped.append(
+                        {
+                            "symbol": best.symbol,
+                            "side": best.side.value,
+                            "strike": best.strike,
+                            "reason": open_reason,
+                            "mode": best.mode,
+                            "score": best.score,
+                            "tier": getattr(best, "tier", None),
+                            "openSideConfirmation": open_meta,
+                        }
+                    )
+                    continue
                 if loss_streak_elite_only:
                     elite_ok = (
                         is_large_loss_pause_elite_candidate(best, snapshots)
@@ -4714,6 +4764,19 @@ async def process(
                         state,
                         allocation_rank,
                     )
+                    if dual_side:
+                        from app.engines.capital_allocator import (
+                            dual_side_allocation,
+                            one_lot_unit_cost_inr,
+                        )
+
+                        allocation = dual_side_allocation(
+                            allocation,
+                            state,
+                            unit_cost_inr=one_lot_unit_cost_inr(
+                                best.symbol, float(best.premium or 0),
+                            ),
+                        )
                     causal_ranking = dict(
                         (best.pretrade_meta or {}).get("causalRanking") or {}
                     )

@@ -39,7 +39,7 @@ def oct_paper_first_lift_small_lift_context(
     from app.config import get_settings
 
     s = settings or get_settings()
-    if not trading_rules_match_paper(s):
+    if not oct_paper_entry_loosening_active(s):
         return False
     if not bool(getattr(s, "oct_paper_first_lift_small_lift_waiver_enabled", True)):
         return False
@@ -75,6 +75,39 @@ def oct_paper_first_lift_small_lift_context(
     if not launch:
         return False
 
+    side = str(evidence.get("side") or "").upper()
+    local = max(
+        _parity_number(evidence.get("localBaseMovePct")),
+        _parity_number(evidence.get("ictBaseRelativeMovePct")),
+    )
+    min_move = float(
+        getattr(s, "oct_paper_first_lift_small_lift_min_local_pct", 2.0) or 2.0
+    )
+    max_move = float(
+        getattr(s, "oct_paper_first_lift_small_lift_max_local_pct", 40.0) or 40.0
+    )
+    max_move = max(
+        max_move,
+        float(getattr(s, "first_lift_trade_max_move_pct", 40.0) or 40.0),
+    )
+
+    location_pad = False
+    if side == "CALL":
+        off_low = _parity_number(evidence.get("offLowMovePct"))
+        min_off = float(
+            getattr(s, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
+        )
+        location_pad = off_low >= min_off - 1e-6
+    elif side == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+        location_pad = put_slide_pad_context(evidence, settings=s)
+
+    session_pad = location_pad
+    # First lift off a measured local base (2–40%) is pad entry, not session-high chase.
+    if not session_pad and launch and min_move <= local <= max_move + 1e-6:
+        session_pad = True
+
     pos = _parity_number(evidence.get("sessionRangePosition"))
     max_pos = float(
         getattr(s, "live_paper_parity_max_session_range_position", 0.52) or 0.52
@@ -83,9 +116,38 @@ def oct_paper_first_lift_small_lift_context(
     min_off_high = float(
         getattr(s, "live_paper_parity_min_off_session_high_pct", 6.0) or 6.0
     )
-    at_option_session_high = pos > 0 and dd > -min_off_high + 1e-6
-    side = str(evidence.get("side") or "").upper()
-    if pos > max_pos + 1e-6 or at_option_session_high:
+    dd_present = (
+        evidence.get("drawdownFromHighPct") is not None
+        and str(evidence.get("drawdownFromHighPct")).strip() != ""
+    )
+    from app.engines.oct1_pad_location import oct1_premium_location_chase_core
+
+    chase_blocked, chase_reason = oct1_premium_location_chase_core(
+        side,
+        pos,
+        dd,
+        evidence,
+        settings=s,
+        dd_present=dd_present,
+    )
+    if chase_blocked:
+        if chase_reason == "live_oct1_put_chase_at_session_low":
+            if not location_pad:
+                return False
+        elif chase_reason == "live_oct1_chase_at_session_high":
+            return False
+        elif chase_reason == "live_oct1_chase_session_range_high":
+            off_session_high = dd_present and dd > -min_off_high + 1e-6
+            pad_ok = location_pad or (
+                launch
+                and min_move <= local <= max_move + 1e-6
+                and not off_session_high
+            )
+            if not pad_ok:
+                return False
+        elif not (session_pad and launch):
+            return False
+    if pos > max_pos + 1e-6 and not session_pad:
         from app.engines.oct1_pad_location import oct1_open_moment_pad_waived
 
         location_ok = False
@@ -103,33 +165,6 @@ def oct_paper_first_lift_small_lift_context(
                     return False
             except Exception:
                 return False
-
-    local = max(
-        _parity_number(evidence.get("localBaseMovePct")),
-        _parity_number(evidence.get("ictBaseRelativeMovePct")),
-    )
-    min_move = float(
-        getattr(s, "oct_paper_first_lift_small_lift_min_local_pct", 2.0) or 2.0
-    )
-    max_move = float(
-        getattr(s, "oct_paper_first_lift_small_lift_max_local_pct", 40.0) or 40.0
-    )
-    max_move = max(
-        max_move,
-        float(getattr(s, "first_lift_trade_max_move_pct", 40.0) or 40.0),
-    )
-
-    session_pad = False
-    if side == "CALL":
-        off_low = _parity_number(evidence.get("offLowMovePct"))
-        min_off = float(
-            getattr(s, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
-        )
-        session_pad = off_low >= min_off - 1e-6
-    elif side == "PUT":
-        from app.engines.put_slide_ce_mirror import put_slide_pad_context
-
-        session_pad = put_slide_pad_context(evidence, settings=s)
 
     if local <= 0 and session_pad:
         local = min_move
@@ -181,6 +216,55 @@ def oct_paper_first_lift_small_lift_context(
     return True
 
 
+def oct_paper_first_lift_otm_entry_ok(
+    alert: Mapping[str, Any] | None,
+    *,
+    depth_steps: int,
+    settings: Any = None,
+) -> bool:
+    """Oct 1 paper: ELITE first-lift / armed-base OTM (≤N steps) any session — not open-window only."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not oct_paper_entry_loosening_active(s):
+        return False
+    if not isinstance(alert, dict):
+        return False
+    if not oct_paper_structural_pad_context(alert, settings=s):
+        return False
+    max_steps = int(
+        getattr(s, "oct_paper_first_lift_small_lift_max_strike_steps", 3) or 3
+    )
+    return int(depth_steps or 0) > 0 and int(depth_steps) <= max_steps
+
+
+def oct_paper_first_lift_entry_window_lo_relax(
+    alert: Mapping[str, Any] | None,
+    *,
+    default_lo: float,
+    settings: Any = None,
+    readiness_reason: str = "",
+) -> float:
+    """Oct 1 paper: first-lift at pad uses small-lift floor (e.g. 2%), not 15% entry window."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not oct_paper_entry_loosening_active(s):
+        return default_lo
+    if not isinstance(alert, dict):
+        return default_lo
+    if not oct_paper_first_lift_small_lift_context(
+        alert,
+        settings=s,
+        readiness_reason=readiness_reason,
+    ):
+        return default_lo
+    floor = float(
+        getattr(s, "oct_paper_first_lift_small_lift_min_local_pct", 2.0) or 2.0
+    )
+    return min(default_lo, floor) if floor > 0 else default_lo
+
+
 def oct_paper_elite_rip_context(
     evidence: Mapping[str, Any] | None,
     *,
@@ -195,7 +279,7 @@ def oct_paper_elite_rip_context(
     from app.config import get_settings
 
     s = settings or get_settings()
-    if not trading_rules_match_paper(s):
+    if not oct_paper_entry_loosening_active(s):
         return False
     if not isinstance(evidence, dict):
         return False
@@ -242,10 +326,28 @@ def oct_paper_elite_rip_context(
             return True
     except Exception:
         return True
-    # After open window: Oct 1 paper still took pullbacks near session low, not afternoon chase.
+
+    # After 09:45: same pad policy as #721/#722 first-lift (all session), not a separate chase lane.
+    if oct_paper_first_lift_small_lift_context(evidence, settings=s):
+        return True
+
+    side = str(evidence.get("side") or "").upper()
     local = _parity_number(evidence.get("localBaseMovePct"))
-    off_low = _parity_number(evidence.get("offLowMovePct"))
     pos = _parity_number(evidence.get("sessionRangePosition"))
+
+    # PUT slide pad + cold v3 (#717) — not CALL off-low semantics.
+    if side == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+        if not put_slide_pad_context(evidence, settings=s):
+            return False
+        max_late = float(
+            getattr(s, "put_slide_cold_velocity_max_local_pct", 22.0) or 22.0
+        )
+        return local <= max_late + 1e-6
+
+    # CALL: #730 small-lift off session low, not extended afternoon chase.
+    off_low = _parity_number(evidence.get("offLowMovePct"))
     max_late_local = float(
         getattr(s, "oct_paper_elite_rip_max_local_outside_open_pct", 28.0) or 28.0
     )
@@ -254,6 +356,147 @@ def oct_paper_elite_rip_context(
     if off_low >= float(getattr(s, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0) - 1e-6:
         return local <= max_late_local + 1e-6
     return local <= max_late_local + 1e-6
+
+
+def oct_paper_first_lift_negative_velocity_ok(
+    evidence: Mapping[str, Any] | None,
+    *,
+    live_v3: float,
+    v9: float = 0.0,
+    settings: Any = None,
+) -> bool:
+    """
+    Oct 1 / Oct 5 paper: ELITE open rip at pad may pass readiness while 3s velocity is negative.
+
+    Matches ``rank_trade_evidence`` + EOD replay — not a blanket cold-tick waiver.
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not bool(
+        getattr(s, "oct_paper_first_lift_negative_velocity_waiver_enabled", True)
+    ):
+        return False
+    if not oct_paper_entry_loosening_active(s):
+        return False
+    if not isinstance(evidence, dict):
+        return False
+    if live_v3 >= -1e-9:
+        return True
+    if oct_paper_elite_rip_context(evidence, settings=s):
+        return True
+    from app.engines.pad_lane_capture import pad_lane_cold_velocity_ok
+
+    if pad_lane_cold_velocity_ok(evidence, live_v3, v9):
+        return True
+    side = str(evidence.get("side") or "").upper()
+    if side == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_cold_velocity_ok
+
+        if put_slide_cold_velocity_ok(evidence, live_v3, v9):
+            return True
+    return False
+
+
+def oct_paper_structural_pad_context(
+    evidence: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+    readiness_reason: str = "",
+) -> bool:
+    """Oct 1/5 pad entry — first-lift small lift (#734) or structural elite rip (#730)."""
+    if not isinstance(evidence, dict):
+        return False
+    return oct_paper_first_lift_small_lift_context(
+        evidence,
+        settings=settings,
+        readiness_reason=readiness_reason,
+    ) or oct_paper_elite_rip_context(evidence, settings=settings)
+
+
+def oct_paper_exec_strict_bypass(
+    alert: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Order-path strict first-lift / premium-fade / MTF — match Oct 1 paper pad fills."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not oct_paper_entry_loosening_active(s):
+        return False
+    if not bool(getattr(s, "oct_paper_exec_strict_bypass_enabled", True)):
+        return False
+    return oct_paper_structural_pad_context(alert, settings=s)
+
+
+def oct_paper_first_lift_entry_window_hi_relax(
+    alert: Mapping[str, Any] | None,
+    *,
+    default_hi: float,
+    settings: Any = None,
+) -> float:
+    """Oct 1 paper: first-lift at pad may sit above default 65% window when still expanding."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not oct_paper_entry_loosening_active(s):
+        return default_hi
+    if not isinstance(alert, dict):
+        return default_hi
+    if not oct_paper_first_lift_small_lift_context(alert, settings=s):
+        return default_hi
+    cap = float(
+        getattr(s, "oct_paper_first_lift_small_lift_session_expansion_max_local_pct", 55.0)
+        or 55.0
+    )
+    try:
+        from app.engines.session_timing import in_open_premium_window
+
+        if in_open_premium_window():
+            cap = max(
+                cap,
+                float(getattr(s, "oct_paper_open_moment_max_local_pct", 70.0) or 70.0),
+            )
+    except Exception:
+        pass
+    return max(default_hi, cap)
+
+
+def oct_paper_same_side_reentry_after_loss_waived(
+    *,
+    prior_loss_trade: Any,
+    strike: float,
+    alert: Mapping[str, Any] | None,
+    settings: Any = None,
+) -> bool:
+    """Oct 5 afternoon vertical — new strike same side after loss if structural pad rip."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not oct_paper_entry_loosening_active(s):
+        return False
+    if not bool(getattr(s, "oct_paper_same_side_reentry_waiver_enabled", True)):
+        return False
+    if prior_loss_trade is None:
+        return False
+    try:
+        prior_strike = float(getattr(prior_loss_trade, "strike", 0) or 0)
+    except (TypeError, ValueError):
+        prior_strike = 0.0
+    if prior_strike > 0 and abs(prior_strike - float(strike or 0)) < 1e-6:
+        return False
+    return oct_paper_structural_pad_context(alert, settings=s)
+
+
+def oct_paper_peak_keep_exit_parity_active(settings: Any | None = None) -> bool:
+    """When true, skip implicit stage-trail ladder on first-lift legs (Oct 1 peak-keep holds)."""
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not trading_rules_match_paper(s):
+        return False
+    return bool(getattr(s, "oct_paper_peak_keep_exit_parity_enabled", True))
 
 
 def _strict_bool(value: Any, default: bool = False) -> bool:
@@ -305,6 +548,36 @@ def trading_rules_match_paper(settings: Any | None = None) -> bool:
     return entry_gates_match_paper(s)
 
 
+def oct_paper_replica_active(settings: Any | None = None) -> bool:
+    """
+    Oct 1 / Oct 5 paper replica — radar, selection and entry as those sessions ran.
+
+    Turns off post-Oct 5 entry loosenings (#718+ parity waivers), the pad guard
+    (#699/#701/#707), the ₹18–350 radar scan band (#714) and strict ATM/ITM-only
+    execution (#692). Exits (peak-keep, adaptive SL, N×/k× fast fade) stay current.
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    return _strict_bool(getattr(s, "oct_paper_replica_enabled", False))
+
+
+def oct_paper_entry_loosening_active(settings: Any | None = None) -> bool:
+    """
+    Post-Oct 5 entry/selection waivers keyed off trading_rules_match_paper.
+
+    False under the Oct paper replica so gates that ran on Oct 1 / Oct 5 paper
+    (power hour, whipsaw, expiry halts, chop-day wire, entry-score floor) run again.
+    Exit and sizing paths keep using trading_rules_match_paper.
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if oct_paper_replica_active(s):
+        return False
+    return trading_rules_match_paper(s)
+
+
 def legacy_live_entry_narrowings_active(settings: Any | None = None) -> bool:
     """
     True when live-only entry/session narrowings may run (legacy stack or live without paper rules).
@@ -345,16 +618,57 @@ def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
     s = settings or get_settings()
     parity = live_paper_parity_active(s)
     gates = entry_gates_match_paper(s)
+    rules = trading_rules_match_paper(s)
+    loosening = oct_paper_entry_loosening_active(s)
+    cap_inr = float(getattr(s, "fallback_capital_inr", 0) or 0)
+    from app.engines.sep917_legacy_profile import (
+        atm_itm_fixed_premium_band_only,
+        strict_atm_itm_execution,
+    )
+
     return {
         "active": parity,
         "entryGatesMatchPaper": gates,
-        "tradingRulesMatchPaper": trading_rules_match_paper(s),
+        "tradingRulesMatchPaper": rules,
+        "octPaperReplica": {
+            "enabled": oct_paper_replica_active(s),
+            "postOct5EntryLooseningActive": loosening,
+            "radarFixedPremiumBandOnly": atm_itm_fixed_premium_band_only(s),
+            "strictAtmItmExecution": strict_atm_itm_execution(s),
+            "padEntryGuardEnabled": bool(
+                getattr(s, "live_paper_parity_pad_entry_guard_enabled", True)
+            ),
+        },
+        "bookMatchesOctPaperReferenceLots": cap_inr
+        >= float(getattr(s, "oct_paper_reference_capital_inr", 149_000.0) or 149_000.0),
         "legacyLiveNarrowStackActive": legacy_live_narrow_stack_active(s),
         "liveBestTradesOnlyEnabled": bool(getattr(s, "live_best_trades_only_enabled", True)),
         "worstDayBlocksLive": bool(getattr(s, "worst_day_blocks_live", True)),
         "liveHoldToStructuralSl": bool(getattr(s, "live_hold_to_structural_sl", False)),
         "useUpstoxCapitalForSizing": bool(getattr(s, "use_upstox_capital_for_sizing", False)),
-        "sizesFromPaperBook": gates and not should_use_live_broker_capital_for_summary(s),
+        "sizesFromPaperBook": (
+            gates
+            and not should_use_live_broker_capital_for_summary(s)
+            and cap_inr
+            >= float(getattr(s, "oct_paper_reference_capital_inr", 149_000.0) or 149_000.0)
+        ),
+        "octPaperBehaviorParity": {
+            "negativeVelocityWaiver": bool(
+                getattr(s, "oct_paper_first_lift_negative_velocity_waiver_enabled", True)
+            )
+            and loosening,
+            "peakKeepExitParity": oct_paper_peak_keep_exit_parity_active(s),
+            "execStrictBypass": bool(
+                getattr(s, "oct_paper_exec_strict_bypass_enabled", True)
+            )
+            and loosening,
+            "structuralPadSelectorWaivers": loosening,
+            "otmTradeablePreserveOnStamp": loosening,
+        },
+        "parityHudNote": (
+            "entryGatesMatchPaper means parity env flags — not Oct 1 lot-for-lot replay. "
+            "See octPaperBehaviorParity and bookMatchesOctPaperReferenceLots."
+        ),
         "sep917LegacyProfileEnabled": bool(getattr(s, "sep917_legacy_profile_enabled", True)),
         "topMomentsOnlyEnabled": bool(getattr(s, "top_moments_only_enabled", False)),
         "paperSimpleProfitMode": bool(getattr(s, "paper_simple_profit_mode", False)),

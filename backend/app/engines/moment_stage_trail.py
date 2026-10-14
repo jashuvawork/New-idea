@@ -127,8 +127,14 @@ def moment_stage_near_complete(
 
 def trade_uses_moment_stage_ladder(trade: PaperTrade) -> bool:
     ctx = trade.entryContext or {}
+    from app.engines.live_paper_parity import oct_paper_peak_keep_exit_parity_active
+
+    paper_peak_keep = oct_paper_peak_keep_exit_parity_active()
     if ctx.get("momentStageLadder") or (ctx.get("exitPlan") or {}).get("momentStageLadder"):
         return True
+    # Oct 1 paper: maxProfitCapture legs still exited via peak-keep — not stage_trail scratches.
+    if paper_peak_keep:
+        return False
     moment = str(ctx.get("momentType") or "").lower()
     if moment in (
         "first_lift_local_base",
@@ -639,6 +645,9 @@ def ftv_runner_pct_floor(
     min_gain_for_pts_arm = _cfg_float(
         s, "ftv_runner_pct_trail_max_profit_min_gain_pct", 8.0
     )
+    pct_of_entry = _cfg_float(s, "ftv_runner_pct_trail_arm_min_best_pct_of_entry", 15.0)
+    if pct_of_entry > 0:
+        arm_min_pts = min(arm_min_pts, entry * pct_of_entry / 100.0)
     if modest is not None:
         arm_pct, arm_min_pts, keep = modest
         armed = gain_pct >= arm_pct or best >= arm_min_pts
@@ -657,6 +666,65 @@ def ftv_runner_pct_floor(
         keep = learned
     keep = min(0.95, max(0.5, keep))
     return round(best * keep, 2)
+
+
+def profit_ladder_floor(
+    trade: PaperTrade,
+    best: float,
+    *,
+    settings: Optional[Settings] = None,
+) -> Optional[tuple[float, str]]:
+    """Unified ratcheting profit floor (P&L points) and the tier that owns it.
+
+    Tiers by peak gain off entry premium:
+      * breakeven  — peak ≥ 8%: lock entry + 2%.
+      * peak_keep  — peak ≥ 15%: keep 75% of peak gain.
+      * multiple   — max LTP ≥ N× entry: floor at N× entry or 75% of peak gain,
+        whichever is higher, but always at least max(3pt, 5% of peak LTP) under the
+        peak so a tick under N× does not cut a fresh print. k× ratchets via the
+        75% keep (k ≥ 3 always sits above the N× floor).
+    """
+    s = settings or get_settings()
+    if getattr(s, "unified_profit_ladder_enabled", False) is not True:
+        return None
+    entry = _safe_float(getattr(trade, "entryPremium", 0))
+    best = _safe_float(best)
+    if entry <= 0 or best < _cfg_float(s, "unified_profit_ladder_min_best_points", 4.0):
+        return None
+
+    gain_pct = best / entry * 100.0
+    keep = min(0.95, max(0.5, _cfg_float(s, "unified_profit_ladder_keep_ratio", 0.75)))
+    be_floor = entry * _cfg_float(s, "unified_profit_ladder_breakeven_lock_pct", 2.0) / 100.0
+    peak_ltp = max(_safe_float(getattr(trade, "maxLtp", 0)), entry + best)
+    arm_ratio = max(1.01, _cfg_float(s, "unified_profit_ladder_multiple_arm_ratio", 2.0))
+
+    if peak_ltp + 1e-6 >= arm_ratio * entry:
+        min_gb = max(
+            _cfg_float(s, "unified_profit_ladder_multiple_min_giveback_points", 3.0),
+            peak_ltp
+            * _cfg_float(s, "unified_profit_ladder_multiple_min_giveback_pct_of_peak", 5.0)
+            / 100.0,
+        )
+        multiple_floor = min(entry * (arm_ratio - 1.0), peak_ltp - min_gb - entry)
+        floor_pts, layer = max(multiple_floor, best * keep, be_floor), "multiple"
+    elif gain_pct >= _cfg_float(s, "unified_profit_ladder_keep_arm_pct", 15.0):
+        floor_pts, layer = max(best * keep, be_floor), "peak_keep"
+    elif gain_pct >= _cfg_float(s, "unified_profit_ladder_breakeven_arm_pct", 8.0):
+        floor_pts, layer = be_floor, "breakeven"
+    else:
+        return None
+
+    ctx = dict(trade.entryContext or {})
+    prev = _safe_float((ctx.get("profitLadder") or {}).get("floorPts"))
+    floor_pts = round(max(floor_pts, prev), 2)
+    ctx["profitLadder"] = {
+        "floorPts": floor_pts,
+        "layer": layer,
+        "peakGainPct": round(gain_pct, 1),
+        "peakMultiple": round(peak_ltp / entry, 3),
+    }
+    trade.entryContext = ctx
+    return floor_pts, layer
 
 
 def compose_trail_floor_with_stages(

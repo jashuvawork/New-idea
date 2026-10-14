@@ -220,6 +220,38 @@ def counter_trend_entry_allowed(
 
     if isinstance(alert, dict) and alert_has_early_radar_pad_capture(alert):
         return True
+    from app.engines.live_paper_parity import (
+        oct_paper_first_lift_small_lift_context,
+        oct_paper_entry_loosening_active,
+    )
+
+    settings = get_settings()
+    if oct_paper_entry_loosening_active(settings):
+        evidence: dict[str, Any] = dict(alert) if isinstance(alert, dict) else {}
+        if explosion_event is not None and not evidence:
+            evidence = {
+                "side": getattr(explosion_event, "side", ""),
+                "tier": getattr(explosion_event, "tier", ""),
+                "explosionScore": getattr(explosion_event, "explosion_score", 0),
+                "score": getattr(explosion_event, "explosion_score", 0),
+                "localBaseMovePct": getattr(explosion_event, "local_base_move_pct", 0),
+                "momentType": getattr(explosion_event, "reason", ""),
+            }
+        elif explosion_event is not None:
+            evidence.setdefault("tier", getattr(explosion_event, "tier", ""))
+            evidence.setdefault(
+                "explosionScore",
+                getattr(explosion_event, "explosion_score", 0),
+            )
+        if oct_paper_first_lift_small_lift_context(evidence, settings=settings):
+            return True
+        if snap is not None and explosion_event is not None:
+            from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
+
+            sym = str(getattr(explosion_event, "symbol", "") or "")
+            flip_ok, _, _ = index_rally_side_flip_bypass(sym, side, snap, settings=settings)
+            if flip_ok:
+                return True
     from app.engines.index_confirmed_local_base import index_confirmed_local_base
 
     if index_confirmed_local_base(side, snap, alert):

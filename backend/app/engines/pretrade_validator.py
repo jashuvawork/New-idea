@@ -1120,18 +1120,31 @@ def validate_candidate(
             if isinstance(getattr(candidate, "alert", None), dict)
             else None,
         )
+        alert_dict = (
+            getattr(candidate, "alert", None)
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None
+        )
         from app.engines.ict_breakout_monitor import first_lift_entry_ready
 
         strict_base_ready = first_lift_entry_ready(
             snap=snap,
             event=explosion_event,
             ict=trap_ict,
-            alert=(
-                getattr(candidate, "alert", None)
-                if isinstance(getattr(candidate, "alert", None), dict)
-                else None
-            ),
+            alert=alert_dict,
         )
+        if not strict_base_ready and alert_dict is not None:
+            from app.engines.live_paper_parity import (
+                oct_paper_first_lift_small_lift_context,
+                oct_paper_entry_loosening_active,
+            )
+
+            if oct_paper_entry_loosening_active(settings) and oct_paper_first_lift_small_lift_context(
+                alert_dict,
+                settings=settings,
+            ):
+                strict_base_ready = True
+                meta["octPaperFirstLiftPad"] = True
         from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
         must_take = elite_must_take_bypass_allowed(
@@ -1150,32 +1163,28 @@ def validate_candidate(
             snap,
             explosion_event,
             trap_ict,
-            alert=(
-                getattr(candidate, "alert", None)
-                if isinstance(getattr(candidate, "alert", None), dict)
-                else None
-            ),
+            alert=alert_dict,
         )
 
         window_blocked, window_reason = explosion_entry_window_blocked(
-            explosion_event, ict=trap_ict, top_must_take=must_take,
+            explosion_event,
+            ict=trap_ict,
+            top_must_take=must_take,
             squeeze_early_base=squeeze_early_base_active(explosion_event, snap),
             bullish_local_base=bool(bullish_base.get("active")),
+            alert=alert_dict,
+            snap=snap,
         )
         if window_blocked and not strict_base_ready:
             return False, window_reason, meta
 
         post_session_win, _post_win_meta = _post_session_win(state)
-        alert_dict = (
-            getattr(candidate, "alert", None)
-            if isinstance(getattr(candidate, "alert", None), dict)
-            else None
-        )
 
         pad_chase, pad_reason = tier_promotion_pad_chase_blocked(
             explosion_event,
             ict=trap_ict,
             alert=alert_dict,
+            snap=snap,
         )
         if pad_chase and not (strict_base_ready and not post_session_win):
             return False, pad_reason, meta

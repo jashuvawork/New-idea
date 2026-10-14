@@ -19,6 +19,7 @@ the rolling spot tape so coil-breakout prediction matches live detection/ranking
 
 from __future__ import annotations
 
+import bisect
 import json
 import zipfile
 from collections import defaultdict, deque
@@ -28,7 +29,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
-from app.engines.eod_trade_report import apply_portfolio_limits
+from app.engines.eod_trade_report import _replay_daily_stop, apply_portfolio_limits
 from app.engines.local_base_chart_bypass import local_base_entry_window
 from app.engines.top_moment_gate import (
     classify_top_moment_type,
@@ -792,6 +793,108 @@ def evaluate_replay_live_gates(
     return True, "ok"
 
 
+_EXPLOSION_STOP_COOLDOWN_REASONS = frozenset({
+    "explosion_stop_loss",
+    "explosion_emergency_stop",
+    "explosion_time_stop",
+    "explosion_trail_sl",
+    "adaptive_stop_loss",
+    "adaptive_trail_sl",
+    "explosion_never_green_hard_stop",
+    "explosion_catastrophic_loss_stop",
+})
+
+
+def evaluate_replay_live_explosion_gates(
+    alert: dict[str, Any],
+    snap: SymbolSnapshot,
+    *,
+    now: datetime,
+    settings: Any = None,
+    signal_gates: bool = True,
+) -> tuple[bool, str]:
+    """Live explosion entry checks the auto-trader runs before the order wire.
+
+    ``check_explosion_entry`` (chart align, breadth hard blocks, Smart Ichimoku with the
+    index-rally bypass, entry windows, timing) plus open-window side confirmation. The
+    stop cooldown is tracked by the replay itself on the replay clock. ``signal_gates=False``
+    keeps only the open-side confirmation (for entries live already passed on tick data).
+    """
+    from types import SimpleNamespace
+
+    from app.engines.explosion_profit import check_explosion_entry
+    from app.engines.open_side_confirmation import open_side_confirmation
+    from app.models.schemas import Breadth
+
+    s = settings or get_settings()
+    candidate = _candidate_from_alert(alert, snap)
+    blocked, reason, _meta = open_side_confirmation(
+        candidate.symbol, candidate.side, snap, now=now, settings=s,
+    )
+    if blocked:
+        return False, reason or "open_side_unconfirmed"
+    if not signal_gates:
+        return True, "ok"
+    ok, reason = check_explosion_entry(
+        candidate.explosion_event,
+        SimpleNamespace(tqs=float(snap.tradeQualityScore or 0), confidence=0.0),
+        snap.breadth or Breadth(),
+        False,
+        chart=snap.spotChart,
+        snap=snap,
+        alert=alert,
+    )
+    if not ok:
+        return False, reason
+    return True, "ok"
+
+
+def _replay_allocator_budget(
+    open_legs: dict[str, tuple[datetime, dict[str, Any]]],
+    *,
+    symbol: str,
+    premium: float,
+    dual_side: bool,
+) -> float:
+    """Live ranked-allocator budget for the next leg given the replay's open legs.
+
+    With ``dual_side`` the best-only CE+PE split applies (first leg keeps the reserve).
+    """
+    from app.engines.capital_allocator import (
+        dual_side_allocation,
+        next_ranked_allocation_rank,
+        one_lot_unit_cost_inr,
+        ranked_allocation_for_state,
+    )
+    from app.models.schemas import AutoTraderState, PaperTrade, StrategyType
+
+    state = AutoTraderState()
+    for rank, (_exit, leg) in enumerate(open_legs.values(), start=1):
+        state.openPaperTrades.append(
+            PaperTrade(
+                id=f"replay-open-{rank}",
+                symbol=str(leg.get("symbol") or ""),
+                side=Side(str(leg.get("side") or "CALL")),
+                strike=_f(leg.get("strike")),
+                entryPremium=_f(leg.get("entryPremium")),
+                currentPremium=_f(leg.get("entryPremium")),
+                lots=int(leg.get("lots") or 0),
+                openedAt=datetime.now(IST),
+                strategyType=StrategyType.EXPLOSIVE,
+                entryContext={"allocationRank": rank},
+            )
+        )
+    rank = next_ranked_allocation_rank(state) or (len(open_legs) + 1)
+    allocation = ranked_allocation_for_state(state, rank)
+    if dual_side:
+        allocation = dual_side_allocation(
+            allocation,
+            state,
+            unit_cost_inr=one_lot_unit_cost_inr(symbol, premium),
+        )
+    return float(allocation.budgetInr or 0)
+
+
 def _replay_selection_rank(
     ranking: dict[str, Any],
     alert: dict[str, Any],
@@ -942,8 +1045,16 @@ def _simulate_trade_from_entry(
     settings: Any,
     entry_ctx: dict[str, Any],
     assessment: Optional[dict[str, Any]] = None,
+    spot_series: Optional[list[tuple[datetime, float]]] = None,
+    session_extremes: Optional[dict[str, dict[str, Any]]] = None,
+    budget_inr: Optional[float] = None,
 ) -> dict[str, Any]:
-    """Walk forward on premium tape from entry until production exit fires."""
+    """Walk forward on premium tape from entry until production exit fires.
+
+    With ``spot_series`` + ``session_extremes`` (the replay's index tape), the trade is
+    stamped with ``spotAtEntry`` and the index last/high/low advance tick by tick, so
+    exits that read the index (breakeven / deep-ITM runner holds) see the live view.
+    """
     from app.engines.capital_allocator import lot_multiplier, max_lots_for_capital
     from app.engines.elite_runner_exit_bundle import (
         apply_elite_runner_exit_bundle,
@@ -957,7 +1068,10 @@ def _simulate_trade_from_entry(
     units = int(lot_multiplier(symbol) or 20)
     ep = entry_premium
     base = base_premium or ep
-    lots = max(1, max_lots_for_capital(symbol, ep))
+    if budget_inr is not None and ep > 0 and units > 0:
+        lots = max(1, int(float(budget_inr) / (ep * units)))
+    else:
+        lots = max(1, max_lots_for_capital(symbol, ep))
     min_sl_pts = _f(getattr(s, "elite_full_lot_min_stop_points", 16.0), 16.0)
     min_sl_pct = _f(getattr(s, "elite_full_lot_min_stop_pct_of_premium", 0.18), 0.18)
     stop_pts = max(min_sl_pts, ep * max(0.0, min_sl_pct))
@@ -1035,9 +1149,34 @@ def _simulate_trade_from_entry(
     best = 0.0
     peak = ep
     exit_rec: Optional[tuple[datetime, float, str]] = None
+    sym_u = symbol.upper()
+    walk_spots: list[tuple[datetime, float]] = []
+    saved_ext: Optional[dict[str, Any]] = None
+    walk_ext: Optional[dict[str, Any]] = None
+    if spot_series and session_extremes is not None:
+        before = [sp for t, sp in spot_series if t <= entry_ts and sp > 0]
+        if before:
+            tr.entryContext["spotAtEntry"] = round(before[-1], 2)
+        walk_spots = [(t, sp) for t, sp in spot_series if t >= entry_ts and sp > 0]
+        saved_ext = session_extremes.get(sym_u)
+        walk_ext = dict(saved_ext or {})
+        if before:
+            walk_ext.setdefault("open", before[0])
+            walk_ext["hi"] = max(float(walk_ext.get("hi") or before[-1]), max(before))
+            walk_ext["lo"] = min(float(walk_ext.get("lo") or before[-1]), min(before))
+            walk_ext["last"] = before[-1]
+        session_extremes[sym_u] = walk_ext
+    spot_i = 0
     for tj, pj in forward:
         if pj <= 0:
             continue
+        if walk_ext is not None:
+            while spot_i < len(walk_spots) and walk_spots[spot_i][0] <= tj:
+                sp = walk_spots[spot_i][1]
+                walk_ext["last"] = sp
+                walk_ext["hi"] = max(float(walk_ext.get("hi") or sp), sp)
+                walk_ext["lo"] = min(float(walk_ext.get("lo") or sp), sp)
+                spot_i += 1
         tr.openedAt = wnow - timedelta(seconds=(tj - entry_ts).total_seconds())
         tr.currentPremium = pj
         best = max(best, pj - ep)
@@ -1045,17 +1184,26 @@ def _simulate_trade_from_entry(
         peak = max(peak, pj)
         lookback = tj - timedelta(seconds=3)
         ref_p = ep
+        ref_t = entry_ts
         for t_prev, p_prev in forward:
             if t_prev > tj:
                 break
             if t_prev <= lookback:
                 ref_p = p_prev
-        v = round(pj - ref_p, 3)
+                ref_t = t_prev
+        # Tape samples are ~10-13s apart; scale the move to a 3s rate like the live tick feed.
+        gap = (tj - ref_t).total_seconds()
+        v = round((pj - ref_p) * (3.0 / gap if gap > 3.0 else 1.0), 3)
         tr.entryContext["liveVelocity3s"] = v
         reason, _pnl = evaluate_explosion_exit(tr, pj, tier, units, live_velocity_3s=v)
         if reason:
             exit_rec = (tj, pj, reason)
             break
+    if session_extremes is not None and walk_ext is not None:
+        if saved_ext is None:
+            session_extremes.pop(sym_u, None)
+        else:
+            session_extremes[sym_u] = saved_ext
     if exit_rec is None and forward:
         exit_rec = (forward[-1][0], forward[-1][1], "eod_close")
     if exit_rec is None:
@@ -1119,8 +1267,19 @@ def replay_local_base_day(
     side_filter: Optional[str] = None,
     seed_session_loss_inr: float = 0.0,
     replay_state: Any = None,
+    anchored_entries: Optional[list[dict[str, Any]]] = None,
+    anchor_max_lag_seconds: float = 60.0,
 ) -> dict[str, Any]:
-    """Replay one session's premium tape with production local-base entry gates."""
+    """Replay one session's premium tape with production local-base entry gates.
+
+    ``anchored_entries`` (``symbol``/``side``/``strike``/``ts``, optional ``tier``/``source``/
+    ``liveGated``) replaces tape-derived entry selection with the live funnel's decisions:
+    the tape has no volume, so the elite/top-moment scores that chose live entries cannot
+    be rebuilt. Each anchor is still gated by the current book (side slots, stop cooldown,
+    open-side confirmation, directional lock, session pause, daily loss stop); anchors
+    without ``liveGated`` also run ``check_explosion_entry`` + power-hour quality. Exits run
+    through the current exit engine.
+    """
     from app.engines import explosion_detector, ict_breakout_monitor, session_timing
     from app.engines.explosion_detector import (
         refresh_snapshot_explosion_alerts,
@@ -1148,6 +1307,7 @@ def replay_local_base_day(
 
     # Pre-index the full premium tape so exit simulation can walk forward from entry.
     premium_series: dict[str, list[tuple[datetime, float]]] = defaultdict(list)
+    spot_series: dict[str, list[tuple[datetime, float]]] = defaultdict(list)
     for batch in batches:
         ts_raw = batch.get("ts")
         if not ts_raw:
@@ -1160,6 +1320,7 @@ def replay_local_base_day(
             ts = ts.replace(tzinfo=IST)
         else:
             ts = ts.astimezone(IST)
+        spot_seen: set[str] = set()
         for contract in batch.get("contracts") or []:
             sym = str(contract.get("symbol") or "").upper()
             side = str(contract.get("side") or "").upper()
@@ -1167,6 +1328,10 @@ def replay_local_base_day(
             prem = _f(contract.get("premium"))
             if sym and side in {"CALL", "PUT"} and strike_v > 0 and prem > 0:
                 premium_series[_contract_key(sym, side, strike_v)].append((ts, prem))
+            spot_v = _f(contract.get("spot"))
+            if sym and spot_v > 0 and sym not in spot_seen:
+                spot_seen.add(sym)
+                spot_series[sym].append((ts, spot_v))
 
     reset_detector_state_for_tests()
     from app.engines.directional_lock import record_trade_side, reset_directional_lock
@@ -1199,6 +1364,23 @@ def replay_local_base_day(
     trades_per_key: dict[str, int] = defaultdict(int)
     next_ok_after: Optional[datetime] = None
 
+    live_book = getattr(s, "eod_replay_live_explosion_book_enabled", False) is True
+    dual_side = (
+        live_book
+        and bool(getattr(s, "selector_best_only_enabled", True))
+        and getattr(s, "selector_best_only_dual_side_enabled", False) is True
+    )
+    per_side_stop_cooldown = getattr(s, "explosion_cooldown_per_side_enabled", False) is True
+    # Dual-side book: side -> (exit time, leg) of the open leg; side -> next entry allowed.
+    open_legs: dict[str, tuple[datetime, dict[str, Any]]] = {}
+    side_next_ok: dict[str, datetime] = {}
+    stop_cooldown_until: dict[str, datetime] = {}
+    session_extremes: dict[str, dict[str, Any]] = {}
+
+    from app.engines.index_tick_helpers import (
+        install_replay_session_extremes,
+        restore_replay_session_extremes,
+    )
     from app.models.schemas import AutoTraderState
 
     if replay_state is None:
@@ -1206,7 +1388,273 @@ def replay_local_base_day(
     elite_engine = bool(getattr(s, "elite_trade_engine_enabled", False))
     daily_max = int(getattr(s, "eod_replay_daily_max_trades", 0) or 0)
     session_trades_taken = 0
+    session_pause_enabled = False
 
+    anchors: Optional[list[dict[str, Any]]] = None
+    if anchored_entries is not None:
+        anchors = []
+        for raw in anchored_entries:
+            a_ts = raw.get("ts")
+            if isinstance(a_ts, str):
+                a_ts = datetime.fromisoformat(a_ts)
+            if not isinstance(a_ts, datetime):
+                continue
+            a_ts = a_ts.replace(tzinfo=IST) if a_ts.tzinfo is None else a_ts.astimezone(IST)
+            anchors.append({**raw, "ts": a_ts, "outcome": None})
+        anchors.sort(key=lambda a: a["ts"])
+        batch_times: list[datetime] = []
+        for batch in batches:
+            try:
+                bt = datetime.fromisoformat(str(batch.get("ts") or ""))
+            except ValueError:
+                continue
+            batch_times.append(bt.replace(tzinfo=IST) if bt.tzinfo is None else bt.astimezone(IST))
+        batch_times.sort()
+        # Enter on the tape sample nearest the live fill (the tape can gap for minutes).
+        for a in anchors:
+            i = bisect.bisect_left(batch_times, a["ts"])
+            near = [batch_times[j] for j in (i - 1, i) if 0 <= j < len(batch_times)]
+            best = min(near, key=lambda bt: abs((bt - a["ts"]).total_seconds()), default=None)
+            if best is None or abs((best - a["ts"]).total_seconds()) > anchor_max_lag_seconds:
+                a["outcome"] = "anchor_no_tape_near_entry"
+            else:
+                a["dueTs"] = best
+
+    def _block_due_anchors(now: datetime, reason: str) -> None:
+        for a in anchors or []:
+            if a["outcome"] is None and a["dueTs"] <= now:
+                a["outcome"] = reason
+
+    def _take_trade(
+        *,
+        ts: datetime,
+        sym: str,
+        snap: SymbolSnapshot,
+        alert: dict[str, Any],
+        key: str,
+        moment: Optional[str],
+        ranking: dict[str, Any],
+        assessment: dict[str, Any],
+        entry_reason: str,
+    ) -> dict[str, Any]:
+        nonlocal session_trades_taken, next_ok_after
+        strike_v = _f(alert.get("strike"))
+        side = str(alert.get("side") or "").upper()
+        tier = str(alert.get("tier") or "").upper()
+        ep = _f(alert.get("premium"))
+        base = _f(alert.get("ictBasePremium") or alert.get("basePremium"))
+        if base <= 0:
+            hist = [
+                p for t, p in premium_series.get(key, [])
+                if (ts - t).total_seconds() <= 1200 and p > 0
+            ]
+            base = min(hist) if hist else ep
+        forward = [
+            (t, p)
+            for t, p in premium_series.get(key, [])
+            if t >= ts
+        ]
+        entry_ctx = {
+            "topMomentType": moment,
+            "entryReason": entry_reason,
+            "grade": ranking.get("grade"),
+            "explosionTier": tier,
+            "velocity3s": alert.get("velocity3s"),
+            "volumeSurge": alert.get("volumeSurge"),
+            "ictFlatThenVertical": alert.get("ictFlatThenVertical"),
+            "ictFirstLift": alert.get("ictFirstLift"),
+            "ictArmedBaseLaunch": alert.get("ictArmedBaseLaunch"),
+            "ictEliteBaseReady": alert.get("ictEliteBaseReady"),
+            "ictVRipReady": alert.get("ictVRipReady"),
+            "momentType": classify_top_moment_type(_alert_evidence(alert, snap)),
+        }
+        budget_inr = (
+            _replay_allocator_budget(open_legs, symbol=sym, premium=ep, dual_side=dual_side)
+            if live_book
+            else None
+        )
+        trade = _simulate_trade_from_entry(
+            symbol=sym,
+            side=side,
+            strike=strike_v,
+            tier=tier,
+            entry_ts=ts,
+            entry_premium=ep,
+            base_premium=base,
+            forward=forward,
+            settings=s,
+            entry_ctx=entry_ctx,
+            assessment=assessment if assessment else None,
+            spot_series=spot_series.get(sym),
+            session_extremes=session_extremes,
+            budget_inr=budget_inr,
+        )
+        if open_legs:
+            trade["concurrentWith"] = [
+                f"{leg['symbol']}:{leg['side']}:{leg['strike']:g}"
+                for _x, leg in open_legs.values()
+            ]
+        raw_candidates.append(trade)
+        _record_replay_closed_trade(
+            replay_state,
+            trade,
+            entry_ctx=entry_ctx,
+            session_date=date,
+        )
+        session_trades_taken += 1
+        if elite_engine and assessment:
+            from app.engines.elite_trade_budget import record_elite_trade_entry
+
+            record_elite_trade_entry(
+                replay_state,
+                assessment,
+                symbol=sym,
+                side=side,
+                strike=strike_v,
+                settings=s,
+            )
+        if session_pause_enabled:
+            record_session_trade_close(float(trade.get("pnlInr") or 0))
+        trades_per_key[key] += 1
+        record_trade_side(sym, Side(side), snap)
+        cooldown_until[key] = trade["_exitDt"] + timedelta(
+            seconds=entry_cooldown_seconds
+        )
+        next_ok_after = trade["_exitDt"] + timedelta(
+            seconds=entry_cooldown_seconds
+        )
+        if dual_side:
+            open_legs[side] = (trade["_exitDt"], trade)
+            side_next_ok[side] = next_ok_after
+        if (
+            live_book
+            and trade.get("exitReason") in _EXPLOSION_STOP_COOLDOWN_REASONS
+            and _f(trade.get("pnlInr")) < 0
+        ):
+            stop_secs = _f(
+                getattr(s, "explosion_emergency_cooldown_seconds", 300)
+                if trade.get("exitReason") == "explosion_emergency_stop"
+                else getattr(s, "explosion_reentry_cooldown_seconds", 90),
+                90.0,
+            )
+            stop_key = f"{sym}:{side}" if per_side_stop_cooldown else sym
+            stop_cooldown_until[stop_key] = trade["_exitDt"] + timedelta(seconds=stop_secs)
+        if len(signal_rows) < 500:
+            signal_rows.append({
+                "ts": ts.isoformat(),
+                "key": key,
+                "tier": tier,
+                "premium": ep,
+                "baseRelPct": alert.get("ictBaseRelativeMovePct"),
+                "allowed": True,
+                "reason": entry_reason,
+                "momentType": moment,
+                "grade": ranking.get("grade"),
+            })
+        return trade
+
+    def _take_due_anchors(
+        ts: datetime,
+        batch_snapshots: dict[str, SymbolSnapshot],
+        busy_sides: set[str],
+    ) -> None:
+        """Enter the live funnel's entries on the replay clock, gated by the current book."""
+        taken_sides: set[str] = set()
+        for a in anchors or []:
+            if a["outcome"] is not None or a["dueTs"] > ts:
+                continue
+            sym = str(a.get("symbol") or "").upper()
+            side = str(a.get("side") or "").upper()
+            strike_v = _f(a.get("strike"))
+            key = _contract_key(sym, side, strike_v)
+            if side in busy_sides or side in taken_sides:
+                a["outcome"] = (
+                    "best_only_dual_side_same_side_open" if dual_side else "single_position_open"
+                )
+                continue
+            if not dual_side and next_ok_after is not None and ts < next_ok_after:
+                a["outcome"] = "single_position_open"
+                continue
+            if live_book:
+                stop_key = f"{sym}:{side}" if per_side_stop_cooldown else sym
+                stop_cd = stop_cooldown_until.get(stop_key)
+                if stop_cd is not None and ts < stop_cd:
+                    a["outcome"] = "explosion_cooldown"
+                    continue
+            snap = batch_snapshots.get(sym)
+            contract = (state.get(sym) or {}).get((strike_v, side))
+            if snap is None or not contract or _f(contract.get("premium")) <= 0:
+                a["outcome"] = "anchor_contract_missing"
+                continue
+            alert = next(
+                (
+                    al for al in snap.explosionAlerts or []
+                    if str(al.get("side") or "").upper() == side
+                    and abs(_f(al.get("strike")) - strike_v) < 1e-6
+                ),
+                None,
+            )
+            alert_eval = _enrich_alert_from_contract(
+                dict(alert) if alert else {
+                    "symbol": sym,
+                    "side": side,
+                    "strike": strike_v,
+                    "premium": _f(contract.get("premium")),
+                    "tier": str(a.get("tier") or "EXPLODING"),
+                },
+                contract,
+            )
+            alert_eval["premium"] = _f(contract.get("premium"))
+            if a.get("tier"):
+                alert_eval["tier"] = a["tier"]
+            live_gated = bool(a.get("liveGated"))
+            if live_book:
+                book_ok, book_reason = evaluate_replay_live_explosion_gates(
+                    alert_eval, snap, now=ts, settings=s, signal_gates=not live_gated,
+                )
+                if not book_ok:
+                    a["outcome"] = book_reason
+                    continue
+            if live_gates and live_gated:
+                from app.engines.directional_lock import check_directional_side_lock
+
+                candidate = _candidate_from_alert(alert_eval, snap)
+                dir_blocked, dir_reason = check_directional_side_lock(
+                    sym, candidate.side, snap, tier=candidate.tier, candidate=candidate,
+                )
+                if dir_blocked:
+                    a["outcome"] = dir_reason
+                    continue
+            elif live_gates:
+                live_ok, live_reason = evaluate_replay_live_gates(
+                    alert_eval, snap, batch_snapshots, settings=s, skip_session_gate=True,
+                )
+                if not live_ok:
+                    a["outcome"] = live_reason
+                    continue
+            ranking = rank_trade_evidence(_alert_evidence(alert_eval, snap))
+            trade = _take_trade(
+                ts=ts,
+                sym=sym,
+                snap=snap,
+                alert=alert_eval,
+                key=key,
+                moment=None,
+                ranking=ranking,
+                assessment={},
+                entry_reason=f"anchored:{a.get('source') or 'live'}",
+            )
+            trade["anchorSource"] = a.get("source")
+            if a.get("dailyLossStopBypass"):
+                trade["dailyLossStopBypass"] = True
+            trade["anchorTs"] = a["ts"].strftime("%H:%M:%S")
+            a["outcome"] = "entered"
+            a["trade"] = trade
+            taken_sides.add(side)
+            busy_sides.add(side)
+
+    live_gates = bool(getattr(s, "eod_replay_live_session_gates_enabled", True))
+    extremes_token = install_replay_session_extremes(session_extremes)
     try:
         explosion_detector.datetime = _ReplayDateTime
         ict_breakout_monitor.datetime = _ReplayDateTime
@@ -1310,6 +1758,16 @@ def replay_local_base_day(
                     chartAnalysis=chart_analysis,
                     tradeQualityScore=55.0,
                 )
+                if spot > 0:
+                    ext = session_extremes.get(sym)
+                    if ext is None:
+                        session_extremes[sym] = {
+                            "date": date, "open": spot, "hi": spot, "lo": spot, "last": spot,
+                        }
+                    else:
+                        ext["hi"] = max(float(ext.get("hi") or spot), spot)
+                        ext["lo"] = min(float(ext.get("lo") or spot), spot)
+                        ext["last"] = spot
                 refresh_snapshot_explosion_alerts(snap)
                 batch_snapshots[sym] = snap
 
@@ -1320,16 +1778,31 @@ def replay_local_base_day(
 
             batch_day_mode = resolve_session_day_mode(batch_snapshots)
 
-            if next_ok_after is not None and ts < next_ok_after:
+            busy_sides: set[str] = set()
+            if dual_side:
+                for side_name in ("CALL", "PUT"):
+                    leg = open_legs.get(side_name)
+                    if leg is not None and ts >= leg[0]:
+                        open_legs.pop(side_name, None)
+                        leg = None
+                    nxt = side_next_ok.get(side_name)
+                    if leg is not None or (nxt is not None and ts < nxt):
+                        busy_sides.add(side_name)
+                if len(busy_sides) >= 2 and anchors is None:
+                    continue
+            elif next_ok_after is not None and ts < next_ok_after and anchors is None:
                 continue
 
             if daily_max > 0 and session_trades_taken >= daily_max:
                 gate_stats["eod_replay_daily_cap"] += 1
+                _block_due_anchors(ts, "eod_replay_daily_cap")
                 continue
 
             if win_start is not None and ts < win_start:
+                _block_due_anchors(ts, "outside_replay_window")
                 continue
             if win_end is not None and ts > win_end:
+                _block_due_anchors(ts, "outside_replay_window")
                 continue
 
             session_gate_blocked = False
@@ -1348,6 +1821,7 @@ def replay_local_base_day(
                     if not session_ok:
                         gate_stats[session_reason] += 1
                         session_gate_blocked = True
+                        _block_due_anchors(ts, session_reason)
 
             if session_gate_blocked:
                 continue
@@ -1360,6 +1834,7 @@ def replay_local_base_day(
                 )
                 if entry_paused:
                     gate_stats[pause_reason] += 1
+                    _block_due_anchors(ts, pause_reason)
                     continue
                 elite_only = bool(pause_meta.get("lossStreakEliteOnly"))
                 large_loss_elite_only = bool(pause_meta.get("largeLossPauseBypass"))
@@ -1367,6 +1842,10 @@ def replay_local_base_day(
                     gate_stats["large_loss_pause_bypass_active"] += 1
                 elif elite_only:
                     gate_stats["loss_streak_elite_bypass_active"] += 1
+
+            if anchors is not None:
+                _take_due_anchors(ts, batch_snapshots, busy_sides)
+                continue
 
             ranked_candidates: list[dict[str, Any]] = []
             for sym, snap in batch_snapshots.items():
@@ -1386,6 +1865,15 @@ def replay_local_base_day(
                     if cd is not None and ts < cd:
                         gate_stats["contract_cooldown"] += 1
                         continue
+                    if side in busy_sides:
+                        gate_stats["best_only_dual_side_same_side_open"] += 1
+                        continue
+                    if live_book:
+                        stop_key = f"{sym}:{side}" if per_side_stop_cooldown else sym
+                        stop_cd = stop_cooldown_until.get(stop_key)
+                        if stop_cd is not None and ts < stop_cd:
+                            gate_stats["explosion_cooldown"] += 1
+                            continue
 
                     contract = symbol_state.get((strike_v, side))
                     alert_eval = _enrich_alert_from_contract(alert, contract)
@@ -1488,6 +1976,24 @@ def replay_local_base_day(
                             })
                         continue
 
+                    if live_book:
+                        book_ok, book_reason = evaluate_replay_live_explosion_gates(
+                            alert_eval, snap, now=ts, settings=s,
+                        )
+                        if not book_ok:
+                            gate_stats[book_reason] += 1
+                            if len(signal_rows) < 500:
+                                signal_rows.append({
+                                    "ts": ts.isoformat(),
+                                    "key": key,
+                                    "tier": alert.get("tier"),
+                                    "premium": alert.get("premium"),
+                                    "baseRelPct": alert.get("ictBaseRelativeMovePct"),
+                                    "allowed": False,
+                                    "reason": book_reason,
+                                })
+                            continue
+
                     gate_stats["entry_allowed"] += 1
                     if live_gates:
                         live_ok, live_reason = evaluate_replay_live_gates(
@@ -1556,100 +2062,25 @@ def replay_local_base_day(
             ranking = pick["ranking"]
             assessment = pick.get("assessment") or {}
             entry_reason = pick.get("entryReason") or ""
-            strike_v = _f(alert.get("strike"))
-            side = str(alert.get("side") or "").upper()
-            tier = str(alert.get("tier") or "").upper()
-            ep = _f(alert.get("premium"))
-            base = _f(alert.get("ictBasePremium") or alert.get("basePremium"))
-            if base <= 0:
-                hist = [
-                    p for t, p in premium_series.get(key, [])
-                    if (ts - t).total_seconds() <= 1200 and p > 0
-                ]
-                base = min(hist) if hist else ep
-
             _, entry_reason_check, moment, ranking = evaluate_local_base_entry(
                 alert, snap, settings=s, day_mode=batch_day_mode,
             )
-            if not entry_reason:
-                entry_reason = entry_reason_check
-            forward = [
-                (t, p)
-                for t, p in premium_series.get(key, [])
-                if t >= ts
-            ]
-            entry_ctx = {
-                "topMomentType": moment,
-                "entryReason": entry_reason,
-                "grade": ranking.get("grade"),
-                "explosionTier": tier,
-                "velocity3s": alert.get("velocity3s"),
-                "volumeSurge": alert.get("volumeSurge"),
-                "ictFlatThenVertical": alert.get("ictFlatThenVertical"),
-                "ictFirstLift": alert.get("ictFirstLift"),
-                "ictArmedBaseLaunch": alert.get("ictArmedBaseLaunch"),
-                "ictEliteBaseReady": alert.get("ictEliteBaseReady"),
-                "ictVRipReady": alert.get("ictVRipReady"),
-                "momentType": classify_top_moment_type(_alert_evidence(alert, snap)),
-            }
-            trade = _simulate_trade_from_entry(
-                symbol=sym,
-                side=side,
-                strike=strike_v,
-                tier=tier,
-                entry_ts=ts,
-                entry_premium=ep,
-                base_premium=base,
-                forward=forward,
-                settings=s,
-                entry_ctx=entry_ctx,
-                assessment=assessment if assessment else None,
+            _take_trade(
+                ts=ts,
+                sym=sym,
+                snap=snap,
+                alert=alert,
+                key=key,
+                moment=moment,
+                ranking=ranking,
+                assessment=assessment,
+                entry_reason=entry_reason or entry_reason_check,
             )
-            raw_candidates.append(trade)
-            _record_replay_closed_trade(
-                replay_state,
-                trade,
-                entry_ctx=entry_ctx,
-                session_date=date,
-            )
-            session_trades_taken += 1
-            if elite_engine and assessment:
-                from app.engines.elite_trade_budget import record_elite_trade_entry
-
-                record_elite_trade_entry(
-                    replay_state,
-                    assessment,
-                    symbol=sym,
-                    side=side,
-                    strike=strike_v,
-                    settings=s,
-                )
-            if session_pause_enabled:
-                record_session_trade_close(float(trade.get("pnlInr") or 0))
-            trades_per_key[key] += 1
-            record_trade_side(sym, Side(side), snap)
-            cooldown_until[key] = trade["_exitDt"] + timedelta(
-                seconds=entry_cooldown_seconds
-            )
-            next_ok_after = trade["_exitDt"] + timedelta(
-                seconds=entry_cooldown_seconds
-            )
-            if len(signal_rows) < 500:
-                signal_rows.append({
-                    "ts": ts.isoformat(),
-                    "key": key,
-                    "tier": tier,
-                    "premium": ep,
-                    "baseRelPct": alert.get("ictBaseRelativeMovePct"),
-                    "allowed": True,
-                    "reason": entry_reason,
-                    "momentType": moment,
-                    "grade": ranking.get("grade"),
-                })
 
     finally:
         from app.config import set_settings_override
 
+        restore_replay_session_extremes(extremes_token)
         set_settings_override(None)
         (
             explosion_detector.datetime,
@@ -1662,19 +2093,49 @@ def replay_local_base_day(
         reset_detector_state_for_tests()
         reset_session_guards()
 
-    taken = apply_portfolio_limits(raw_candidates, settings=s)
+    book_settings = (
+        s.model_copy(update={"eod_report_max_concurrent": 2, "eod_report_same_side_cap": 1})
+        if dual_side and hasattr(s, "model_copy")
+        else s
+    )
+    taken = apply_portfolio_limits(raw_candidates, settings=book_settings)
+    taken_ids = {id(t) for t in taken}
+    anchor_rows: Optional[list[dict[str, Any]]] = None
+    if anchors is not None:
+        anchor_rows = []
+        for a in anchors:
+            trade = a.get("trade")
+            outcome = a["outcome"] or "anchor_after_tape"
+            if trade is not None and id(trade) not in taken_ids:
+                outcome = "portfolio_limit_or_daily_loss_stop"
+            anchor_rows.append({
+                "key": _contract_key(
+                    str(a.get("symbol") or "").upper(),
+                    str(a.get("side") or "").upper(),
+                    _f(a.get("strike")),
+                ),
+                "ts": a["ts"].strftime("%H:%M:%S"),
+                "source": a.get("source"),
+                "outcome": outcome,
+            })
     for t in taken:
         t.pop("_entryDt", None)
         t.pop("_exitDt", None)
 
     total = round(sum(_f(t.get("pnlInr")) for t in taken), 0)
     wins = sum(1 for t in taken if _f(t.get("pnlInr")) > 0)
-    daily_stop = _f(getattr(s, "daily_loss_stop_inr", 20_000.0), 20_000.0)
+    daily_stop = _replay_daily_stop(s)
 
-    mode = "local_base_system_params"
+    mode = "live_explosion_book" if live_book else "local_base_system_params"
+    if anchors is not None:
+        mode = "anchored_live_entries"
     if win_start or win_end or side_filter_v:
         mode = "window_replay"
+    extra: dict[str, Any] = {}
+    if anchor_rows is not None:
+        extra["anchors"] = anchor_rows
     return {
+        **extra,
         "date": date,
         "status": "ok",
         "mode": mode,
@@ -1694,7 +2155,15 @@ def replay_local_base_day(
             "Full-tape replay with production top-moment + first-lift + "
             "local-base window gates + elite budget/dedup + assessment-based "
             "exit bundle + live session gates (power hour, directional lock, "
-            "best-side rank). One position at a time + daily loss stop."
+            "best-side rank). "
+            + (
+                "Live explosion book: check_explosion_entry + open-side confirmation "
+                "+ stop cooldown; "
+                + ("one leg per side (CE + PE at once)" if dual_side else "one position at a time")
+                if live_book
+                else "One position at a time"
+            )
+            + " + daily loss stop."
         ),
         "trades": taken,
     }

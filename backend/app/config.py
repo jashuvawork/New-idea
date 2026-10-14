@@ -595,6 +595,38 @@ class Settings(BaseSettings):
     # Minimum hold before adaptive SL on executed entries — Sep15 23500 PE exited @77s.
     executed_entry_min_hold_before_loss_seconds: int = 300
     executed_entry_elite_min_hold_before_loss_seconds: int = 600
+    # Hard stops that ignore every min-hold / defer above. Oct 13 NIFTY 22300 PE: ELITE
+    # 600s min-hold kept a never-green ₹68 leg open through its ₹56 stop to ₹15 (−₹37.9k).
+    never_green_hard_stop_enabled: bool = False
+    # "Never green" = best ≤ max(0.5pt, this % of entry premium).
+    never_green_hard_stop_max_best_pct: float = 2.0
+    never_green_hard_stop_min_hold_seconds: float = 5.0
+    # Any leg (green or not) down this % of entry premium exits immediately. 0 = off.
+    catastrophic_loss_stop_pct: float = 0.0
+    # Oct 13 NIFTY 22250 CE: peak +17.75pt (< 75pt stage) left only the +1pt cushion;
+    # booked +0.9pt on a flat-index dip, then the CE ran ~+45pt. Hold the cushion
+    # while the index holds entry (CE: not below / PE: not above, within tolerance).
+    breakeven_shakeout_hold_enabled: bool = False
+    breakeven_shakeout_hold_index_tolerance_pct: float = 0.05
+    breakeven_shakeout_hold_max_loss_pct: float = 4.0
+    # Oct 13 NIFTY 22250 CE (entry 264): best +40.8pt, a 305→295 dip (−3% premium) hit the
+    # 75% points-keep floor while NIFTY held entry; the CE then ran to 495. On deep-ITM
+    # premiums a points-keep floor is index noise, so green profit locks defer while the
+    # premium is within max_pullback_pct of its peak, keeps min_keep_ratio of the best,
+    # and the index holds entry (CALL: not below / PUT: not above, within tolerance).
+    # Oct 13 NIFTY open V-rip: every ELITE score-100 CE (22250–22350, +155–251% MFE) was
+    # gated smart_ichimoku_cloud_below_not_above for 09:17–09:27 while NIFTY ripped off
+    # its session low — the lagging cloud cannot confirm a reversal. Waive the cloud gate
+    # when index_rally_side_flip_bypass confirms the move (CALL: rally off session low,
+    # PUT: slide off session high, with aligned RSI / MACD / mom5).
+    smart_ichimoku_index_rally_bypass_enabled: bool = False
+    deep_itm_runner_pullback_hold_enabled: bool = False
+    # NIFTY premium; × symbol_premium_scale per index (SENSEX ₹300 at the default 3×).
+    deep_itm_runner_pullback_hold_min_entry_premium: float = 100.0
+    deep_itm_runner_pullback_hold_min_best_pct: float = 5.0
+    deep_itm_runner_pullback_hold_max_pullback_pct: float = 8.0
+    deep_itm_runner_pullback_hold_min_keep_ratio: float = 0.35
+    deep_itm_runner_pullback_hold_index_tolerance_pct: float = 0.05
     mid_rip_never_green_grace_seconds: float = 600.0
     # Sep15 NIFTY 23400 PE: ELITE v_rip_session_low at 20–27% off base blocked elite_v_rip_only + local cap.
     elite_mega_vertical_bypass_enabled: bool = True
@@ -1676,8 +1708,26 @@ class Settings(BaseSettings):
     # Point-arm on max-profit legs still needs this min % off entry (Oct7 72600 CE +20pt
     # but +5% scratched; Sep2 +31pt at +11.7% still arms).
     ftv_runner_pct_trail_max_profit_min_gain_pct: float = 8.0
+    # Point-arm scales down on cheap premiums: arm at min(20pt, this % of entry). Oct 12
+    # NIFTY 22300 PE @ ₹58.5 peaked +10.2pt (+17%, ₹7.3k) and rode back to +₹2k (20pt = 34%).
+    ftv_runner_pct_trail_arm_min_best_pct_of_entry: float = 15.0
     ftv_runner_pct_trail_keep_ratio: float = 0.75
     ftv_runner_pct_trail_min_best_points: float = 6.0
+    # Unified profit ladder — one ratcheting floor in % of entry premium that folds
+    # breakeven lock, 75% peak-keep and N×/k× capture together. Legacy exit layers
+    # still run after it; whichever floor is higher books first.
+    unified_profit_ladder_enabled: bool = False
+    unified_profit_ladder_min_best_points: float = 4.0
+    unified_profit_ladder_min_hold_seconds: float = 60.0
+    unified_profit_ladder_breakeven_arm_pct: float = 8.0
+    unified_profit_ladder_breakeven_lock_pct: float = 2.0
+    unified_profit_ladder_keep_arm_pct: float = 15.0
+    unified_profit_ladder_keep_ratio: float = 0.75
+    unified_profit_ladder_multiple_arm_ratio: float = 2.0
+    unified_profit_ladder_multiple_min_giveback_points: float = 3.0
+    unified_profit_ladder_multiple_min_giveback_pct_of_peak: float = 5.0
+    unified_profit_ladder_fast_fade_velocity_3s: float = 2.0
+    unified_profit_ladder_hot_defer_velocity_3s: float = 2.0
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.
@@ -1999,6 +2049,10 @@ class Settings(BaseSettings):
     explosion_thesis_hold_skip_time_exit: bool = True  # no time_stop once thesis is green
     explosion_reentry_cooldown_seconds: int = 180
     explosion_emergency_cooldown_seconds: int = 300
+    # Oct 13 NIFTY: the 09:27 22300 PE stop put every NIFTY CE (the move's side, +120–311%
+    # MFE) into the 180s cooldown — 1,093 blocks. A stop cools only its own side (CALL or
+    # PUT on that index); the opposite side stays free to take its momentum.
+    explosion_cooldown_per_side_enabled: bool = False
     # A just-captured FTV peak remains exhausted until this exact CE/PE contract
     # builds a fresh post-close base and accelerates again.
     explosion_post_peak_reentry_guard_enabled: bool = True
@@ -2121,6 +2175,11 @@ class Settings(BaseSettings):
     eod_replay_structural_gates_enabled: bool = True
     # Optional full validate_candidate stack — heavier; default off.
     eod_replay_pretrade_enabled: bool = False
+    # Replay the live explosion book: check_explosion_entry (chart/breadth/Smart Ichimoku
+    # + index-rally bypass), open-side confirmation, the explosion stop cooldown
+    # (per side when explosion_cooldown_per_side_enabled) and, with
+    # selector_best_only_dual_side_enabled, one leg per side sized like the live allocator.
+    eod_replay_live_explosion_book_enabled: bool = False
     # Full-tape replay tuning (NOT wired to live auto-trader). Profile A/B showed
     # entry caps + legacyBypass blocks drop winners without improving net P&L — keep
     # exit-side fixes in explosion_profit and use these only for explicit research.
@@ -2744,6 +2803,16 @@ class Settings(BaseSettings):
     tier_promotion_pad_chase_min_base_rel_pct: float = 8.0
     # Best-only selector — one top-ranked explosion per radar cycle; rank-1 at selection.
     selector_best_only_enabled: bool = True
+    # CE + PE same session at the same time: while one explosive leg is open, best-only may
+    # open ONE more on the opposite side (never a second same-side leg). The first leg
+    # leaves reserve_pct of the capital base free so the opposite leg can still buy;
+    # the opposite leg uses the remaining book. Reserve only applies with the flag on.
+    selector_best_only_dual_side_enabled: bool = False
+    selector_best_only_dual_side_reserve_pct: float = 0.30
+    # A long option ties up only the premium paid. On, open legs count at entry cost
+    # (never a winner's mark) in the sizing book and risk-engine margin check, so a CE
+    # runner up 40%+ no longer leaves the opposite PE leg ₹0 (Oct 13 dual-side audit).
+    capital_commit_at_entry_cost_enabled: bool = False
     # Grade-A BUILDING armed_base_option_led_ready on live selector — enter at local
     # base before ELITE/EXPLODING promote (Aug28 NIFTY PUT 24200/24100 ~1h late).
     # Archive week in-window false-start rate ~7.5% (3/40); win rate ~75%.
@@ -3006,6 +3075,12 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
+    # 09:15 → open_caution_until: entry side must be confirmed by today's index tape
+    # (move off session open + side half of session range). Mirrored CE / PE.
+    open_side_confirmation_enabled: bool = False
+    open_side_confirmation_min_minutes: float = 5.0
+    open_side_confirmation_min_index_move_pct: float = 0.10
+    open_side_confirmation_min_range_position: float = 0.6
     open_caution_min_explosion_score: int = 45
     open_caution_score_bonus: int = 0
     open_caution_min_rank_score: float = 55.0
@@ -3254,14 +3329,30 @@ class Settings(BaseSettings):
     # Frozen Oct slide/rally: ITM rip may exceed ₹350 cap while still Oct 1 ATM/ITM capture.
     oct_paper_slide_explosion_max_premium_inr: float = 650.0
     oct_paper_slide_premium_waiver_enabled: bool = True
+    # Oct 1 / Oct 5 paper replica: radar, selection and entry as those sessions ran
+    # (no post-Oct 5 waivers, pad guard, ₹18–350 scan band or strict ATM/ITM execution).
+    # Exits stay current. Set in deploy/env.october-frozen.overlay.
+    oct_paper_replica_enabled: bool = False
     # Oct 1 first-lift / small-lift at pad — waive chase blockers (not negative_velocity).
     oct_paper_first_lift_small_lift_waiver_enabled: bool = True
+    # Oct 1 / #730: near-base structural rip may enter while live 3s velocity is briefly negative.
+    oct_paper_first_lift_negative_velocity_waiver_enabled: bool = True
+    # Live+paper parity: prefer peak-keep / velocity-reversal over implicit stage-trail on first lifts.
+    oct_paper_peak_keep_exit_parity_enabled: bool = True
+    oct_paper_exec_strict_bypass_enabled: bool = True
+    oct_paper_same_side_reentry_waiver_enabled: bool = True
+    oct_paper_reentry_ml_waiver_enabled: bool = True
+    oct_paper_reference_capital_inr: float = 149_000.0
     oct_paper_first_lift_small_lift_min_local_pct: float = 2.0
     oct_paper_first_lift_small_lift_max_local_pct: float = 40.0
     oct_paper_first_lift_small_lift_session_expansion_max_local_pct: float = 55.0
     oct_paper_first_lift_small_lift_max_strike_steps: int = 3
     oct_paper_open_moment_max_local_pct: float = 70.0
     oct_paper_open_moment_pad_waiver_enabled: bool = True
+    # Oct 12 RCA: open index flip (CALL rally / PUT slide) — capped OTM + early pad floor
+    oct_open_index_flip_max_otm_steps: int = 2
+    oct_open_index_flip_min_pad_pct: float = 3.0
+    oct_open_index_flip_max_pad_chase_rel_pct: float = 32.0
     # After 09:45 IST: negative v3 ELITE rip only if still small lift off base (blocks late chase).
     oct_paper_elite_rip_max_local_outside_open_pct: float = 28.0
 
@@ -3342,6 +3433,13 @@ class Settings(BaseSettings):
     # strongest approved contracts first instead of spending the whole book on one leg.
     fallback_capital_inr: float = 200_000
     max_sizing_capital_inr: float = 200_000
+    # Daily budget: the book set via POST /api/capital (or FALLBACK_CAPITAL_INR) is the
+    # sizing capital, and the INR risk limits below follow it as % of that book.
+    capital_scaled_risk_limits_enabled: bool = False
+    daily_loss_stop_capital_pct: float = 10.0
+    emergency_stop_capital_pct: float = 10.0
+    max_risk_per_trade_capital_pct: float = 2.0
+    session_large_loss_pause_capital_pct: float = 4.0
     per_trade_capital_pct: float = 0.90
     ftv_ranked_allocation_enabled: bool = True
     ftv_allocation_weights_csv: str = "0.60,0.25,0.10"
@@ -3417,7 +3515,8 @@ class Settings(BaseSettings):
     # Exit reasons that arm the cooldown (never-green hard cut often lacks v3<0).
     # adaptive_stop_loss counts only when best ≤ explosion_failed_launch_max_best_points.
     explosion_failed_launch_reentry_exit_reasons_csv: str = (
-        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
+        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss,"
+        "explosion_never_green_hard_stop"
     )
     # Same symbol+side cooldown after a red close that had a material peak (trail giveback).
     peak_fade_same_side_reentry_enabled: bool = True
@@ -3798,9 +3897,10 @@ class Settings(BaseSettings):
     radar_archive_enabled: bool = True
     radar_archive_dir: str = ""  # default: {trade_store_dir}/radar_archives
     radar_archive_top_n_per_day: int = 100
-    # Keep one trading week of daily archives for EOD replay / tradeability review.
-    # Premium tapes are large; unbounded retention fills the disk and stalls the backend.
-    radar_archive_retention_days: int = 7
+    # Daily radar-YYYY-MM-DD.zip retention on local disk. 0 = keep every finalized EOD ZIP.
+    # Intraday telemetry JSONL uses radar_telemetry_retention_days (purged after finalize).
+    radar_archive_retention_days: int = 0
+    radar_telemetry_retention_days: int = 7
     # When true, daily finalize ZIPs only bundle artifacts needed for EOD replay and
     # funnel/scorecard analysis (premium tape, funnel, scorecard). Skips alerts tape,
     # pipeline history, and per-day FTV calibration blobs.
@@ -3817,6 +3917,9 @@ class Settings(BaseSettings):
     # slow/OOM restart loop. 10s granularity still replays FTV/V base lifts fine, and the LIVE
     # trigger never uses the tape. Set 0 only for short debug windows.
     radar_premium_tape_sample_seconds: int = 10
+    # Per-append fsync on radar telemetry JSONL. Off: on a throttled EBS volume it stalled
+    # the event loop past the 20s watchdog (Oct 13 midday restart loop).
+    radar_telemetry_fsync_enabled: bool = False
     # Cap how much of the (append-only, time-ordered) premium tape the startup restore reads.
     # It only needs the last ~35 min, so tail-read at most this many bytes instead of parsing
     # the whole intraday file — bounds startup time/memory regardless of tape size.

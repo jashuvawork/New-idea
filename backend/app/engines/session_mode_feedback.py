@@ -453,10 +453,10 @@ def _failed_launch_reentry_exit_reasons(settings: Any) -> set[str]:
     raw = getattr(
         settings,
         "explosion_failed_launch_reentry_exit_reasons_csv",
-        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss",
+        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss,explosion_never_green_hard_stop",
     )
     if not isinstance(raw, str) or not raw.strip():
-        raw = "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
+        raw = "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss,explosion_never_green_hard_stop"
     return {part.strip() for part in raw.split(",") if part.strip()}
 
 
@@ -764,6 +764,20 @@ def reentry_ml_win_prob_blocked(
     if waived:
         meta.update(waive_meta)
         meta["applied"] = False
+        return False, meta
+
+    from app.engines.live_paper_parity import (
+        oct_paper_structural_pad_context,
+        oct_paper_entry_loosening_active,
+    )
+
+    if (
+        bool(getattr(settings, "oct_paper_reentry_ml_waiver_enabled", True))
+        and oct_paper_entry_loosening_active(settings)
+        and isinstance(alert, dict)
+        and oct_paper_structural_pad_context(alert, settings=settings)
+    ):
+        meta.update({"octPaperReentryMlWaived": True})
         return False, meta
 
     session_min = float(
@@ -1310,6 +1324,28 @@ def session_same_side_loss_reentry_blocked(
         return False, meta
     prior = _latest_same_side_loss_close(state, side=side)
     if prior is None or getattr(prior, "closedAt", None) is None:
+        return False, meta
+
+    alert_row = None
+    if candidate is not None:
+        raw_alert = getattr(candidate, "alert", None)
+        if isinstance(raw_alert, dict):
+            alert_row = raw_alert
+    strike = 0.0
+    if candidate is not None:
+        try:
+            strike = float(getattr(candidate, "strike", 0) or 0)
+        except (TypeError, ValueError):
+            strike = 0.0
+    from app.engines.live_paper_parity import oct_paper_same_side_reentry_after_loss_waived
+
+    if oct_paper_same_side_reentry_after_loss_waived(
+        prior_loss_trade=prior,
+        strike=strike,
+        alert=alert_row,
+        settings=settings,
+    ):
+        meta.update({"octPaperSameSideReentryWaived": True})
         return False, meta
 
     now = datetime.now(_IST)
