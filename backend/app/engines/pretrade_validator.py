@@ -1550,6 +1550,12 @@ def validate_candidate(
         index_trough_bypass = index_trough_momentum_turn(
             candidate.side, snap.spotChart,
         )
+    if not index_trough_bypass:
+        from app.engines.index_rally_side_flip import index_flip_waives_chart_align
+
+        if index_flip_waives_chart_align(candidate.side, snap):
+            index_trough_bypass = True
+            meta["indexFlipChartBypass"] = True
     if index_trough_bypass:
         meta["indexTroughChartBypass"] = True
     blocked_chart, chart_reason = chart_blocks_side(

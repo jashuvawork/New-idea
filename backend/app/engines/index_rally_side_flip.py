@@ -248,3 +248,21 @@ def index_rally_side_flip_bypass(
     return _put_slide_bypass(
         sym, snap, settings, locked=locked, direction=direction, breadth=breadth,
     )
+
+
+def index_flip_waives_chart_align(
+    side: Side | str,
+    snap: SymbolSnapshot | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Confirmed index rally (CALL) / slide (PUT) clears the lagging 5m chart-align gate."""
+    settings = settings or get_settings()
+    if getattr(settings, "index_flip_chart_align_waiver_enabled", False) is not True:
+        return False
+    if snap is None:
+        return False
+    ok, _reason, _metrics = index_rally_side_flip_bypass(
+        str(getattr(snap, "symbol", "") or ""), side, snap, settings=settings,
+    )
+    return bool(ok)

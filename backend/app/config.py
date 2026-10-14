@@ -620,6 +620,10 @@ class Settings(BaseSettings):
     # when index_rally_side_flip_bypass confirms the move (CALL: rally off session low,
     # PUT: slide off session high, with aligned RSI / MACD / mom5).
     smart_ichimoku_index_rally_bypass_enabled: bool = False
+    # Oct 14 13:17–13:58 CALL flip back (SENSEX/NIFTY CE +40–54%) blocked chart_not_aligned
+    # while the 5m spot direction still read the morning slide. Same confirmation as above
+    # (CALL rally off session low / PUT slide off session high) waives the chart-align gate.
+    index_flip_chart_align_waiver_enabled: bool = False
     # Oct 14 14:35 SENSEX 72800 PE: always-max lots skipped the per-trade risk check and
     # one stop (₹5.6k) exceeded the ₹4.1k left of the ₹5k daily stop (−₹6.0k realised).
     # Cap every entry's lots so stop × units ≤ frac × remaining daily-loss budget
