@@ -252,6 +252,7 @@ def _ensure_state_loaded() -> None:
                     pass
             try:
                 side_raw = str(row.get("side", "CALL")).upper()
+                max_ltp_at_raw = row.get("maxLtpAt")
                 _auto_trader_state.closedPaperTrades.append(PaperTrade(
                     id=tid or f"restored-{restored_closed}",
                     symbol=str(row.get("symbol", "")),
@@ -262,6 +263,10 @@ def _ensure_state_loaded() -> None:
                     lots=int(row.get("lots") or 1),
                     exitPremium=float(row.get("exitPremium") or row.get("entryPremium") or 0),
                     pnlInr=float(row.get("pnlInr") or 0),
+                    pnlPoints=float(row.get("pnlPoints") or 0),
+                    bestPnlPoints=float(row.get("bestPnlPoints") or 0),
+                    maxLtp=float(row["maxLtp"]) if row.get("maxLtp") is not None else None,
+                    maxLtpAt=datetime.fromisoformat(str(max_ltp_at_raw)) if max_ltp_at_raw else None,
                     openedAt=datetime.fromisoformat(str(row.get("openedAt"))) if row.get("openedAt") else datetime.now(IST),
                     closedAt=datetime.fromisoformat(str(closed_raw)) if closed_raw else None,
                     status="CLOSED",
