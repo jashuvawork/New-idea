@@ -674,6 +674,8 @@ def check_explosion_entry(
                 if snap is not None
                 else False
             )
+            from app.engines.index_rally_side_flip import index_flip_waives_chart_align
+
             if not (
                 premium_bypass
                 or local_ichi_bypass
@@ -681,6 +683,7 @@ def check_explosion_entry(
                 or early_pad
                 or afternoon_capture_skips_chart_block(event, align_chart)
                 or is_all_day_explosion_event(event, chart=align_chart)
+                or index_flip_waives_chart_align(event.side, snap, settings=settings)
             ):
                 return False, "explosion_requires_chart_align"
 
@@ -959,6 +962,7 @@ def check_explosion_entry(
 
     afternoon_chart_skip = afternoon_capture_skips_chart_block(event, chart)
     all_day_capture = is_all_day_explosion_event(event, chart=chart)
+    from app.engines.index_rally_side_flip import index_flip_waives_chart_align
 
     blocked_chart, chart_reason = chart_blocks_side(
         event.side,
@@ -967,6 +971,7 @@ def check_explosion_entry(
         momentum_surge=index_moment,
         premium_led_bypass=premium_bypass or afternoon_chart_skip or all_day_capture,
         expiry_explosion_bypass=expiry_chart_bypass,
+        index_trough_bypass=index_flip_waives_chart_align(event.side, snap),
     )
     # Aug6 hard-counter-trend may ignore premium_led_bypass inside chart_blocks_side;
     # still allow intentional afternoon / all-day / premium-led capture paths here.

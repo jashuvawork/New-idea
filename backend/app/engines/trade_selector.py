@@ -855,11 +855,14 @@ def _explosion_candidates(
                     side_v = _Side(side_raw)
                 except Exception:
                     side_v = None
+            from app.engines.index_rally_side_flip import index_flip_waives_chart_align
+
             if (
                 side_v is not None
                 and snap.spotChart is not None
                 and not side_aligned_with_chart(side_v, snap.spotChart)
                 and not lift_ready
+                and not index_flip_waives_chart_align(side_v, snap, settings=settings)
             ):
                 # A confirmed local base off which the side is breaking may survive the
                 # chart-align drop — mirror check_explosion_entry so a genuine base rip
@@ -3159,11 +3162,12 @@ def diagnose_missed_entries(
                 from app.engines.bullish_local_base import alert_bullish_local_base_active
                 from app.engines.ftv_candlestick_confirm import ftv_candlestick_chart_bypass
                 from app.engines.spot_direction import index_trough_momentum_turn
+                from app.engines.index_rally_side_flip import index_flip_waives_chart_align
 
                 side_raw = str(alert.get("side") or "").upper()
-                index_turn_ok = (
-                    side_raw in ("CALL", "PUT")
-                    and index_trough_momentum_turn(side_raw, snap.spotChart)
+                index_turn_ok = side_raw in ("CALL", "PUT") and (
+                    index_trough_momentum_turn(side_raw, snap.spotChart)
+                    or index_flip_waives_chart_align(side_raw, snap, settings=settings)
                 )
                 if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
                     pad_lane_chart_ok = False
