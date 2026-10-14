@@ -2232,6 +2232,31 @@ async def _open_from_candidate(
         ignore_daily_loss_stop = candidate_qualifies_expiry_daily_loss_stop_bypass(
             candidate, snapshots,
         )
+    if not ignore_daily_loss_stop:
+        from app.engines.capital_allocator import compute_session_pnl
+        from app.engines.capital_risk_limits import daily_loss_budget_lot_cap
+
+        budget_lots, budget_meta = daily_loss_budget_lot_cap(
+            lots=lots,
+            lot_mult=lot_mult,
+            stop_points=final_stop_points,
+            session_pnl_inr=compute_session_pnl(state),
+            settings=settings,
+        )
+        if budget_meta and budget_lots < lots:
+            if budget_lots < 1:
+                return False, "entry_stop_exceeds_daily_loss_budget"
+            lots = budget_lots
+            if exit_plan is not None:
+                exit_plan["lots"] = lots
+                reasons = list(exit_plan.get("reasoning") or [])
+                reasons.append(
+                    f"Daily-loss budget cap: {budget_meta['requestedLots']}→{lots} lots "
+                    f"(stop risk ₹{budget_meta['requestedStopRiskInr']:,.0f} > "
+                    f"₹{budget_meta['budgetInr']:,.0f} left)"
+                )
+                exit_plan["reasoning"] = reasons
+                exit_plan["dailyLossBudgetCap"] = budget_meta
     ignore_per_trade_risk = always_max_entry or _ignore_per_trade_risk_cap_for_entry(
         elite_full_lot=bool(elite_full_lot),
         top_rank_full_budget_lots=bool(top_rank_full_budget_lots),

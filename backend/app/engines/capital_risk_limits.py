@@ -58,6 +58,43 @@ def risk_limit_inr(field: str, settings: Any = None, *, runtime: bool = True) ->
     return round(book * pct / 100.0, 2)
 
 
+def daily_loss_budget_lot_cap(
+    *,
+    lots: int,
+    lot_mult: int,
+    stop_points: float,
+    session_pnl_inr: float,
+    settings: Any = None,
+) -> tuple[int, dict[str, Any]]:
+    """Largest lot count whose stop loss still fits what is left of the daily loss stop.
+
+    Session profit does not widen the budget past one full daily stop, so a single
+    all-in stop-out can never on its own carry the session through the daily loss stop.
+    """
+    s = settings or get_settings()
+    if getattr(s, "entry_stop_daily_budget_cap_enabled", False) is not True:
+        return int(lots), {}
+    loss_stop = abs(risk_limit_inr("daily_loss_stop_inr", s))
+    stop_pts = _num(stop_points)
+    if loss_stop <= 0 or stop_pts <= 0 or lot_mult <= 0 or lots <= 0:
+        return int(lots), {}
+    remaining = min(loss_stop, loss_stop + _num(session_pnl_inr))
+    frac = _num(getattr(s, "entry_stop_daily_budget_frac", 1.0)) or 1.0
+    budget = max(0.0, remaining * max(0.0, min(1.0, frac)))
+    risk_one = stop_pts * lot_mult
+    fit = int(budget // risk_one)
+    capped = max(0, min(int(lots), fit))
+    return capped, {
+        "dailyLossStopInr": round(loss_stop, 2),
+        "remainingBudgetInr": round(remaining, 2),
+        "budgetInr": round(budget, 2),
+        "stopRiskPerLotInr": round(risk_one, 2),
+        "requestedLots": int(lots),
+        "cappedLots": capped,
+        "requestedStopRiskInr": round(risk_one * int(lots), 2),
+    }
+
+
 def capital_risk_limits_summary(settings: Any = None) -> dict[str, Any]:
     s = settings or get_settings()
     return {

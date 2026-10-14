@@ -620,6 +620,12 @@ class Settings(BaseSettings):
     # when index_rally_side_flip_bypass confirms the move (CALL: rally off session low,
     # PUT: slide off session high, with aligned RSI / MACD / mom5).
     smart_ichimoku_index_rally_bypass_enabled: bool = False
+    # Oct 14 14:35 SENSEX 72800 PE: always-max lots skipped the per-trade risk check and
+    # one stop (₹5.6k) exceeded the ₹4.1k left of the ₹5k daily stop (−₹6.0k realised).
+    # Cap every entry's lots so stop × units ≤ frac × remaining daily-loss budget
+    # (CE / PE alike); reject when not even one lot fits.
+    entry_stop_daily_budget_cap_enabled: bool = False
+    entry_stop_daily_budget_frac: float = 1.0
     deep_itm_runner_pullback_hold_enabled: bool = False
     # NIFTY premium; × symbol_premium_scale per index (SENSEX ₹300 at the default 3×).
     deep_itm_runner_pullback_hold_min_entry_premium: float = 100.0
