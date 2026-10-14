@@ -1940,10 +1940,13 @@ async def _open_from_candidate(
                 if isinstance(getattr(candidate, "alert", None), dict)
                 else None
             )
+            from app.engines.index_rally_side_flip import index_flip_waives_chart_align
+
             index_trough_bypass = bool(
                 (_alert_row or {}).get("ictIndexTroughSlowV")
                 or (_alert_row or {}).get("indexTroughSlowV")
                 or index_trough_momentum_turn(candidate.side, snap.spotChart)
+                or index_flip_waives_chart_align(candidate.side, snap)
             )
             from app.engines.ftv_candlestick_confirm import ftv_candlestick_bypass_for_snap
 

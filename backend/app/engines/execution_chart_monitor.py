@@ -345,6 +345,10 @@ async def monitor_trade_chart_before_execution(
         or (alert or {}).get("indexPeakSlowV")
         or index_trough_momentum_turn(side, snap.spotChart)
     )
+    if not index_trough_bypass:
+        from app.engines.index_rally_side_flip import index_flip_waives_chart_align
+
+        index_trough_bypass = index_flip_waives_chart_align(side, snap)
     # Aug6 78800 PE: counter-trend PUT filled via expiry/local-base bypasses.
     from app.engines.spot_direction import hard_counter_trend_chart
 
