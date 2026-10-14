@@ -70,6 +70,49 @@ def parse_india_vix_quote(quote: dict[str, Any]) -> Optional[dict[str, float]]:
     except (TypeError, ValueError):
         return None
 
+def _candle_ts(row: Any) -> Optional[datetime]:
+    raw: Any = None
+    if isinstance(row, (list, tuple)) and row:
+        raw = row[0]
+    elif isinstance(row, dict):
+        raw = row.get("timestamp") or row.get("time") or row.get("ts")
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=IST)
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=IST)
+
+
+def chronological_candles(*series: list[Any]) -> list[Any]:
+    """Merge candle series oldest → newest, deduplicated by timestamp.
+
+    Upstox historical and intraday endpoints return candles newest-first; every chart
+    consumer (``closes[-1]`` = live bar, ``_pct_change`` lookbacks, RSI/MACD/Ichimoku)
+    assumes oldest-first. Later series win on duplicate timestamps. Rows without a
+    parseable timestamp keep their given order.
+    """
+    rows = [row for s in series for row in (s or [])]
+    if not rows:
+        return []
+    stamped: dict[datetime, Any] = {}
+    for row in rows:
+        ts = _candle_ts(row)
+        if ts is None:
+            return rows
+        stamped[ts] = row
+    return [stamped[ts] for ts in sorted(stamped)]
+
+
+_INTRADAY_UNIT_FOR_INTERVAL: dict[str, tuple[str, int]] = {
+    "1minute": ("minutes", 1),
+    "30minute": ("minutes", 30),
+    "day": ("days", 1),
+}
+
 # Option chain segment mapping
 OPTION_SEGMENTS = {
     "NIFTY": "NSE_FO",
@@ -690,7 +733,11 @@ class UpstoxClient:
         *,
         force_refresh: bool = False,
     ) -> list[dict[str, Any]]:
-        """OHLCV candles for any Upstox instrument (index or option leg)."""
+        """OHLCV candles for any Upstox instrument (index or option leg), oldest → newest.
+
+        The V2 historical endpoint stops at the previous session, so today's bars are
+        merged from the intraday endpoint — otherwise ``closes[-1]`` is days old.
+        """
         cache_key = f"candles:{instrument_key}:{interval}:{count}"
         if not force_refresh:
             cached = _cache_get(cache_key, self.settings.upstox_candles_cache_seconds)
@@ -704,7 +751,25 @@ class UpstoxClient:
             f"/historical-candle/{encoded_key}/{interval}/{to_date}/{from_date}",
         )
         candles = data.get("candles", []) if isinstance(data, dict) else data
-        result = candles[-count:] if candles else []
+        history = candles if isinstance(candles, list) else []
+
+        today: list[Any] = []
+        intraday_unit = _INTRADAY_UNIT_FOR_INTERVAL.get(interval)
+        if intraday_unit is not None:
+            try:
+                today = await self.get_intraday_candles_v3(
+                    instrument_key,
+                    unit=intraday_unit[0],
+                    interval=intraday_unit[1],
+                    force_refresh=force_refresh,
+                )
+            except Exception as exc:
+                if isinstance(exc, UpstoxError) and "rate limited" in str(exc).lower():
+                    raise
+                logger.warning("Intraday candles failed for %s: %s", instrument_key, exc)
+
+        merged = chronological_candles(history, today)
+        result = merged[-count:] if merged else []
         if result and not force_refresh:
             _cache_set(cache_key, result)
         return result
@@ -729,7 +794,7 @@ class UpstoxClient:
             f"/historical-candle/intraday/{encoded_key}/{unit}/{interval}",
         )
         candles = data.get("candles", []) if isinstance(data, dict) else data
-        result = candles if isinstance(candles, list) else []
+        result = chronological_candles(candles if isinstance(candles, list) else [])
         if result and not force_refresh:
             _cache_set(cache_key, result)
         return result
@@ -779,7 +844,7 @@ class UpstoxClient:
             path += f"/{from_date}"
         data = await self._get_v3(path)
         candles = data.get("candles", []) if isinstance(data, dict) else data
-        result = candles if isinstance(candles, list) else []
+        result = chronological_candles(candles if isinstance(candles, list) else [])
         if result and not force_refresh:
             _cache_set(cache_key, result)
         return result
