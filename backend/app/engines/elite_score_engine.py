@@ -1471,6 +1471,7 @@ def elite_entry_allowed(
 
     settings = settings or get_settings()
     from app.engines.live_paper_parity import (
+        oct_open_session_first_lift_lane_active,
         oct_paper_first_lift_small_lift_context,
         structural_pad_entry_lane_active,
     )
@@ -1485,7 +1486,10 @@ def elite_entry_allowed(
         settings=settings,
         readiness_reason=readiness_reason,
     )
-    oct_pad_lane = oct_first_lift or oct_structural_pad
+    oct_open_lane = oct_open_session_first_lift_lane_active(
+        evidence, settings=settings,
+    )
+    oct_pad_lane = oct_first_lift or oct_structural_pad or oct_open_lane
 
     resolved_mode, resolved_type = resolve_elite_session_day_type(
         state,

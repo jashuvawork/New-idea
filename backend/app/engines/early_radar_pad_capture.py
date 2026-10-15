@@ -648,6 +648,10 @@ def building_coil_pad_live_blocked(
 ) -> tuple[bool, str]:
     """Block live entry when coil base is armed but expansion is not confirmed."""
     s = settings or get_settings()
+    from app.engines.live_paper_parity import oct_open_session_first_lift_lane_active
+
+    if oct_open_session_first_lift_lane_active(alert, settings=s):
+        return False, ""
     if not building_coil_pad_lane_active(alert, s):
         return False, ""
     if building_coil_pad_lift_confirmed(alert, s):

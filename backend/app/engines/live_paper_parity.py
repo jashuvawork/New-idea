@@ -535,6 +535,93 @@ def _oct_paper_structural_launch_flags(evidence: Mapping[str, Any]) -> bool:
     )
 
 
+def oct_open_session_first_lift_lane_active(
+    evidence: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """
+    Oct 1 open window (09:15–09:45): vertical / v-rip first lift without coil-pad proof.
+
+    Aligns selector, elite score, funnel waivers, and exec bypass — not the post-Oct pad guard.
+    """
+    s = settings or get_settings()
+    if not oct_paper_structural_entry_waivers_active(s):
+        return False
+    if not isinstance(evidence, dict):
+        return False
+    try:
+        from app.engines.session_timing import in_open_premium_window
+
+        if not in_open_premium_window():
+            return False
+    except Exception:
+        return False
+    tier = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    score = _parity_number(evidence.get("explosionScore") or evidence.get("score"))
+    min_score = max(
+        float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0),
+        float(getattr(s, "oct_paper_open_first_lift_min_score", 84.0) or 84.0),
+    )
+    if score < min_score - 1e-6:
+        return False
+    from app.engines.open_rip_selector import open_rip_elite_structural_evidence
+
+    if open_rip_elite_structural_evidence(evidence):
+        return True
+    v3 = _parity_number(evidence.get("velocity3s") or evidence.get("velocity_3s"))
+    v9 = _parity_number(evidence.get("velocity9s") or evidence.get("velocity_9s"))
+    hot_v3 = float(getattr(s, "explosion_live_confirm_hot_velocity_3s", 8.0) or 8.0)
+    side = str(evidence.get("side") or "").upper()
+    if side == "CALL":
+        off_low = _parity_number(evidence.get("offLowMovePct"))
+        min_off = float(
+            getattr(s, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
+        )
+        if off_low >= min_off - 1e-6 or v3 >= hot_v3 * 0.45 or v9 >= hot_v3 * 0.6:
+            return True
+    elif side == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+        if put_slide_pad_context(evidence, settings=s):
+            return True
+        if v3 >= hot_v3 * 0.45 or v9 >= hot_v3 * 0.6:
+            return True
+    return False
+
+
+def _oct_paper_open_session_chase_blocks(
+    evidence: Mapping[str, Any],
+    *,
+    settings: Any,
+) -> bool:
+    """Open rip off session extreme: block only extended session-high chase, not pad lift."""
+    side = str(evidence.get("side") or "").upper()
+    off_low = _parity_number(evidence.get("offLowMovePct"))
+    min_off = float(
+        getattr(settings, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
+    )
+    if side == "CALL" and off_low >= min_off - 1e-6:
+        pos_raw = evidence.get("sessionRangePosition")
+        if pos_raw is None or str(pos_raw).strip() == "":
+            return False
+        pos = _parity_number(pos_raw)
+        extreme = float(
+            getattr(settings, "oct_paper_open_first_lift_max_session_position", 0.88)
+            or 0.88
+        )
+        if pos <= extreme + 1e-6:
+            return False
+    if side == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+        if put_slide_pad_context(evidence, settings=settings):
+            return _oct_paper_premium_chase_blocks(evidence, settings=settings)
+    return _oct_paper_premium_chase_blocks(evidence, settings=settings)
+
+
 def _oct_paper_local_base_in_first_lift_band(
     evidence: Mapping[str, Any],
     *,
@@ -563,6 +650,8 @@ def _oct_paper_base_lift_evidence(
     if structural_pad_entry_lane_active(
         evidence, settings=settings, readiness_reason=readiness_reason,
     ):
+        return True
+    if oct_open_session_first_lift_lane_active(evidence, settings=settings):
         return True
     if _oct_paper_local_base_in_first_lift_band(evidence, settings=settings):
         return True
@@ -628,6 +717,8 @@ def oct_paper_base_first_lift_take_allowed(
     )
     if not _oct_paper_base_lift_evidence(evidence, settings=s, readiness_reason=rr):
         return False
+    if oct_open_session_first_lift_lane_active(evidence, settings=s):
+        return not _oct_paper_open_session_chase_blocks(evidence, settings=s)
     return not _oct_paper_premium_chase_blocks(evidence, settings=s)
 
 
@@ -690,6 +781,13 @@ def enrich_alert_for_oct_paper_exec(
     if ready and reason:
         row["firstLiftReadinessReason"] = reason
         row["firstLift"] = True
+        rr = str(reason).lower()
+        if "v_rip" in rr or "armed_base" in rr or "first_lift" in rr:
+            row.setdefault("armedBaseLaunch", True)
+            row.setdefault("ictArmedBaseLaunch", True)
+        if "v_rip" in rr:
+            row.setdefault("vRipReady", True)
+            row.setdefault("momentType", "v_rip_session_low")
     if event is not None:
         for key, attr in (
             ("localBaseMovePct", "local_base_move_pct"),
@@ -711,6 +809,15 @@ def enrich_alert_for_oct_paper_exec(
             row["side"] = (
                 side.value if hasattr(side, "value") else str(side or "").upper()
             )
+    if oct_open_session_first_lift_lane_active(row):
+        row.setdefault("firstLift", True)
+        row.setdefault("firstLiftReadinessReason", "oct_open_session_first_lift")
+        if str(row.get("side") or "").upper() == "CALL":
+            row.setdefault("momentType", "v_rip_session_low")
+            row.setdefault("vRipReady", True)
+        elif str(row.get("side") or "").upper() == "PUT":
+            row.setdefault("momentType", "v_rip_session_high")
+            row.setdefault("vRipReady", True)
     return row
 
 
