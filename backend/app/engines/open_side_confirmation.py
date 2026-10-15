@@ -38,11 +38,24 @@ def open_side_confirmation(
     *,
     now: Optional[datetime] = None,
     settings: Any = None,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Return (blocked, reason, meta) for an entry on ``side`` during the open window."""
     settings = settings or get_settings()
     if getattr(settings, "open_side_confirmation_enabled", False) is not True:
         return False, "", {}
+    if isinstance(alert, dict):
+        from app.engines.live_paper_parity import (
+            oct_paper_replica_active,
+            oct_paper_session_first_lift_lane_active,
+        )
+
+        if oct_paper_replica_active(settings):
+            side_v = _side_val(side)
+            row = dict(alert)
+            row.setdefault("side", side_v)
+            if oct_paper_session_first_lift_lane_active(row, settings=settings):
+                return False, "", {"openSideWaived": "oct_paper_session_first_lift"}
     now = (now or datetime.now(IST)).astimezone(IST)
     minutes = now.hour * 60 + now.minute + now.second / 60.0
     until = (

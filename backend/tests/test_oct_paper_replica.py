@@ -314,7 +314,8 @@ def test_frozen_overlay_enables_oct_paper_replica():
     assert env["LIVE_PAPER_PARITY_PAD_ENTRY_GUARD_ENABLED"] == "false"
     assert env["OTM_REVERSAL_ENTRY_ENABLED"] == "true"
     assert env["EXPIRY_WORST_DAY_HALT_ENTRIES"] == "true"
-    assert (env["ENTRY_EARLIEST_HOUR"], env["ENTRY_EARLIEST_MINUTE"]) == ("9", "20")
+    assert (env["ENTRY_EARLIEST_HOUR"], env["ENTRY_EARLIEST_MINUTE"]) == ("9", "16")
+    assert env.get("OPEN_SIDE_CONFIRMATION_MIN_MINUTES") == "1"
     assert env["ADAPTIVE_EXITS_ENABLED"] == "true"
     assert env["EXPLOSION_MULTIPLE_FAST_FADE_ENABLED"] == "true"
     assert env["PE_WIN_CE_MIRROR_ENABLED"] == "true"
