@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from unittest.mock import MagicMock, patch
 
 from app.engines.explosion_entry_guards import (
@@ -123,7 +124,11 @@ def test_replica_waives_premium_out_of_band_near_miss_oct1_style():
 
 
 def test_replica_elite_funnel_waives_without_pad_flags():
-    from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+    from app.engines.live_paper_parity import (
+        oct_paper_base_first_lift_take_allowed,
+        oct_paper_exec_strict_bypass,
+        oct_paper_funnel_readiness_waived,
+    )
 
     s = _replica()
     alert = {
@@ -134,6 +139,8 @@ def test_replica_elite_funnel_waives_without_pad_flags():
         "sessionRangePosition": 0.35,
     }
     assert oct_paper_funnel_readiness_waived(alert, settings=s) is True
+    assert oct_paper_base_first_lift_take_allowed(alert, settings=s) is True
+    assert oct_paper_exec_strict_bypass(alert, settings=s) is True
 
 
 def test_replica_waives_midday_no_ict_for_elite_funnel():
@@ -154,6 +161,7 @@ def test_replica_waives_midday_no_ict_for_elite_funnel():
         "tier": "ELITE",
         "explosionScore": 90.0,
         "side": "CALL",
+        "localBaseMovePct": 14.0,
         "sessionRangePosition": 0.4,
     }
     with patch("app.engines.explosion_entry_guards.get_settings", return_value=s):
@@ -176,12 +184,127 @@ def test_replica_counter_trend_allowed_for_elite_funnel():
         "tier": "ELITE",
         "explosionScore": 88.0,
         "side": "PUT",
+        "localBaseMovePct": 10.0,
         "sessionRangePosition": 0.42,
     }
     with patch("app.engines.morning_premium_capture.get_settings", return_value=s):
         assert counter_trend_entry_allowed(
             Side.PUT, snap, explosion_event=event, alert=alert,
         ) is True
+
+
+@pytest.mark.parametrize(
+    "side,local,session_pos",
+    [
+        ("CALL", 12.0, 0.35),
+        ("PUT", 10.0, 0.42),
+    ],
+)
+def test_base_lift_funnel_and_exec_bypass_parity_ce_pe(side, local, session_pos):
+    from app.engines.live_paper_parity import (
+        oct_paper_exec_strict_bypass,
+        oct_paper_funnel_readiness_waived,
+    )
+
+    s = _replica()
+    alert = {
+        "tier": "EXPLODING",
+        "explosionScore": 88.0,
+        "side": side,
+        "localBaseMovePct": local,
+        "sessionRangePosition": session_pos,
+        "armedBaseLaunch": True,
+    }
+    if side == "PUT":
+        with patch(
+            "app.engines.put_slide_ce_mirror.put_slide_pad_context", return_value=True
+        ):
+            assert oct_paper_funnel_readiness_waived(alert, settings=s) is True
+            assert oct_paper_exec_strict_bypass(alert, settings=s) is True
+    else:
+        assert oct_paper_funnel_readiness_waived(alert, settings=s) is True
+        assert oct_paper_exec_strict_bypass(alert, settings=s) is True
+
+
+@pytest.mark.parametrize("side", ["CALL", "PUT"])
+def test_extended_chase_blocks_base_lift_take_ce_pe(side):
+    from app.engines.live_paper_parity import oct_paper_base_first_lift_take_allowed
+
+    s = _replica()
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 95.0,
+        "side": side,
+        "localBaseMovePct": 12.0,
+        "sessionRangePosition": 0.92,
+        "drawdownFromHighPct": 1.0,
+    }
+    with patch(
+        "app.engines.oct1_pad_location.oct1_premium_location_chase_core",
+        return_value=(True, "oct1_chase"),
+    ):
+        assert oct_paper_base_first_lift_take_allowed(alert, settings=s) is False
+
+
+@patch("app.config.get_settings")
+@patch("app.engines.pad_lane_capture.get_settings")
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_resolve_strict_pad_lane_oct_paper_exec_bypass_at_base(
+    mock_ict,
+    mock_pad,
+    mock_cfg,
+):
+    from app.engines.pad_lane_capture import resolve_strict_pad_lane_for_entry
+    from app.models.schemas import SymbolSnapshot
+
+    s = _replica()
+    mock_pad.return_value = s
+    mock_ict.return_value = s
+    mock_cfg.return_value = s
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp="2026-10-15T09:25:00+05:30",
+        marketPhase="LIVE_MARKET",
+        dataAvailable=True,
+        tradeQualityScore=80.0,
+        spot=22500.0,
+        atmStrike=22500.0,
+    )
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 92.0,
+        "side": "CALL",
+        "localBaseMovePct": 12.0,
+        "sessionRangePosition": 0.35,
+        "firstLift": True,
+        "armedBaseLaunch": True,
+    }
+    event = MagicMock(tier="ELITE", explosion_score=92.0)
+    with patch(
+        "app.engines.ict_breakout_monitor.first_lift_entry_readiness",
+        return_value=(False, ""),
+    ):
+        _pad_lane, strict = resolve_strict_pad_lane_for_entry(
+            Side.CALL,
+            snap,
+            mode="explosion",
+            explosion_event=event,
+            alert=alert,
+        )
+    assert strict is True
+
+
+def test_tier_only_without_base_lift_not_waived():
+    from app.engines.live_paper_parity import oct_paper_base_first_lift_take_allowed
+
+    s = _replica()
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 95.0,
+        "side": "CALL",
+        "sessionRangePosition": 0.4,
+    }
+    assert oct_paper_base_first_lift_take_allowed(alert, settings=s) is False
 
 
 def test_replica_skips_put_index_pin_block():
