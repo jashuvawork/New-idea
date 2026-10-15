@@ -768,16 +768,20 @@ def elite_side_local_base_cap(
             effective_near_base_max_local_pct,
             symmetric_best_trade_at_base_capture,
         )
-        from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+        from app.engines.live_paper_parity import (
+            oct_paper_entry_loosening_active,
+            structural_pad_entry_lane_active,
+        )
 
-        if oct_paper_entry_loosening_active(settings):
+        pad_lane = structural_pad_entry_lane_active(evidence, settings=settings)
+        if oct_paper_entry_loosening_active(settings) or pad_lane:
             ok, _ = symmetric_best_trade_at_base_capture(
                 evidence,
                 evidence,
                 ranking=ranking if isinstance(ranking, Mapping) else None,
                 settings=settings,
             )
-            if ok:
+            if ok or pad_lane:
                 cap = max(cap, effective_near_base_max_local_pct(settings))
                 cap = min(cap, general)
     return cap
@@ -1092,9 +1096,17 @@ def elite_fvq_chase_blocked(
     from app.engines.live_paper_parity import (
         oct_paper_first_lift_small_lift_context,
         oct_paper_entry_loosening_active,
+        structural_pad_entry_lane_active,
     )
 
     if oct_paper_first_lift_small_lift_context(
+        evidence,
+        settings=settings,
+        readiness_reason=readiness_reason,
+    ):
+        return False, ""
+
+    if structural_pad_entry_lane_active(
         evidence,
         settings=settings,
         readiness_reason=readiness_reason,

@@ -417,6 +417,69 @@ def oct_paper_structural_pad_context(
     ) or oct_paper_elite_rip_context(evidence, settings=settings)
 
 
+def structural_pad_entry_lane_active(
+    evidence: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+    readiness_reason: str = "",
+) -> bool:
+    """
+    Pad / mid-rip entry lane under Frozen Oct — not extended session chase.
+
+    CE: rally off low or local-base pad band. PE: slide pad (put_slide mirror).
+    Includes flip V/FTV structural moments when tier/score qualify.
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if not oct_paper_structural_entry_waivers_active(s):
+        return False
+    if not bool(getattr(s, "structural_pad_entry_lane_enabled", True)):
+        return False
+    if not isinstance(evidence, dict):
+        return False
+    rr = str(
+        readiness_reason
+        or evidence.get("firstLiftReadinessReason")
+        or evidence.get("ictBaseReadinessReason")
+        or ""
+    )
+    if oct_paper_structural_pad_context(evidence, settings=s, readiness_reason=rr):
+        return True
+    from app.engines.chop_worst_flip_capture import flip_structural_evidence
+
+    if not flip_structural_evidence(evidence, readiness_reason=rr):
+        return False
+    tier = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    score = _parity_number(evidence.get("explosionScore") or evidence.get("score"))
+    min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
+    if score < min_score - 1e-6:
+        return False
+    side = str(evidence.get("side") or "").upper()
+    if side == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+        return put_slide_pad_context(evidence, settings=s)
+    if side == "CALL":
+        off_low = _parity_number(evidence.get("offLowMovePct"))
+        min_off = float(
+            getattr(s, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
+        )
+        local = _parity_number(evidence.get("localBaseMovePct"))
+        min_local = float(
+            getattr(s, "oct_paper_first_lift_small_lift_min_local_pct", 2.0) or 2.0
+        )
+        max_local = float(
+            getattr(s, "oct_paper_first_lift_small_lift_max_local_pct", 40.0) or 40.0
+        )
+        return (off_low >= min_off - 1e-6) or (
+            min_local <= local <= max_local + 1e-6
+        )
+    return False
+
+
 def oct_paper_exec_strict_bypass(
     alert: Mapping[str, Any] | None,
     *,

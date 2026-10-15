@@ -276,7 +276,10 @@ def live_entry_score_blocks_entry(
     min_live = live_entry_score_min_for_tier(tier, settings=settings)
     meta["liveEntryMin"] = min_live
     if live < min_live:
-        from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+        from app.engines.live_paper_parity import (
+            oct_paper_entry_loosening_active,
+            structural_pad_entry_lane_active,
+        )
 
         alert = _alert_dict(candidate)
         tier_u = tier.upper()
@@ -288,13 +291,26 @@ def live_entry_score_blocks_entry(
         min_expl = float(
             getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0
         )
+        rr = str(
+            alert.get("firstLiftReadinessReason")
+            or alert.get("ictBaseReadinessReason")
+            or ""
+        )
+        pad_lane = structural_pad_entry_lane_active(
+            alert, settings=settings, readiness_reason=rr,
+        )
         oct_paper_floor_skip = (
-            oct_paper_entry_loosening_active(settings)
-            and tier_u in ("ELITE", "EXPLODING")
+            tier_u in ("ELITE", "EXPLODING")
             and expl_score >= min_expl - 1e-6
+            and (
+                oct_paper_entry_loosening_active(settings)
+                or pad_lane
+            )
         )
         if oct_paper_floor_skip:
             meta["octPaperLiveEntryScoreFloorSkipped"] = True
+            if pad_lane:
+                meta["structuralPadLiveEntryScoreFloorSkipped"] = True
         else:
             return (
                 True,

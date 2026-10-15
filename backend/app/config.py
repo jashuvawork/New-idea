@@ -3359,6 +3359,9 @@ class Settings(BaseSettings):
     # Live+paper parity: prefer peak-keep / velocity-reversal over implicit stage-trail on first lifts.
     oct_paper_peak_keep_exit_parity_enabled: bool = True
     oct_paper_exec_strict_bypass_enabled: bool = True
+    # Pad / mid-rip lane (first-lift, V-rip, flip base) — waives chop-live choke under replica.
+    structural_pad_entry_lane_enabled: bool = True
+    structural_pad_chop_live_waiver_enabled: bool = True
     oct_paper_same_side_reentry_waiver_enabled: bool = True
     oct_paper_reentry_ml_waiver_enabled: bool = True
     oct_paper_reference_capital_inr: float = 149_000.0
