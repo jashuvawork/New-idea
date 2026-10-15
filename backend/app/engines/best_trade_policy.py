@@ -1254,6 +1254,10 @@ def expiry_cheap_otm_entry_blocked(
     settings = settings or get_settings()
     if not bool(getattr(settings, "best_trade_block_expiry_cheap_otm_enabled", True)):
         return False, ""
+    from app.engines.live_paper_parity import oct_paper_replica_active
+
+    if oct_paper_replica_active(settings):
+        return False, ""
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         return False, ""
     if snap is None or not is_symbol_expiry_day(snap):

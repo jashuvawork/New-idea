@@ -263,14 +263,30 @@ def _high_signal_pre_candidate_skip_reason(
         return "explosion_not_tradeable"
     from app.engines.premium_filter import explosion_alert_premium_tradeable
 
-    if not explosion_alert_premium_tradeable(
+    prem_ok = explosion_alert_premium_tradeable(
         alert.get("premium"),
         peak_move_pct=float(alert.get("peakMovePct") or 0),
         snap=snap,
         alert=alert,
         state=state,
         settings=settings,
-    ):
+    )
+    if not prem_ok:
+        from app.engines.live_paper_parity import (
+            oct_paper_funnel_readiness_waived,
+            oct_paper_structural_entry_waivers_active,
+        )
+
+        if oct_paper_structural_entry_waivers_active(settings) and (
+            lift_ready
+            or oct_paper_funnel_readiness_waived(
+                alert,
+                settings=settings,
+                readiness_reason=first_lift_readiness_reason,
+            )
+        ):
+            prem_ok = True
+    if not prem_ok:
         return "explosion_premium_not_tradeable"
     side_v = str(alert.get("side") or "").upper()
     tier_u = str(alert.get("tier") or "").upper()
@@ -654,14 +670,30 @@ def _explosion_candidates(
             continue
         from app.engines.premium_filter import explosion_alert_premium_tradeable
 
-        if not explosion_alert_premium_tradeable(
+        prem_ok = explosion_alert_premium_tradeable(
             alert.get("premium"),
             peak_move_pct=float(alert.get("peakMovePct") or 0),
             snap=snap,
             alert=alert if isinstance(alert, dict) else None,
             state=state,
             settings=settings,
-        ):
+        )
+        if not prem_ok and isinstance(alert, dict):
+            from app.engines.live_paper_parity import (
+                oct_paper_funnel_readiness_waived,
+                oct_paper_structural_entry_waivers_active,
+            )
+
+            if oct_paper_structural_entry_waivers_active(settings) and (
+                lift_ready
+                or oct_paper_funnel_readiness_waived(
+                    alert,
+                    settings=settings,
+                    readiness_reason=first_lift_readiness_reason,
+                )
+            ):
+                prem_ok = True
+        if not prem_ok:
             if isinstance(alert, dict):
                 _record_explosion_alert_skip(symbol, alert, "explosion_premium_not_tradeable")
             continue

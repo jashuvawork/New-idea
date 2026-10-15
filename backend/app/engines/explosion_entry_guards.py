@@ -460,6 +460,19 @@ def explosion_entry_window_blocked(
         return False, ""
     if explosion_event is None:
         return False, ""
+    from app.engines.live_paper_parity import (
+        oct_paper_funnel_readiness_waived,
+        oct_paper_replica_active,
+    )
+
+    if oct_paper_replica_active(settings):
+        tier_u = str(getattr(explosion_event, "tier", "") or "").upper()
+        if tier_u in ("ELITE", "EXPLODING", "BUILDING"):
+            return False, ""
+        if isinstance(alert, dict) and oct_paper_funnel_readiness_waived(
+            alert, settings=settings,
+        ):
+            return False, ""
 
     lo, hi = entry_window_bounds(ict, top_must_take=top_must_take)
     # Non-must-take ELITE/EXPLODING: take at local-base pad (default ≤40%).

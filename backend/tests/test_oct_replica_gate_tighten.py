@@ -38,10 +38,10 @@ def _frozen_loosening(**kwargs):
     )
 
 
-def test_replica_does_not_waive_generic_near_miss_prefixes():
+def test_replica_waives_oct1_premium_near_miss_not_other_prefixes():
     s = _replica()
     alert = {"tier": "ELITE", "explosionScore": 88.0, "side": "PUT", "strike": 72200.0}
-    assert not explosion_near_miss_waive(
+    assert explosion_near_miss_waive(
         alert,
         readiness_reason="premium_out_of_band",
         settings=s,

@@ -273,6 +273,10 @@ def validate_mtf_scalp(
     - Premium 1m/5m must not be fading
     """
     settings = get_settings()
+    from app.engines.live_paper_parity import oct_paper_replica_active
+
+    if oct_paper_replica_active(settings):
+        return True, "ok", {"octPaperReplicaMtfSkipped": True}
     if not settings.execution_mtf_enabled or not index_mtf:
         return True, "ok", {}
 

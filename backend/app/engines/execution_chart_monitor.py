@@ -398,12 +398,19 @@ async def monitor_trade_chart_before_execution(
         alert if isinstance(alert, dict) else None,
         explosion_event,
     )
+    from app.engines.live_paper_parity import oct_paper_exec_strict_bypass
+
+    oct_paper_strict_exec = oct_paper_exec_strict_bypass(
+        alert if isinstance(alert, dict) else None,
+        settings=settings,
+    )
     premium_fade_pad_lane = (
         strict_first_lift_bypass
         or pad_lane_chart_bypass
         or atm_armed_fade_bypass
         or symmetric_fade_bypass
         or building_rip_fade_bypass
+        or oct_paper_strict_exec
     )
     confirmed_ftv_bypass = bool(
         (strict_first_lift_bypass or atm_armed_fade_bypass)

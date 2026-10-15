@@ -70,6 +70,10 @@ def explosion_exhausted(event: ExplosionEvent) -> tuple[bool, str]:
 def index_pin_blocks_put_explosion(event: ExplosionEvent, snap: SymbolSnapshot) -> tuple[bool, str]:
     """Block PE fades when index pins at day high with bullish stock breadth."""
     settings = get_settings()
+    from app.engines.live_paper_parity import oct_paper_replica_active
+
+    if oct_paper_replica_active(settings):
+        return False, "ok"
     if not settings.index_pin_put_block_enabled:
         return False, "ok"
     if _side_val(event.side) != "PUT":
@@ -596,10 +600,24 @@ def explosion_near_miss_waive(
                     ):
                         return False
                 return True
+        from app.engines.live_paper_parity import oct_paper_replica_active
+
+        tier = str(alert.get("tier") or "").upper()
+        score = float(alert.get("explosionScore") or alert.get("score") or 0)
+        min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
+        if (
+            oct_paper_replica_active(s)
+            and tier in ("ELITE", "EXPLODING")
+            and score >= min_score
+        ):
+            oct1_premium_near_miss = (
+                "premium_out_of_band",
+                "premium_above",
+                "premium_below",
+            )
+            if rr.startswith(oct1_premium_near_miss):
+                return True
         if oct_paper_entry_loosening_active(s):
-            tier = str(alert.get("tier") or "").upper()
-            score = float(alert.get("explosionScore") or alert.get("score") or 0)
-            min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
             if tier in ("ELITE", "EXPLODING") and score >= min_score:
                 oct_near_miss_prefixes = (
                     "first_lift_quality",
@@ -644,6 +662,15 @@ def explosion_near_miss_waive(
             "first_lift_base_move_outside",
         )
     ):
+        if isinstance(alert, dict):
+            from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+            if oct_paper_funnel_readiness_waived(
+                alert,
+                settings=s,
+                readiness_reason=readiness_reason,
+            ):
+                return True
         return False
     if elite_near_atm_index_rip_first_lift_waive(alert, settings=s):
         return True

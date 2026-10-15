@@ -1894,9 +1894,15 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
 
         failed_launch_block = True
+        from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
         if oct_paper_first_lift_small_lift_context(evidence, settings=settings):
             if v3 >= 0 or micro_pullback or _pad_lane_cold_velocity_ok(evidence, v3, v9):
                 failed_launch_block = False
+        if failed_launch_block and oct_paper_funnel_readiness_waived(
+            evidence, settings=settings,
+        ):
+            failed_launch_block = False
         if failed_launch_block:
             rejected = True
             penalties.append({"code": "failed_launch", "points": 45.0})
@@ -1913,9 +1919,12 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         penalties.append({"code": "exhausted_post_peak_reentry", "points": 60.0})
         score -= 60.0
     if bool(evidence.get("midRipCoil")):
-        rejected = True
-        penalties.append({"code": "mid_rip_armed_coil", "points": 50.0})
-        score -= 50.0
+        from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+        if not oct_paper_funnel_readiness_waived(evidence, settings=settings):
+            rejected = True
+            penalties.append({"code": "mid_rip_armed_coil", "points": 50.0})
+            score -= 50.0
 
     elite_preauthorized = bool(
         elite_base_ready
