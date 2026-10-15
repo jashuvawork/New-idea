@@ -502,6 +502,34 @@ def structural_pad_entry_lane_active(
     return False
 
 
+def oct_paper_funnel_readiness_waived(
+    evidence: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+    readiness_reason: str = "",
+) -> bool:
+    """
+    Oct 1 / replica stack — structural pad/first-lift may pass readiness gates
+    that post-Oct additions added (mid-rip coil, base-move band, ichimoku, etc.).
+    """
+    s = settings or get_settings()
+    if not oct_paper_structural_entry_waivers_active(s):
+        return False
+    if not isinstance(evidence, dict):
+        return False
+    rr = str(
+        readiness_reason
+        or evidence.get("firstLiftReadinessReason")
+        or evidence.get("ictBaseReadinessReason")
+        or ""
+    )
+    if oct_paper_structural_pad_context(evidence, settings=s, readiness_reason=rr):
+        return True
+    return structural_pad_entry_lane_active(
+        evidence, settings=s, readiness_reason=rr,
+    )
+
+
 def oct_paper_exec_strict_bypass(
     alert: Mapping[str, Any] | None,
     *,

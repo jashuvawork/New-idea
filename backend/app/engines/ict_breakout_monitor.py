@@ -1764,7 +1764,11 @@ def first_lift_entry_readiness(
         else {}
     )
     if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
-        return False, "mid_rip_armed_coil_rejected"
+        from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+        evidence = alert if isinstance(alert, dict) else row
+        if not oct_paper_funnel_readiness_waived(evidence, settings=settings):
+            return False, "mid_rip_armed_coil_rejected"
 
     # BUILDING bullish-rip sleeve — mid-rip OK while still expanding to max.
     # Runs before first-lift chart gate so option-led BUILDING rips still authorize.
@@ -2232,7 +2236,13 @@ def first_lift_entry_readiness(
             if not grade_a_lane and not top_ftv_v_lane:
                 min_move = min(min_move, bd_floors["minMove"])
     if not (min_move <= base_move <= max_move):
-        return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
+        from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+        evidence = alert if isinstance(alert, dict) else row
+        if oct_paper_funnel_readiness_waived(evidence, settings=settings):
+            pass
+        else:
+            return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
 
     # Option-led lane: a strong ATM/ITM option can lead before the 5m index chart turns
     # and before the generic explosion-score floor is met. Evaluated here so it is not
@@ -2424,7 +2434,10 @@ def first_lift_entry_readiness(
             v9=v9,
             settings=settings,
         ):
-            return False, "first_lift_live_velocity_negative"
+            from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+            if not oct_paper_funnel_readiness_waived(row, settings=settings):
+                return False, "first_lift_live_velocity_negative"
     if v_rip_lane:
         min_v3 = float(
             getattr(settings, "ict_v_rip_min_velocity_3s", 1.2) or 1.2

@@ -70,6 +70,10 @@ def explosion_exhausted(event: ExplosionEvent) -> tuple[bool, str]:
 def index_pin_blocks_put_explosion(event: ExplosionEvent, snap: SymbolSnapshot) -> tuple[bool, str]:
     """Block PE fades when index pins at day high with bullish stock breadth."""
     settings = get_settings()
+    from app.engines.live_paper_parity import oct_paper_replica_active
+
+    if oct_paper_replica_active(settings):
+        return False, "ok"
     if not settings.index_pin_put_block_enabled:
         return False, "ok"
     if _side_val(event.side) != "PUT":
@@ -644,6 +648,15 @@ def explosion_near_miss_waive(
             "first_lift_base_move_outside",
         )
     ):
+        if isinstance(alert, dict):
+            from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+            if oct_paper_funnel_readiness_waived(
+                alert,
+                settings=s,
+                readiness_reason=readiness_reason,
+            ):
+                return True
         return False
     if elite_near_atm_index_rip_first_lift_waive(alert, settings=s):
         return True
