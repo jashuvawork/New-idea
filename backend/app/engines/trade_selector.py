@@ -2435,7 +2435,7 @@ def find_best_entry(
             continue
         if ranking.get("grade") == "REJECT":
             from app.engines.live_paper_parity import (
-                oct_paper_entry_loosening_active,
+                oct_paper_skip_live_only_session_gates,
                 oct_paper_structural_pad_context,
             )
             from app.engines.trade_ranking import selector_rejection_reason
@@ -2458,7 +2458,7 @@ def find_best_entry(
             rank_evidence = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
             pad_evidence = {**rank_evidence, "tier": tier_u, "explosionScore": expl_score}
             oct_keep = (
-                oct_paper_entry_loosening_active(settings)
+                oct_paper_skip_live_only_session_gates(settings)
                 and tier_u in ("ELITE", "EXPLODING")
                 and expl_score >= min_score - 1e-6
             ) or oct_paper_structural_pad_context(pad_evidence, settings=settings)

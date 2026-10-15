@@ -257,6 +257,14 @@ def live_entry_score_blocks_entry(
     settings = get_settings()
     if not bool(getattr(settings, "live_entry_score_gate_enabled", True)):
         return False, "ok", {}
+    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
+
+    if oct_paper_skip_live_only_session_gates(settings):
+        meta = refresh_candidate_live_entry_score(
+            candidate, snap, premium_chart=premium_chart,
+        )
+        meta["octPaperLiveEntryScoreGateSkipped"] = True
+        return False, "ok", meta
     meta = refresh_candidate_live_entry_score(
         candidate, snap, premium_chart=premium_chart,
     )
@@ -277,7 +285,7 @@ def live_entry_score_blocks_entry(
     meta["liveEntryMin"] = min_live
     if live < min_live:
         from app.engines.live_paper_parity import (
-            oct_paper_entry_loosening_active,
+            oct_paper_skip_live_only_session_gates,
             structural_pad_entry_lane_active,
         )
 
@@ -303,7 +311,7 @@ def live_entry_score_blocks_entry(
             tier_u in ("ELITE", "EXPLODING")
             and expl_score >= min_expl - 1e-6
             and (
-                oct_paper_entry_loosening_active(settings)
+                oct_paper_skip_live_only_session_gates(settings)
                 or pad_lane
             )
         )

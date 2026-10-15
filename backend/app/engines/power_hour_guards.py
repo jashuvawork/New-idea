@@ -116,10 +116,10 @@ def check_power_hour_session_allowed(
     _ = state
     meta: dict[str, Any] = {}
     from app.config import get_settings
-    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
 
     settings = get_settings()
-    if oct_paper_entry_loosening_active(settings):
+    if oct_paper_skip_live_only_session_gates(settings):
         meta["octPaperPowerHourSkipped"] = True
         return True, "ok", meta
     if not in_power_hour_window():

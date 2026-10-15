@@ -769,12 +769,12 @@ def elite_side_local_base_cap(
             symmetric_best_trade_at_base_capture,
         )
         from app.engines.live_paper_parity import (
-            oct_paper_entry_loosening_active,
+            oct_paper_skip_live_only_session_gates,
             structural_pad_entry_lane_active,
         )
 
         pad_lane = structural_pad_entry_lane_active(evidence, settings=settings)
-        if oct_paper_entry_loosening_active(settings) or pad_lane:
+        if oct_paper_skip_live_only_session_gates(settings) or pad_lane:
             ok, _ = symmetric_best_trade_at_base_capture(
                 evidence,
                 evidence,
@@ -1095,7 +1095,7 @@ def elite_fvq_chase_blocked(
     from app.engines.live_entry_score import live_entry_best_trade_capture_active
     from app.engines.live_paper_parity import (
         oct_paper_first_lift_small_lift_context,
-        oct_paper_entry_loosening_active,
+        oct_paper_skip_live_only_session_gates,
         structural_pad_entry_lane_active,
     )
 
@@ -1113,7 +1113,7 @@ def elite_fvq_chase_blocked(
     ):
         return False, ""
 
-    if oct_paper_entry_loosening_active(settings):
+    if oct_paper_skip_live_only_session_gates(settings):
         tier_u = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
         score = float(
             evidence.get("explosionScore") or evidence.get("explosion_score") or 0

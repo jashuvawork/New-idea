@@ -342,7 +342,7 @@ def test_oct_paper_skips_live_entry_score_floor_for_hot_elite(
     blocked, reason, meta = live_entry_score_blocks_entry(candidate, None)
     assert blocked is False
     assert reason == "ok"
-    assert meta.get("octPaperLiveEntryScoreFloorSkipped") is True
+    assert meta.get("octPaperLiveEntryScoreGateSkipped") is True
 
     mock_settings.return_value = settings_mock(
         enable_live_trading=True,

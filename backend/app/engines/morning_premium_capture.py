@@ -222,7 +222,7 @@ def counter_trend_entry_allowed(
         return True
     from app.engines.live_paper_parity import (
         oct_paper_first_lift_small_lift_context,
-        oct_paper_entry_loosening_active,
+        oct_paper_skip_live_only_session_gates,
     )
 
     settings = get_settings()
@@ -244,7 +244,7 @@ def counter_trend_entry_allowed(
         )
     if evidence and oct_paper_first_lift_small_lift_context(evidence, settings=settings):
         return True
-    if oct_paper_entry_loosening_active(settings):
+    if oct_paper_skip_live_only_session_gates(settings):
         if snap is not None and explosion_event is not None:
             from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
 

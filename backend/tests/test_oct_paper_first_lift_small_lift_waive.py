@@ -308,7 +308,7 @@ def test_replica_live_entry_score_floor_skipped_on_structural_pad():
         ):
             blocked, reason, meta = live_entry_score_blocks_entry(cand, snap=None)
     assert blocked is False
-    assert meta.get("structuralPadLiveEntryScoreFloorSkipped") is True
+    assert meta.get("octPaperLiveEntryScoreGateSkipped") is True
 
 
 @patch("app.engines.elite_score_engine.resolve_elite_session_day_type", return_value=("BULLISH DAY", "BULLISH"))

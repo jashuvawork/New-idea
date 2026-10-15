@@ -639,7 +639,8 @@ def oct_paper_replica_active(settings: Any | None = None) -> bool:
 
     Turns off post-Oct 5 entry loosenings (#718+ parity waivers), the pad guard
     (#699/#701/#707), the ₹18–350 radar scan band (#714) and strict ATM/ITM-only
-    execution (#692). Exits (peak-keep, adaptive SL, N×/k× fast fade) stay current.
+    execution (#692). Skips live-only session gates (#719) like Oct 1/5 paper.
+    Exits (peak-keep, adaptive SL, N×/k× fast fade) stay current.
     """
     from app.config import get_settings
 
@@ -651,9 +652,9 @@ def oct_paper_entry_loosening_active(settings: Any | None = None) -> bool:
     """
     Post-Oct 5 entry/selection waivers keyed off trading_rules_match_paper.
 
-    False under the Oct paper replica so gates that ran on Oct 1 / Oct 5 paper
-    (power hour, whipsaw, expiry halts, chop-day wire, entry-score floor) run again.
-    Exit and sizing paths keep using trading_rules_match_paper.
+    False under the Oct paper replica — use ``oct_paper_skip_live_only_session_gates``
+    for Oct 1/5 session parity and ``oct_paper_structural_entry_waivers_active`` for
+    first-lift / pad lane. Exit and sizing paths keep using trading_rules_match_paper.
     """
     from app.config import get_settings
 
@@ -674,6 +675,24 @@ def oct_paper_structural_entry_waivers_active(settings: Any | None = None) -> bo
 
     s = settings or get_settings()
     return trading_rules_match_paper(s)
+
+
+def oct_paper_skip_live_only_session_gates(settings: Any | None = None) -> bool:
+    """
+    Oct 1 / Oct 5 paper — skip live-only session/selector narrowings (#718 / #719).
+
+    When true: no chop-live wire, whipsaw pause, power-hour top-only halt, expiry
+    worst-day declining halt, or live-entry-score gate. Matches paper on those days;
+    anti-chase guards (vertical chase, pad location, post-win mirror chase) stay on.
+
+    True under ``oct_paper_replica`` or ``oct_paper_entry_loosening_active``.
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if oct_paper_replica_active(s):
+        return True
+    return oct_paper_entry_loosening_active(s)
 
 
 def legacy_live_entry_narrowings_active(settings: Any | None = None) -> bool:
@@ -719,6 +738,7 @@ def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
     rules = trading_rules_match_paper(s)
     loosening = oct_paper_entry_loosening_active(s)
     structural_waivers = oct_paper_structural_entry_waivers_active(s)
+    skip_live_session_gates = oct_paper_skip_live_only_session_gates(s)
     cap_inr = float(getattr(s, "fallback_capital_inr", 0) or 0)
     from app.engines.sep917_legacy_profile import (
         atm_itm_fixed_premium_band_only,
@@ -733,6 +753,7 @@ def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
             "enabled": oct_paper_replica_active(s),
             "postOct5EntryLooseningActive": loosening,
             "structuralEntryWaiversActive": structural_waivers,
+            "skipLiveOnlySessionGates": skip_live_session_gates,
             "radarFixedPremiumBandOnly": atm_itm_fixed_premium_band_only(s),
             "strictAtmItmExecution": strict_atm_itm_execution(s),
             "padEntryGuardEnabled": bool(

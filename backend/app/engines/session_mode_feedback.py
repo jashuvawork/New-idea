@@ -779,14 +779,10 @@ def reentry_ml_win_prob_blocked(
         meta["applied"] = False
         return False, meta
 
-    from app.engines.live_paper_parity import (
-        oct_paper_structural_pad_context,
-        oct_paper_entry_loosening_active,
-    )
+    from app.engines.live_paper_parity import oct_paper_structural_pad_context
 
     if (
         bool(getattr(settings, "oct_paper_reentry_ml_waiver_enabled", True))
-        and oct_paper_entry_loosening_active(settings)
         and isinstance(alert, dict)
         and oct_paper_structural_pad_context(alert, settings=settings)
     ):

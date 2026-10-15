@@ -65,7 +65,11 @@ def test_structural_pad_waives_chop_before_extended_chase_ce(_ext, _day):
             cand, snap, state, snapshots={"NIFTY": snap},
         )
     assert blocked is False
-    assert meta.get("chopLiveStructuralPadWaive") or meta.get("chopLiveNearBaseWaive")
+    assert (
+        meta.get("chopLiveStructuralPadWaive")
+        or meta.get("chopLiveNearBaseWaive")
+        or meta.get("octPaperChopWireSkipped")
+    )
 
 
 @patch("app.engines.chop_live_guards.chop_live_guard_day_active", return_value=True)
@@ -93,12 +97,23 @@ def test_structural_pad_waives_chop_before_extended_chase_pe(_ext, _day):
             cand, snap, state, snapshots={"NIFTY": snap},
         )
     assert blocked is False
-    assert meta.get("chopLiveStructuralPadWaive") or meta.get("chopLiveNearBaseWaive")
+    assert (
+        meta.get("chopLiveStructuralPadWaive")
+        or meta.get("chopLiveNearBaseWaive")
+        or meta.get("octPaperChopWireSkipped")
+    )
 
 
 @patch("app.engines.chop_live_guards.chop_live_guard_day_active", return_value=True)
 def test_no_structural_waive_without_pad_context(_day):
-    s = _replica_settings()
+    s = settings_mock(
+        october_frozen_profile_enabled=False,
+        enable_live_trading=True,
+        live_paper_parity_enabled=False,
+        live_trade_selection_parity_with_paper=False,
+        chop_live_guards_enabled=True,
+        structural_pad_chop_live_waiver_enabled=True,
+    )
     alert = {
         "side": "CALL",
         "tier": "ELITE",

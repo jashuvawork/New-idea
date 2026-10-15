@@ -295,9 +295,9 @@ def armed_base_shallow_launch_blocked(
     """Hard block shallow armed-base launches on chop or midday windows (CE/PE symmetric)."""
     settings = get_settings()
     meta: dict[str, Any] = {}
-    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
 
-    if oct_paper_entry_loosening_active(settings):
+    if oct_paper_skip_live_only_session_gates(settings):
         meta["octPaperArmedBaseChopSkipped"] = True
         return False, "", meta
     if not getattr(settings, "chop_live_block_armed_base_launch", True):
@@ -402,9 +402,9 @@ def chop_live_entry_blocked(
     """
     settings = get_settings()
     meta: dict[str, Any] = {"chopLiveGuard": True}
-    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
 
-    if oct_paper_entry_loosening_active(settings):
+    if oct_paper_skip_live_only_session_gates(settings):
         meta["chopLiveGuard"] = False
         meta["octPaperChopWireSkipped"] = True
         return False, "ok", meta
@@ -487,9 +487,9 @@ def chop_second_same_side_leg_blocked(
     """Block stacking a second explosion leg on the same side during chop/worst days."""
     settings = get_settings()
     meta: dict[str, Any] = {}
-    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
 
-    if oct_paper_entry_loosening_active(settings):
+    if oct_paper_skip_live_only_session_gates(settings):
         return False, "ok", meta
     if not getattr(settings, "chop_live_second_leg_block_enabled", True):
         return False, "ok", meta
