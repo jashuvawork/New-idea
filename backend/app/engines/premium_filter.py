@@ -177,9 +177,9 @@ def explosion_alert_premium_tradeable(
         return False
     if not isinstance(alert, dict) or snap is None:
         return False
-    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+    from app.engines.live_paper_parity import oct_paper_structural_entry_waivers_active
 
-    if not oct_paper_entry_loosening_active(settings):
+    if not oct_paper_structural_entry_waivers_active(settings):
         return False
     tier_u = str(alert.get("tier") or "").upper()
     score = float(alert.get("explosionScore") or alert.get("score") or 0)

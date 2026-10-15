@@ -20,10 +20,10 @@ def oct1_open_moment_pad_waived(
     settings: Any = None,
 ) -> tuple[bool, str]:
     """09:15–09:45 open-window pad waivers only (no first-lift context — avoids recursion)."""
-    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+    from app.engines.live_paper_parity import oct_paper_structural_entry_waivers_active
 
     settings = settings or get_settings()
-    if not oct_paper_entry_loosening_active(settings):
+    if not oct_paper_structural_entry_waivers_active(settings):
         return False, ""
     if not bool(getattr(settings, "oct_paper_open_moment_pad_waiver_enabled", True)):
         return False, ""
@@ -49,6 +49,8 @@ def oct1_open_moment_pad_waived(
                 "v_rip_session_low",
                 "flat_then_vertical",
                 "first_lift_local_base",
+                "ELITE_BASE_READY",
+                "elite_base_ready",
             )
         ):
             return True, "oct_open_call_rip_pad_waive"
@@ -75,11 +77,11 @@ def oct1_pad_location_waived(
     """Open-window + first-lift waivers before session-high/low chase checks."""
     from app.engines.live_paper_parity import (
         oct_paper_first_lift_small_lift_context,
-        oct_paper_entry_loosening_active,
+        oct_paper_structural_entry_waivers_active,
     )
 
     settings = settings or get_settings()
-    if not oct_paper_entry_loosening_active(settings):
+    if not oct_paper_structural_entry_waivers_active(settings):
         return False, ""
     if oct_paper_first_lift_small_lift_context(
         evidence,

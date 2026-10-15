@@ -222,29 +222,29 @@ def counter_trend_entry_allowed(
         return True
     from app.engines.live_paper_parity import (
         oct_paper_first_lift_small_lift_context,
-        oct_paper_entry_loosening_active,
+        oct_paper_skip_live_only_session_gates,
     )
 
     settings = get_settings()
-    if oct_paper_entry_loosening_active(settings):
-        evidence: dict[str, Any] = dict(alert) if isinstance(alert, dict) else {}
-        if explosion_event is not None and not evidence:
-            evidence = {
-                "side": getattr(explosion_event, "side", ""),
-                "tier": getattr(explosion_event, "tier", ""),
-                "explosionScore": getattr(explosion_event, "explosion_score", 0),
-                "score": getattr(explosion_event, "explosion_score", 0),
-                "localBaseMovePct": getattr(explosion_event, "local_base_move_pct", 0),
-                "momentType": getattr(explosion_event, "reason", ""),
-            }
-        elif explosion_event is not None:
-            evidence.setdefault("tier", getattr(explosion_event, "tier", ""))
-            evidence.setdefault(
-                "explosionScore",
-                getattr(explosion_event, "explosion_score", 0),
-            )
-        if oct_paper_first_lift_small_lift_context(evidence, settings=settings):
-            return True
+    evidence: dict[str, Any] = dict(alert) if isinstance(alert, dict) else {}
+    if explosion_event is not None and not evidence:
+        evidence = {
+            "side": getattr(explosion_event, "side", ""),
+            "tier": getattr(explosion_event, "tier", ""),
+            "explosionScore": getattr(explosion_event, "explosion_score", 0),
+            "score": getattr(explosion_event, "explosion_score", 0),
+            "localBaseMovePct": getattr(explosion_event, "local_base_move_pct", 0),
+            "momentType": getattr(explosion_event, "reason", ""),
+        }
+    elif explosion_event is not None:
+        evidence.setdefault("tier", getattr(explosion_event, "tier", ""))
+        evidence.setdefault(
+            "explosionScore",
+            getattr(explosion_event, "explosion_score", 0),
+        )
+    if evidence and oct_paper_first_lift_small_lift_context(evidence, settings=settings):
+        return True
+    if oct_paper_skip_live_only_session_gates(settings):
         if snap is not None and explosion_event is not None:
             from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
 

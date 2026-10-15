@@ -902,18 +902,13 @@ def _explosion_candidates(
                     side_v, snap, alert=alert,
                 )
                 oct_chart_ok = False
-                from app.engines.live_paper_parity import (
-                    oct_paper_structural_pad_context,
-                    oct_paper_entry_loosening_active,
+                from app.engines.live_paper_parity import oct_paper_structural_pad_context
+
+                oct_chart_ok = oct_paper_structural_pad_context(
+                    alert,
+                    settings=settings,
+                    readiness_reason=first_lift_readiness_reason,
                 )
-
-                if oct_paper_entry_loosening_active(settings):
-
-                    oct_chart_ok = oct_paper_structural_pad_context(
-                        alert,
-                        settings=settings,
-                        readiness_reason=first_lift_readiness_reason,
-                    )
                 if (
                     not local_base_ok
                     and not pad_lane_ok
@@ -2242,11 +2237,13 @@ def find_best_entry(
                 session_same_strike_loss_reentry_blocked,
             )
 
+            _fail_alert = c.alert if isinstance(getattr(c, "alert", None), dict) else None
             fail_blocked, _ = failed_launch_reentry_blocked(
                 state,
                 symbol=c.symbol,
                 side=c.side,
                 strike=float(c.strike or 0),
+                alert=_fail_alert,
             )
             if fail_blocked:
                 c.pretrade_meta = {
@@ -2437,7 +2434,10 @@ def find_best_entry(
             kept_candidates.append(c)
             continue
         if ranking.get("grade") == "REJECT":
-            from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+            from app.engines.live_paper_parity import (
+                oct_paper_skip_live_only_session_gates,
+                oct_paper_structural_pad_context,
+            )
             from app.engines.trade_ranking import selector_rejection_reason
 
             tier_u = str(
@@ -2455,17 +2455,13 @@ def find_best_entry(
                 or getattr(c, "score", 0)
                 or 0
             )
-            from app.engines.live_paper_parity import oct_paper_elite_rip_context
-
             rank_evidence = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
+            pad_evidence = {**rank_evidence, "tier": tier_u, "explosionScore": expl_score}
             oct_keep = (
-                oct_paper_entry_loosening_active(settings)
+                oct_paper_skip_live_only_session_gates(settings)
                 and tier_u in ("ELITE", "EXPLODING")
                 and expl_score >= min_score - 1e-6
-            ) or oct_paper_elite_rip_context(
-                {**rank_evidence, "tier": tier_u, "explosionScore": expl_score},
-                settings=settings,
-            )
+            ) or oct_paper_structural_pad_context(pad_evidence, settings=settings)
             if not oct_keep:
                 _record_selector_gate_rejection(c, selector_rejection_reason(ranking))
                 continue

@@ -768,16 +768,20 @@ def elite_side_local_base_cap(
             effective_near_base_max_local_pct,
             symmetric_best_trade_at_base_capture,
         )
-        from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+        from app.engines.live_paper_parity import (
+            oct_paper_skip_live_only_session_gates,
+            structural_pad_entry_lane_active,
+        )
 
-        if oct_paper_entry_loosening_active(settings):
+        pad_lane = structural_pad_entry_lane_active(evidence, settings=settings)
+        if oct_paper_skip_live_only_session_gates(settings) or pad_lane:
             ok, _ = symmetric_best_trade_at_base_capture(
                 evidence,
                 evidence,
                 ranking=ranking if isinstance(ranking, Mapping) else None,
                 settings=settings,
             )
-            if ok:
+            if ok or pad_lane:
                 cap = max(cap, effective_near_base_max_local_pct(settings))
                 cap = min(cap, general)
     return cap
@@ -1091,7 +1095,8 @@ def elite_fvq_chase_blocked(
     from app.engines.live_entry_score import live_entry_best_trade_capture_active
     from app.engines.live_paper_parity import (
         oct_paper_first_lift_small_lift_context,
-        oct_paper_entry_loosening_active,
+        oct_paper_skip_live_only_session_gates,
+        structural_pad_entry_lane_active,
     )
 
     if oct_paper_first_lift_small_lift_context(
@@ -1101,7 +1106,14 @@ def elite_fvq_chase_blocked(
     ):
         return False, ""
 
-    if oct_paper_entry_loosening_active(settings):
+    if structural_pad_entry_lane_active(
+        evidence,
+        settings=settings,
+        readiness_reason=readiness_reason,
+    ):
+        return False, ""
+
+    if oct_paper_skip_live_only_session_gates(settings):
         tier_u = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
         score = float(
             evidence.get("explosionScore") or evidence.get("explosion_score") or 0
@@ -1458,13 +1470,22 @@ def elite_entry_allowed(
     from app.config import get_settings
 
     settings = settings or get_settings()
-    from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+    from app.engines.live_paper_parity import (
+        oct_paper_first_lift_small_lift_context,
+        structural_pad_entry_lane_active,
+    )
 
     oct_first_lift = oct_paper_first_lift_small_lift_context(
         evidence,
         settings=settings,
         readiness_reason=readiness_reason,
     )
+    oct_structural_pad = structural_pad_entry_lane_active(
+        evidence,
+        settings=settings,
+        readiness_reason=readiness_reason,
+    )
+    oct_pad_lane = oct_first_lift or oct_structural_pad
 
     resolved_mode, resolved_type = resolve_elite_session_day_type(
         state,
@@ -1797,7 +1818,7 @@ def elite_entry_allowed(
         mega_ok=mega_ok or building_rip_helper_ok,
         settings=settings,
     ):
-        if oct_first_lift:
+        if oct_pad_lane:
             pass
         elif bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)):
             assessment = {**assessment, "side": resolved_side}
@@ -1848,7 +1869,7 @@ def elite_entry_allowed(
         mirror_waived=mirror_active,
         rally_unlock_armed=rally_unlock_armed,
     )
-    if chop_call_blocked and not oct_first_lift:
+    if chop_call_blocked and not oct_pad_lane:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, chop_call_reason, assessment
 
@@ -1882,7 +1903,7 @@ def elite_entry_allowed(
     ):
         v_rip_shallow_blocked = False
         v_rip_shallow_reason = ""
-    if v_rip_shallow_blocked and not oct_first_lift:
+    if v_rip_shallow_blocked and not oct_pad_lane:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, v_rip_shallow_reason, assessment
 
@@ -1904,12 +1925,12 @@ def elite_entry_allowed(
     shallow_blocked, shallow_reason = elite_shallow_lift_blocked(
         evidence, assessment, settings=settings,
     )
-    if shallow_blocked and not oct_first_lift:
+    if shallow_blocked and not oct_pad_lane:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, shallow_reason, assessment
 
     local = _number(assessment.get("localBasePct"))
-    if local > max_local + 1e-6 and not oct_first_lift:
+    if local > max_local + 1e-6 and not oct_pad_lane:
         from app.engines.best_trade_policy import symmetric_best_trade_capture_active
 
         assessment = {**assessment, "side": resolved_side, "localBaseCapPct": round(max_local, 2)}
@@ -1929,7 +1950,7 @@ def elite_entry_allowed(
             and bool(
                 getattr(settings, "live_entry_best_trade_capture_waives_elite_timing", True)
             )
-        ) and not building_rip_helper_ok and not call_capture_waive:
+        ) and not building_rip_helper_ok and not call_capture_waive and not oct_pad_lane:
             return False, "elite_timing_not_good_or_ok", assessment
 
     assessment = {

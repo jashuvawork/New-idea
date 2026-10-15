@@ -164,6 +164,43 @@ def _known_broker_instrument_keys(state: AutoTraderState) -> set[str]:
     return keys
 
 
+def _candidate_structural_pad_lane(
+    candidate: Any,
+    *,
+    settings: Any = None,
+) -> bool:
+    """ELITE pad / mid-rip — skip chop-live hard blocks (not extended chase)."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "structural_pad_chop_live_waiver_enabled", True)):
+        return False
+    alert = getattr(candidate, "alert", None)
+    if not isinstance(alert, dict):
+        alert = {}
+    event = getattr(candidate, "explosion_event", None)
+    evidence: dict = dict(alert)
+    if event is not None:
+        evidence.setdefault("side", getattr(event, "side", "") or evidence.get("side"))
+        evidence.setdefault("tier", getattr(event, "tier", "") or evidence.get("tier"))
+        evidence.setdefault(
+            "explosionScore",
+            getattr(event, "explosion_score", 0) or evidence.get("explosionScore"),
+        )
+        evidence.setdefault(
+            "localBaseMovePct",
+            getattr(event, "local_base_move_pct", 0) or evidence.get("localBaseMovePct"),
+        )
+    from app.engines.live_paper_parity import structural_pad_entry_lane_active
+
+    rr = str(
+        evidence.get("firstLiftReadinessReason")
+        or evidence.get("ictBaseReadinessReason")
+        or ""
+    )
+    return structural_pad_entry_lane_active(
+        evidence, settings=settings, readiness_reason=rr,
+    )
+
+
 def _immature_local_base_hard_block(
     candidate: Any,
     snap: SymbolSnapshot,
@@ -258,9 +295,9 @@ def armed_base_shallow_launch_blocked(
     """Hard block shallow armed-base launches on chop or midday windows (CE/PE symmetric)."""
     settings = get_settings()
     meta: dict[str, Any] = {}
-    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
 
-    if oct_paper_entry_loosening_active(settings):
+    if oct_paper_skip_live_only_session_gates(settings):
         meta["octPaperArmedBaseChopSkipped"] = True
         return False, "", meta
     if not getattr(settings, "chop_live_block_armed_base_launch", True):
@@ -365,9 +402,9 @@ def chop_live_entry_blocked(
     """
     settings = get_settings()
     meta: dict[str, Any] = {"chopLiveGuard": True}
-    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
 
-    if oct_paper_entry_loosening_active(settings):
+    if oct_paper_skip_live_only_session_gates(settings):
         meta["chopLiveGuard"] = False
         meta["octPaperChopWireSkipped"] = True
         return False, "ok", meta
@@ -391,6 +428,10 @@ def chop_live_entry_blocked(
         if near_ok:
             meta["chopLiveNearBaseWaive"] = near_reason
             return False, "ok", meta
+
+    if _candidate_structural_pad_lane(candidate, settings=settings):
+        meta["chopLiveStructuralPadWaive"] = True
+        return False, "ok", meta
 
     if getattr(settings, "chop_live_hard_block_worst_day", True) and snapshots:
         from app.engines.worst_day_guard import identify_worst_day
@@ -446,9 +487,9 @@ def chop_second_same_side_leg_blocked(
     """Block stacking a second explosion leg on the same side during chop/worst days."""
     settings = get_settings()
     meta: dict[str, Any] = {}
-    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
 
-    if oct_paper_entry_loosening_active(settings):
+    if oct_paper_skip_live_only_session_gates(settings):
         return False, "ok", meta
     if not getattr(settings, "chop_live_second_leg_block_enabled", True):
         return False, "ok", meta

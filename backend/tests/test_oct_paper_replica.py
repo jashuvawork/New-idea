@@ -16,6 +16,8 @@ from app.engines.live_paper_parity import (
     oct_paper_entry_loosening_active,
     oct_paper_peak_keep_exit_parity_active,
     oct_paper_replica_active,
+    oct_paper_skip_live_only_session_gates,
+    oct_paper_structural_entry_waivers_active,
     oct_paper_structural_pad_context,
     trading_rules_match_paper,
 )
@@ -125,6 +127,8 @@ def test_post_oct5_loosening_on_without_replica_off_with_replica():
     replica = _replica()
     assert trading_rules_match_paper(replica) is True
     assert oct_paper_entry_loosening_active(replica) is False
+    assert oct_paper_structural_entry_waivers_active(replica) is True
+    assert oct_paper_skip_live_only_session_gates(replica) is True
 
 
 def test_replica_also_disables_loosening_on_live_parity():
@@ -243,24 +247,24 @@ def test_pad_guard_off_under_replica_on_with_guard():
 
 
 @pytest.mark.parametrize("side", ["CALL", "PUT"])
-def test_structural_pad_waivers_off_under_replica_ce_pe(side):
+def test_structural_pad_waivers_on_under_replica_ce_pe(side):
     evidence = {
         **_armed(side, "ATM", 0),
         "firstLift": True,
         "localBaseMovePct": 4.0,
+        "offLowMovePct": 8.0,
         "sessionRangePosition": 0.3,
+        "explosionScore": 95.0,
     }
-    assert oct_paper_structural_pad_context(evidence, settings=_replica()) is False
+    assert oct_paper_structural_pad_context(evidence, settings=_replica()) is True
 
 
-def test_power_hour_gate_runs_again_under_replica(use_settings, monkeypatch):
+def test_power_hour_gate_skipped_under_replica(use_settings):
     from app.engines import power_hour_guards
 
     use_settings(_replica())
-    monkeypatch.setattr(power_hour_guards, "in_power_hour_window", lambda: False)
-    ok, _reason, meta = power_hour_guards.check_power_hour_session_allowed(None, {})
-    assert ok is True
-    assert "octPaperPowerHourSkipped" not in meta
+    _ok, _reason, meta = power_hour_guards.check_power_hour_session_allowed(None, {})
+    assert meta.get("octPaperPowerHourSkipped") is True
 
 
 def test_power_hour_gate_skipped_without_replica(use_settings):
@@ -271,13 +275,12 @@ def test_power_hour_gate_skipped_without_replica(use_settings):
     assert meta.get("octPaperPowerHourSkipped") is True
 
 
-def test_whipsaw_pause_runs_again_under_replica(use_settings, monkeypatch):
+def test_whipsaw_pause_skipped_under_replica(use_settings):
     from app.engines import whipsaw_guards
 
     use_settings(_replica(whipsaw_guards_enabled=True))
-    monkeypatch.setattr(whipsaw_guards, "momentum_rally_bypass_whipsaw", lambda _s: True)
     _paused, reason, _ = whipsaw_guards.check_session_whipsaw_pause(None, {})
-    assert reason == "momentum_rally_bypass"
+    assert reason == "oct_paper_whipsaw_skipped"
 
 
 def test_whipsaw_pause_skipped_without_replica(use_settings):
@@ -335,8 +338,10 @@ def test_hud_summary_exposes_replica_state():
     rep = summary["octPaperReplica"]
     assert rep["enabled"] is True
     assert rep["postOct5EntryLooseningActive"] is False
+    assert rep["skipLiveOnlySessionGates"] is True
     assert rep["radarFixedPremiumBandOnly"] is False
     assert rep["strictAtmItmExecution"] is False
     assert rep["padEntryGuardEnabled"] is False
     assert summary["octPaperBehaviorParity"]["peakKeepExitParity"] is True
-    assert summary["octPaperBehaviorParity"]["structuralPadSelectorWaivers"] is False
+    assert summary["octPaperBehaviorParity"]["structuralPadSelectorWaivers"] is True
+    assert rep["structuralEntryWaiversActive"] is True

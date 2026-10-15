@@ -257,6 +257,14 @@ def live_entry_score_blocks_entry(
     settings = get_settings()
     if not bool(getattr(settings, "live_entry_score_gate_enabled", True)):
         return False, "ok", {}
+    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
+
+    if oct_paper_skip_live_only_session_gates(settings):
+        meta = refresh_candidate_live_entry_score(
+            candidate, snap, premium_chart=premium_chart,
+        )
+        meta["octPaperLiveEntryScoreGateSkipped"] = True
+        return False, "ok", meta
     meta = refresh_candidate_live_entry_score(
         candidate, snap, premium_chart=premium_chart,
     )
@@ -276,7 +284,10 @@ def live_entry_score_blocks_entry(
     min_live = live_entry_score_min_for_tier(tier, settings=settings)
     meta["liveEntryMin"] = min_live
     if live < min_live:
-        from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+        from app.engines.live_paper_parity import (
+            oct_paper_skip_live_only_session_gates,
+            structural_pad_entry_lane_active,
+        )
 
         alert = _alert_dict(candidate)
         tier_u = tier.upper()
@@ -288,13 +299,26 @@ def live_entry_score_blocks_entry(
         min_expl = float(
             getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0
         )
+        rr = str(
+            alert.get("firstLiftReadinessReason")
+            or alert.get("ictBaseReadinessReason")
+            or ""
+        )
+        pad_lane = structural_pad_entry_lane_active(
+            alert, settings=settings, readiness_reason=rr,
+        )
         oct_paper_floor_skip = (
-            oct_paper_entry_loosening_active(settings)
-            and tier_u in ("ELITE", "EXPLODING")
+            tier_u in ("ELITE", "EXPLODING")
             and expl_score >= min_expl - 1e-6
+            and (
+                oct_paper_skip_live_only_session_gates(settings)
+                or pad_lane
+            )
         )
         if oct_paper_floor_skip:
             meta["octPaperLiveEntryScoreFloorSkipped"] = True
+            if pad_lane:
+                meta["structuralPadLiveEntryScoreFloorSkipped"] = True
         else:
             return (
                 True,

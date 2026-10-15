@@ -419,12 +419,9 @@ def tier_promotion_pad_chase_blocked(
             settings=settings,
         ):
             return False, ""
-        from app.engines.live_paper_parity import (
-            oct_paper_structural_pad_context,
-            oct_paper_entry_loosening_active,
-        )
+        from app.engines.live_paper_parity import oct_paper_structural_pad_context
 
-        if oct_paper_entry_loosening_active(settings) and oct_paper_structural_pad_context(
+        if oct_paper_structural_pad_context(
             resolved,
             settings=settings,
         ):

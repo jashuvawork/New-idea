@@ -28,9 +28,9 @@ def _in_open_premium_window() -> bool:
 
 
 def _oct_open_flip_active(settings: Any) -> bool:
-    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+    from app.engines.live_paper_parity import oct_paper_structural_entry_waivers_active
 
-    if not oct_paper_entry_loosening_active(settings):
+    if not oct_paper_structural_entry_waivers_active(settings):
         return False
     if not bool(getattr(settings, "oct_paper_open_moment_pad_waiver_enabled", True)):
         return False
@@ -177,9 +177,9 @@ def oct_index_flip_session_pad_waived(
     from app.config import get_settings
 
     settings = settings or get_settings()
-    from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+    from app.engines.live_paper_parity import oct_paper_structural_entry_waivers_active
 
-    if not oct_paper_entry_loosening_active(settings):
+    if not oct_paper_structural_entry_waivers_active(settings):
         return False, ""
     if require_open_window:
         if not bool(getattr(settings, "oct_paper_open_moment_pad_waiver_enabled", True)):

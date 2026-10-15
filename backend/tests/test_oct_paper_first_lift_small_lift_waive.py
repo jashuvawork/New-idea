@@ -9,7 +9,11 @@ from app.engines.elite_score_engine import (
     elite_fvq_chase_blocked,
     elite_perfect_score_blocked,
 )
-from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+from app.engines.live_paper_parity import (
+    oct_paper_first_lift_small_lift_context,
+    oct_paper_structural_entry_waivers_active,
+    oct_paper_structural_pad_context,
+)
 from app.engines.rally_capture import explosion_near_miss_waive
 from app.engines.trade_ranking import rank_trade_evidence
 from tests.mock_defaults import settings_mock
@@ -26,8 +30,37 @@ def _frozen_paper_settings(**kwargs):
     )
 
 
+def _replica_frozen_settings(**kwargs):
+    return _frozen_paper_settings(oct_paper_replica_enabled=True, **kwargs)
+
+
+def test_structural_waivers_active_under_oct_paper_replica():
+    s = _replica_frozen_settings()
+    assert oct_paper_structural_entry_waivers_active(s) is True
+
+
+def test_oct_first_lift_context_elite_base_ready_moment():
+    s = _replica_frozen_settings()
+    ev = {
+        "side": "CALL",
+        "tier": "ELITE",
+        "momentType": "ELITE_BASE_READY",
+        "eliteBaseReady": True,
+        "ictEliteBaseReady": True,
+        "localBaseMovePct": 4.0,
+        "offLowMovePct": 8.0,
+        "sessionRangePosition": 0.28,
+        "drawdownFromHighPct": -10.0,
+        "moneyness": "ATM",
+        "strikeStepsFromAtm": 0,
+        "explosionScore": 100.0,
+    }
+    assert oct_paper_first_lift_small_lift_context(ev, settings=s)
+    assert oct_paper_structural_pad_context(ev, settings=s)
+
+
 def test_oct_first_lift_context_ce_armed_base_at_pad():
-    s = _frozen_paper_settings()
+    s = _replica_frozen_settings()
     ev = {
         "side": "CALL",
         "tier": "ELITE",
@@ -109,6 +142,28 @@ def test_oct_first_lift_context_put_slide_symmetric():
         "strikeStepsFromAtm": 1,
     }
     assert oct_paper_first_lift_small_lift_context(ev, settings=s)
+
+
+@patch("app.engines.elite_score_engine.resolve_elite_session_day_type", return_value=("BULLISH DAY", "BULLISH"))
+def test_replica_first_lift_waives_fvq_under_oct_paper_replica(_day):
+    s = _replica_frozen_settings()
+    ev = {
+        "symbol": "NIFTY",
+        "side": "CALL",
+        "tier": "ELITE",
+        "momentType": "first_lift_local_base",
+        "firstLift": True,
+        "localBaseMovePct": 8.0,
+        "offLowMovePct": 10.0,
+        "flatVerticalQuality": 92.0,
+        "explosionScore": 100.0,
+        "sessionRangePosition": 0.35,
+        "drawdownFromHighPct": -12.0,
+        "moneyness": "ITM",
+        "strikeStepsFromAtm": 1,
+    }
+    blocked, reason = elite_fvq_chase_blocked(ev, settings=s)
+    assert blocked is False, reason
 
 
 @patch("app.engines.elite_score_engine.resolve_elite_session_day_type", return_value=("BULLISH DAY", "BULLISH"))
@@ -215,6 +270,84 @@ def test_near_miss_still_blocks_cold_negative_without_launch():
     )
 
 
+def test_replica_live_entry_score_floor_skipped_on_structural_pad():
+    from types import SimpleNamespace
+
+    from app.engines.live_entry_score import live_entry_score_blocks_entry
+
+    s = _replica_frozen_settings(live_entry_score_gate_enabled=True)
+    alert = {
+        "side": "CALL",
+        "tier": "ELITE",
+        "momentType": "first_lift_local_base",
+        "firstLift": True,
+        "explosionScore": 100.0,
+        "localBaseMovePct": 8.0,
+        "offLowMovePct": 10.0,
+        "sessionRangePosition": 0.35,
+        "drawdownFromHighPct": -12.0,
+        "moneyness": "ITM",
+        "liveEntryScore": 30.0,
+    }
+    cand = SimpleNamespace(
+        mode="explosion",
+        tier="ELITE",
+        side="CALL",
+        alert=alert,
+        explosion_event=SimpleNamespace(explosion_score=100.0),
+        liveEntryScore=30.0,
+        score=100.0,
+    )
+    with patch("app.engines.live_entry_score.get_settings", return_value=s):
+        with patch(
+            "app.engines.live_entry_score.refresh_candidate_live_entry_score",
+            return_value={"liveEntryScore": 30.0},
+        ), patch(
+            "app.engines.premium_vertical_chase_guard.premium_vertical_chase_blocks_entry",
+            return_value=(False, "", {}),
+        ):
+            blocked, reason, meta = live_entry_score_blocks_entry(cand, snap=None)
+    assert blocked is False
+    assert meta.get("octPaperLiveEntryScoreGateSkipped") is True
+
+
+@patch("app.engines.elite_score_engine.resolve_elite_session_day_type", return_value=("BULLISH DAY", "BULLISH"))
+def test_replica_elite_timing_waived_on_structural_pad(_day):
+    s = _replica_frozen_settings(
+        elite_trade_engine_enabled=True,
+        elite_trade_min_score=70.0,
+        live_entry_moment_elite_score_floor=70.0,
+    )
+    ev = {
+        "symbol": "NIFTY",
+        "side": "PUT",
+        "strike": 22500.0,
+        "tier": "ELITE",
+        "momentType": "v_rip_session_high",
+        "vRipReady": True,
+        "localBaseMovePct": 10.0,
+        "offHighMovePct": 6.0,
+        "sessionRangePosition": 0.55,
+        "drawdownFromHighPct": -14.0,
+        "flatVerticalQuality": 50.0,
+        "explosionScore": 100.0,
+        "velocity3s": 2.0,
+        "velocity9s": 1.5,
+        "timingAssessment": "BAD",
+        "timingAction": "block",
+        "moneyness": "ITM",
+        "strikeStepsFromAtm": 1,
+        "mode": "explosion",
+        "tqs": 55.0,
+        "chartConfidence": 50.0,
+    }
+    ranking = rank_trade_evidence(ev)
+    ok, reason, _ = elite_entry_allowed(
+        ev, ranking, settings=s, side="PUT", readiness_reason="v_rip_session_high_ready",
+    )
+    assert ok, reason
+
+
 def test_oct_first_lift_entry_window_lo_relax():
     from app.engines.explosion_entry_guards import explosion_entry_window_blocked
     from app.engines.live_paper_parity import oct_paper_first_lift_entry_window_lo_relax
@@ -304,7 +437,7 @@ def test_counter_trend_allows_oct_first_lift_afternoon():
     from app.engines.morning_premium_capture import counter_trend_entry_allowed
     from app.models.schemas import Side
 
-    s = _frozen_paper_settings()
+    s = _replica_frozen_settings()
     alert = {
         "side": "CALL",
         "tier": "ELITE",
