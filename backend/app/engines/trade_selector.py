@@ -260,7 +260,14 @@ def _high_signal_pre_candidate_skip_reason(
             settings=settings,
         )
     if not alert.get("tradeable") and not lift_ready and not chop_rally_capture:
-        return "explosion_not_tradeable"
+        from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+        if not oct_paper_funnel_readiness_waived(
+            alert,
+            settings=settings,
+            readiness_reason=first_lift_readiness_reason,
+        ):
+            return "explosion_not_tradeable"
     from app.engines.premium_filter import explosion_alert_premium_tradeable
 
     prem_ok = explosion_alert_premium_tradeable(
@@ -665,9 +672,17 @@ def _explosion_candidates(
                 settings=settings,
             )
         if not alert.get("tradeable") and not lift_ready and not chop_rally_capture:
-            if isinstance(alert, dict):
-                _record_explosion_alert_skip(symbol, alert, "explosion_not_tradeable")
-            continue
+            from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+            waived = isinstance(alert, dict) and oct_paper_funnel_readiness_waived(
+                alert,
+                settings=settings,
+                readiness_reason=first_lift_readiness_reason,
+            )
+            if not waived:
+                if isinstance(alert, dict):
+                    _record_explosion_alert_skip(symbol, alert, "explosion_not_tradeable")
+                continue
         from app.engines.premium_filter import explosion_alert_premium_tradeable
 
         prem_ok = explosion_alert_premium_tradeable(
@@ -1361,6 +1376,11 @@ def _explosion_candidates(
             premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
         )
         timing_blocked, _timing_reason = timing_blocks_entry(timing)
+        if timing_blocked and isinstance(alert, dict):
+            from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+            if oct_paper_funnel_readiness_waived(alert, settings=settings):
+                timing_blocked = False
         if (
             timing_blocked
             and not must_take

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from app.engines.explosion_entry_guards import explosion_entry_window_blocked
+from app.engines.explosion_entry_guards import (
+    explosion_entry_window_blocked,
+    live_explosion_confirmation_blocked,
+)
+from app.engines.morning_premium_capture import counter_trend_entry_allowed
 from app.engines.rally_capture import explosion_near_miss_waive, index_pin_blocks_put_explosion
 from app.engines.smart_ichimoku import ichimoku_break_supports_side
 from app.engines.trade_ranking import rank_trade_evidence
@@ -116,6 +120,68 @@ def test_replica_waives_premium_out_of_band_near_miss_oct1_style():
         readiness_reason="premium_out_of_band",
         settings=s,
     )
+
+
+def test_replica_elite_funnel_waives_without_pad_flags():
+    from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+    s = _replica()
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 92.0,
+        "side": "CALL",
+        "localBaseMovePct": 12.0,
+        "sessionRangePosition": 0.35,
+    }
+    assert oct_paper_funnel_readiness_waived(alert, settings=s) is True
+
+
+def test_replica_waives_midday_no_ict_for_elite_funnel():
+    s = _replica()
+    event = MagicMock(
+        tier="ELITE",
+        velocity_3s=3.0,
+        velocity_9s=3.0,
+        explosion_score=90.0,
+        volume_surge=1.0,
+    )
+    ict = MagicMock(
+        flat_then_vertical=False,
+        displacement=True,
+        session_move_pct=20.0,
+    )
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 90.0,
+        "side": "CALL",
+        "sessionRangePosition": 0.4,
+    }
+    with patch("app.engines.explosion_entry_guards.get_settings", return_value=s):
+        blocked, reason = live_explosion_confirmation_blocked(
+            event,
+            ict=ict,
+            alert=alert,
+            midday_chop=True,
+        )
+    assert blocked is False
+    assert reason == ""
+
+
+def test_replica_counter_trend_allowed_for_elite_funnel():
+    s = _replica()
+    snap = MagicMock()
+    snap.breadth = MagicMock(bias="BULLISH")
+    event = MagicMock(side=Side.PUT, tier="ELITE", explosion_score=88.0)
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 88.0,
+        "side": "PUT",
+        "sessionRangePosition": 0.42,
+    }
+    with patch("app.engines.morning_premium_capture.get_settings", return_value=s):
+        assert counter_trend_entry_allowed(
+            Side.PUT, snap, explosion_event=event, alert=alert,
+        ) is True
 
 
 def test_replica_skips_put_index_pin_block():

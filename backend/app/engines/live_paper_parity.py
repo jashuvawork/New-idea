@@ -502,6 +502,53 @@ def structural_pad_entry_lane_active(
     return False
 
 
+def oct_paper_replica_elite_funnel_waived(
+    evidence: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """
+    Oct 1 replica — ELITE/EXPLODING radar rows pass post-Oct readiness gates when
+    not extended premium chase. Used when pad flags are missing on the alert dict
+    but the name is still a top-tier structural candidate.
+    """
+    s = settings or get_settings()
+    if not oct_paper_replica_active(s):
+        return False
+    if not oct_paper_structural_entry_waivers_active(s):
+        return False
+    if not isinstance(evidence, dict):
+        return False
+    tier = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    score = _parity_number(evidence.get("explosionScore") or evidence.get("score"))
+    min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
+    if score < min_score - 1e-6:
+        return False
+    pos_raw = evidence.get("sessionRangePosition")
+    if pos_raw is None or str(pos_raw).strip() == "":
+        return True
+    side = str(evidence.get("side") or "").upper()
+    pos = _parity_number(pos_raw)
+    dd = _parity_number(evidence.get("drawdownFromHighPct"))
+    dd_present = (
+        evidence.get("drawdownFromHighPct") is not None
+        and str(evidence.get("drawdownFromHighPct")).strip() != ""
+    )
+    from app.engines.oct1_pad_location import oct1_premium_location_chase_core
+
+    chase_blocked, _chase_reason = oct1_premium_location_chase_core(
+        side,
+        pos,
+        dd,
+        evidence,
+        settings=s,
+        dd_present=dd_present,
+    )
+    return not chase_blocked
+
+
 def oct_paper_funnel_readiness_waived(
     evidence: Mapping[str, Any] | None,
     *,
@@ -525,9 +572,11 @@ def oct_paper_funnel_readiness_waived(
     )
     if oct_paper_structural_pad_context(evidence, settings=s, readiness_reason=rr):
         return True
-    return structural_pad_entry_lane_active(
+    if structural_pad_entry_lane_active(
         evidence, settings=s, readiness_reason=rr,
-    )
+    ):
+        return True
+    return oct_paper_replica_elite_funnel_waived(evidence, settings=s)
 
 
 def oct_paper_exec_strict_bypass(
