@@ -572,9 +572,9 @@ def explosion_near_miss_waive(
     s = settings or get_settings()
     rr = str(readiness_reason or "").lower()
     if isinstance(alert, dict):
-        from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+        from app.engines.live_paper_parity import oct_paper_structural_entry_waivers_active
 
-        if oct_paper_entry_loosening_active(s):
+        if oct_paper_structural_entry_waivers_active(s):
             from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
 
             if oct_paper_first_lift_small_lift_context(

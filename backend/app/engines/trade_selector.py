@@ -899,18 +899,13 @@ def _explosion_candidates(
                     side_v, snap, alert=alert,
                 )
                 oct_chart_ok = False
-                from app.engines.live_paper_parity import (
-                    oct_paper_structural_pad_context,
-                    oct_paper_entry_loosening_active,
+                from app.engines.live_paper_parity import oct_paper_structural_pad_context
+
+                oct_chart_ok = oct_paper_structural_pad_context(
+                    alert,
+                    settings=settings,
+                    readiness_reason=first_lift_readiness_reason,
                 )
-
-                if oct_paper_entry_loosening_active(settings):
-
-                    oct_chart_ok = oct_paper_structural_pad_context(
-                        alert,
-                        settings=settings,
-                        readiness_reason=first_lift_readiness_reason,
-                    )
                 if (
                     not local_base_ok
                     and not pad_lane_ok
@@ -2434,7 +2429,10 @@ def find_best_entry(
             kept_candidates.append(c)
             continue
         if ranking.get("grade") == "REJECT":
-            from app.engines.live_paper_parity import oct_paper_entry_loosening_active
+            from app.engines.live_paper_parity import (
+                oct_paper_entry_loosening_active,
+                oct_paper_structural_pad_context,
+            )
             from app.engines.trade_ranking import selector_rejection_reason
 
             tier_u = str(
@@ -2452,17 +2450,13 @@ def find_best_entry(
                 or getattr(c, "score", 0)
                 or 0
             )
-            from app.engines.live_paper_parity import oct_paper_elite_rip_context
-
             rank_evidence = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
+            pad_evidence = {**rank_evidence, "tier": tier_u, "explosionScore": expl_score}
             oct_keep = (
                 oct_paper_entry_loosening_active(settings)
                 and tier_u in ("ELITE", "EXPLODING")
                 and expl_score >= min_score - 1e-6
-            ) or oct_paper_elite_rip_context(
-                {**rank_evidence, "tier": tier_u, "explosionScore": expl_score},
-                settings=settings,
-            )
+            ) or oct_paper_structural_pad_context(pad_evidence, settings=settings)
             if not oct_keep:
                 _record_selector_gate_rejection(c, selector_rejection_reason(ranking))
                 continue
