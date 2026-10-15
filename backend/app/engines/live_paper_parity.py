@@ -502,34 +502,82 @@ def structural_pad_entry_lane_active(
     return False
 
 
-def oct_paper_replica_elite_funnel_waived(
-    evidence: Mapping[str, Any] | None,
+def _oct_paper_structural_launch_flags(evidence: Mapping[str, Any]) -> bool:
+    """Armed-base / first-lift / v-rip flags on the alert (before CE/PE location checks)."""
+    armed_launch = bool(
+        evidence.get("armedBaseLaunch") or evidence.get("ictArmedBaseLaunch")
+    )
+    elite_base_ready = bool(
+        evidence.get("eliteBaseReady") or evidence.get("ictEliteBaseReady")
+    )
+    v_rip_ready = bool(
+        evidence.get("vRipReady")
+        or evidence.get("ictVRipReady")
+        or "v_rip" in str(evidence.get("momentType") or "").lower()
+    )
+    building_rip_ready = bool(
+        evidence.get("buildingRipReady") or evidence.get("ictBuildingRipReady")
+    )
+    flat_vertical = bool(
+        evidence.get("flatThenVertical") or evidence.get("ictFlatThenVertical")
+    )
+    first_lift = bool(evidence.get("firstLift") or evidence.get("ictFirstLift"))
+    from app.engines.open_rip_selector import open_rip_elite_structural_evidence
+
+    return (
+        armed_launch
+        or elite_base_ready
+        or v_rip_ready
+        or building_rip_ready
+        or flat_vertical
+        or first_lift
+        or open_rip_elite_structural_evidence(evidence)
+    )
+
+
+def _oct_paper_local_base_in_first_lift_band(
+    evidence: Mapping[str, Any],
     *,
-    settings: Any = None,
+    settings: Any,
 ) -> bool:
-    """
-    Oct 1 replica — ELITE/EXPLODING radar rows pass post-Oct readiness gates when
-    not extended premium chase. Used when pad flags are missing on the alert dict
-    but the name is still a top-tier structural candidate.
-    """
-    s = settings or get_settings()
-    if not oct_paper_replica_active(s):
-        return False
-    if not oct_paper_structural_entry_waivers_active(s):
-        return False
-    if not isinstance(evidence, dict):
-        return False
-    tier = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
-    if tier not in ("ELITE", "EXPLODING"):
-        return False
-    score = _parity_number(evidence.get("explosionScore") or evidence.get("score"))
-    min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
-    if score < min_score - 1e-6:
-        return False
+    local = _parity_number(evidence.get("localBaseMovePct"))
+    min_local = float(
+        getattr(settings, "oct_paper_first_lift_small_lift_min_local_pct", 2.0) or 2.0
+    )
+    max_local = float(
+        getattr(settings, "oct_paper_first_lift_small_lift_max_local_pct", 40.0) or 40.0
+    )
+    return min_local <= local <= max_local + 1e-6
+
+
+def _oct_paper_base_lift_evidence(
+    evidence: Mapping[str, Any],
+    *,
+    settings: Any,
+    readiness_reason: str = "",
+) -> bool:
+    if oct_paper_structural_pad_context(
+        evidence, settings=settings, readiness_reason=readiness_reason,
+    ):
+        return True
+    if structural_pad_entry_lane_active(
+        evidence, settings=settings, readiness_reason=readiness_reason,
+    ):
+        return True
+    if _oct_paper_local_base_in_first_lift_band(evidence, settings=settings):
+        return True
+    return _oct_paper_structural_launch_flags(evidence)
+
+
+def _oct_paper_premium_chase_blocks(
+    evidence: Mapping[str, Any],
+    *,
+    settings: Any,
+) -> bool:
+    side = str(evidence.get("side") or "").upper()
     pos_raw = evidence.get("sessionRangePosition")
     if pos_raw is None or str(pos_raw).strip() == "":
-        return True
-    side = str(evidence.get("side") or "").upper()
+        return False
     pos = _parity_number(pos_raw)
     dd = _parity_number(evidence.get("drawdownFromHighPct"))
     dd_present = (
@@ -543,10 +591,44 @@ def oct_paper_replica_elite_funnel_waived(
         pos,
         dd,
         evidence,
-        settings=s,
+        settings=settings,
         dd_present=dd_present,
     )
-    return not chase_blocked
+    return chase_blocked
+
+
+def oct_paper_base_first_lift_take_allowed(
+    evidence: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+    readiness_reason: str = "",
+) -> bool:
+    """
+    Oct 1 structural base / first-lift take — single predicate for funnel + exec.
+
+    ELITE/EXPLODING at pad/local-base with CE/PE lane semantics; blocks extended chase.
+    """
+    s = settings or get_settings()
+    if not oct_paper_structural_entry_waivers_active(s):
+        return False
+    if not isinstance(evidence, dict):
+        return False
+    tier = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    score = _parity_number(evidence.get("explosionScore") or evidence.get("score"))
+    min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
+    if score < min_score - 1e-6:
+        return False
+    rr = str(
+        readiness_reason
+        or evidence.get("firstLiftReadinessReason")
+        or evidence.get("ictBaseReadinessReason")
+        or ""
+    )
+    if not _oct_paper_base_lift_evidence(evidence, settings=s, readiness_reason=rr):
+        return False
+    return not _oct_paper_premium_chase_blocks(evidence, settings=s)
 
 
 def oct_paper_funnel_readiness_waived(
@@ -559,24 +641,11 @@ def oct_paper_funnel_readiness_waived(
     Oct 1 / replica stack — structural pad/first-lift may pass readiness gates
     that post-Oct additions added (mid-rip coil, base-move band, ichimoku, etc.).
     """
-    s = settings or get_settings()
-    if not oct_paper_structural_entry_waivers_active(s):
-        return False
-    if not isinstance(evidence, dict):
-        return False
-    rr = str(
-        readiness_reason
-        or evidence.get("firstLiftReadinessReason")
-        or evidence.get("ictBaseReadinessReason")
-        or ""
+    return oct_paper_base_first_lift_take_allowed(
+        evidence,
+        settings=settings,
+        readiness_reason=readiness_reason,
     )
-    if oct_paper_structural_pad_context(evidence, settings=s, readiness_reason=rr):
-        return True
-    if structural_pad_entry_lane_active(
-        evidence, settings=s, readiness_reason=rr,
-    ):
-        return True
-    return oct_paper_replica_elite_funnel_waived(evidence, settings=s)
 
 
 def oct_paper_exec_strict_bypass(
@@ -588,11 +657,61 @@ def oct_paper_exec_strict_bypass(
     from app.config import get_settings
 
     s = settings or get_settings()
-    if not oct_paper_structural_entry_waivers_active(s):
-        return False
     if not bool(getattr(s, "oct_paper_exec_strict_bypass_enabled", True)):
         return False
-    return oct_paper_structural_pad_context(alert, settings=s)
+    return oct_paper_base_first_lift_take_allowed(alert, settings=s)
+
+
+def enrich_alert_for_oct_paper_exec(
+    alert: Mapping[str, Any] | None,
+    *,
+    snap: Any = None,
+    event: Any = None,
+) -> dict[str, Any]:
+    """Merge ICT first-lift fields onto the alert so order-path bypass matches selector."""
+    if not isinstance(alert, dict):
+        alert = {}
+    if not oct_paper_structural_entry_waivers_active():
+        return dict(alert)
+    from app.engines.explosion_detector import enrich_alert_armed_evidence
+    from app.engines.ict_breakout_monitor import (
+        analyze_explosion_event_ict,
+        first_lift_entry_readiness,
+    )
+
+    row = enrich_alert_armed_evidence(dict(alert))
+    ict = analyze_explosion_event_ict(event, snap) if event is not None else None
+    ready, reason = first_lift_entry_readiness(
+        snap=snap,
+        event=event,
+        ict=ict,
+        alert=row,
+    )
+    if ready and reason:
+        row["firstLiftReadinessReason"] = reason
+        row["firstLift"] = True
+    if event is not None:
+        for key, attr in (
+            ("localBaseMovePct", "local_base_move_pct"),
+            ("offLowMovePct", "off_low_move_pct"),
+            ("sessionRangePosition", "session_range_position"),
+        ):
+            if row.get(key) in (None, ""):
+                val = getattr(event, attr, None)
+                if val is not None and str(val).strip() != "":
+                    row[key] = val
+        if row.get("explosionScore") in (None, "", 0):
+            score = getattr(event, "explosion_score", None)
+            if score is not None:
+                row["explosionScore"] = score
+        if not row.get("tier"):
+            row["tier"] = getattr(event, "tier", "") or ""
+        if not row.get("side"):
+            side = getattr(event, "side", None)
+            row["side"] = (
+                side.value if hasattr(side, "value") else str(side or "").upper()
+            )
+    return row
 
 
 def oct_paper_first_lift_entry_window_hi_relax(

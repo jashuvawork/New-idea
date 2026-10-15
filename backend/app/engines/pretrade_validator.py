@@ -613,6 +613,21 @@ def validate_candidate(
     """
     settings = get_settings()
     policy_meta: dict[str, Any] = {}
+    if str(getattr(candidate, "mode", "") or "").lower() == "explosion":
+        sym = str(getattr(candidate, "symbol", "") or "")
+        snap_for_enrich = (
+            (snapshots or {}).get(sym)
+            if snapshots
+            else getattr(candidate, "snap", None)
+        )
+        raw_alert = getattr(candidate, "alert", None)
+        from app.engines.live_paper_parity import enrich_alert_for_oct_paper_exec
+
+        candidate.alert = enrich_alert_for_oct_paper_exec(
+            raw_alert if isinstance(raw_alert, dict) else {},
+            snap=snap_for_enrich,
+            event=getattr(candidate, "explosion_event", None),
+        )
     from app.engines.power_hour_guards import (
         candidate_qualifies_power_hour_top_trade,
         in_power_hour_window,
