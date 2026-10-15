@@ -481,7 +481,10 @@ def structural_pad_entry_lane_active(
             return False
         from app.engines.oct1_pad_location import oct1_premium_location_chase_core
 
-        pos = _parity_number(evidence.get("sessionRangePosition"))
+        pos_raw = evidence.get("sessionRangePosition")
+        if pos_raw is None or str(pos_raw).strip() == "":
+            return False
+        pos = _parity_number(pos_raw)
         dd = _parity_number(evidence.get("drawdownFromHighPct"))
         dd_present = (
             evidence.get("drawdownFromHighPct") is not None

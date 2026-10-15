@@ -259,12 +259,6 @@ def live_entry_score_blocks_entry(
         return False, "ok", {}
     from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
 
-    if oct_paper_skip_live_only_session_gates(settings):
-        meta = refresh_candidate_live_entry_score(
-            candidate, snap, premium_chart=premium_chart,
-        )
-        meta["octPaperLiveEntryScoreGateSkipped"] = True
-        return False, "ok", meta
     meta = refresh_candidate_live_entry_score(
         candidate, snap, premium_chart=premium_chart,
     )
@@ -279,6 +273,9 @@ def live_entry_score_blocks_entry(
     meta.update(chase_meta)
     if chase_blocked:
         return True, chase_reason, meta
+    if oct_paper_skip_live_only_session_gates(settings):
+        meta["octPaperLiveEntryScoreGateSkipped"] = True
+        return False, "ok", meta
     tier = str(getattr(candidate, "tier", "") or _alert_dict(candidate).get("tier") or "")
     live = float(getattr(candidate, "liveEntryScore", 0) or meta.get("liveEntryScore") or 0)
     min_live = live_entry_score_min_for_tier(tier, settings=settings)
