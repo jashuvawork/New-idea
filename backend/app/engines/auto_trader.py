@@ -551,11 +551,17 @@ async def _open_from_candidate(
             session_same_strike_loss_reentry_blocked,
         )
 
+        _fail_alert = (
+            candidate.alert
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None
+        )
         fail_blocked, _fail_meta = failed_launch_reentry_blocked(
             state,
             symbol=symbol,
             side=candidate.side,
             strike=float(candidate.strike or 0),
+            alert=_fail_alert,
         )
         if fail_blocked:
             return False, "failed_launch_reentry_cooldown"

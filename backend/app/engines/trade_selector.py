@@ -2237,11 +2237,13 @@ def find_best_entry(
                 session_same_strike_loss_reentry_blocked,
             )
 
+            _fail_alert = c.alert if isinstance(getattr(c, "alert", None), dict) else None
             fail_blocked, _ = failed_launch_reentry_blocked(
                 state,
                 symbol=c.symbol,
                 side=c.side,
                 strike=float(c.strike or 0),
+                alert=_fail_alert,
             )
             if fail_blocked:
                 c.pretrade_meta = {

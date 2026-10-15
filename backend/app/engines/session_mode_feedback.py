@@ -546,6 +546,7 @@ def failed_launch_reentry_blocked(
     symbol: str,
     side: Any,
     strike: float,
+    alert: dict[str, Any] | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Block same/nearby-strike re-entry after failed launch or never-green stop.
 
@@ -574,6 +575,18 @@ def failed_launch_reentry_blocked(
     )
     if prior is None or getattr(prior, "closedAt", None) is None:
         return False, meta
+    prior_strike = float(getattr(prior, "strike", 0) or 0)
+    strike_f = float(strike or 0)
+    if (
+        bool(getattr(settings, "structural_pad_failed_launch_reentry_waiver_enabled", True))
+        and isinstance(alert, dict)
+        and abs(prior_strike - strike_f) > 0.01
+    ):
+        from app.engines.live_paper_parity import structural_pad_entry_lane_active
+
+        if structural_pad_entry_lane_active(alert, settings=settings):
+            meta["structuralPadFailedLaunchReentryWaived"] = True
+            return False, meta
     reason = str(getattr(prior, "exitReason", "") or "")
     prior_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
     best = float(getattr(prior, "bestPnlPoints", 0) or 0)

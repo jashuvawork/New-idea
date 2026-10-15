@@ -136,3 +136,48 @@ def test_no_structural_waive_without_pad_context(_day):
             )
     assert blocked is True
     assert "extended_chase" in reason
+
+
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_structural_pad_waives_failed_launch_reentry_on_new_strike_ce(mock_settings):
+    from datetime import datetime, timedelta
+
+    from app.engines.session_mode_feedback import failed_launch_reentry_blocked
+    from app.models.schemas import Side
+
+    s = _replica_settings(
+        structural_pad_failed_launch_reentry_waiver_enabled=True,
+    )
+    mock_settings.return_value = s
+    prior = SimpleNamespace(
+        id="p1",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=72000.0,
+        strategyType="EXPLOSIVE",
+        exitReason="explosion_failed_launch",
+        pnlInr=-500.0,
+        bestPnlPoints=0.0,
+        closedAt=datetime.now() - timedelta(minutes=5),
+        openedAt=datetime.now() - timedelta(minutes=6),
+        entryContext={"selectionMode": "explosion"},
+    )
+    state = AutoTraderState()
+    state.closedPaperTrades = [prior]
+    alert = {
+        "side": "CALL",
+        "tier": "ELITE",
+        "momentType": "first_lift_local_base",
+        "firstLift": True,
+        "explosionScore": 100.0,
+        "localBaseMovePct": 8.0,
+        "offLowMovePct": 10.0,
+        "sessionRangePosition": 0.35,
+        "drawdownFromHighPct": -12.0,
+        "moneyness": "ITM",
+    }
+    blocked, meta = failed_launch_reentry_blocked(
+        state, symbol="NIFTY", side=Side.CALL, strike=72050.0, alert=alert,
+    )
+    assert blocked is False
+    assert meta.get("structuralPadFailedLaunchReentryWaived") is True

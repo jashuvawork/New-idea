@@ -474,9 +474,28 @@ def structural_pad_entry_lane_active(
         max_local = float(
             getattr(s, "oct_paper_first_lift_small_lift_max_local_pct", 40.0) or 40.0
         )
-        return (off_low >= min_off - 1e-6) or (
+        location_ok = (off_low >= min_off - 1e-6) or (
             min_local <= local <= max_local + 1e-6
         )
+        if not location_ok:
+            return False
+        from app.engines.oct1_pad_location import oct1_premium_location_chase_core
+
+        pos = _parity_number(evidence.get("sessionRangePosition"))
+        dd = _parity_number(evidence.get("drawdownFromHighPct"))
+        dd_present = (
+            evidence.get("drawdownFromHighPct") is not None
+            and str(evidence.get("drawdownFromHighPct")).strip() != ""
+        )
+        chase_blocked, _chase_reason = oct1_premium_location_chase_core(
+            side,
+            pos,
+            dd,
+            evidence,
+            settings=s,
+            dd_present=dd_present,
+        )
+        return not chase_blocked
     return False
 
 
