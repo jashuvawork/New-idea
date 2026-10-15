@@ -106,6 +106,18 @@ def test_replica_ranking_does_not_reject_mid_rip_coil_for_structural_pad():
     assert "mid_rip_armed_coil" not in codes
 
 
+def test_replica_waives_premium_out_of_band_near_miss_oct1_style():
+    s = _replica()
+    alert = {"tier": "ELITE", "explosionScore": 88.0, "side": "CALL", "strike": 72500.0}
+    from app.engines.rally_capture import explosion_near_miss_waive
+
+    assert explosion_near_miss_waive(
+        alert,
+        readiness_reason="premium_out_of_band",
+        settings=s,
+    )
+
+
 def test_replica_skips_put_index_pin_block():
     s = _replica(index_pin_put_block_enabled=True)
     event = MagicMock(side=Side.PUT)

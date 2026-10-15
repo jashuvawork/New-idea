@@ -600,10 +600,24 @@ def explosion_near_miss_waive(
                     ):
                         return False
                 return True
+        from app.engines.live_paper_parity import oct_paper_replica_active
+
+        tier = str(alert.get("tier") or "").upper()
+        score = float(alert.get("explosionScore") or alert.get("score") or 0)
+        min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
+        if (
+            oct_paper_replica_active(s)
+            and tier in ("ELITE", "EXPLODING")
+            and score >= min_score
+        ):
+            oct1_premium_near_miss = (
+                "premium_out_of_band",
+                "premium_above",
+                "premium_below",
+            )
+            if rr.startswith(oct1_premium_near_miss):
+                return True
         if oct_paper_entry_loosening_active(s):
-            tier = str(alert.get("tier") or "").upper()
-            score = float(alert.get("explosionScore") or alert.get("score") or 0)
-            min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
             if tier in ("ELITE", "EXPLODING") and score >= min_score:
                 oct_near_miss_prefixes = (
                     "first_lift_quality",
