@@ -844,6 +844,17 @@ def live_explosion_confirmation_blocked(
     ):
         return False, ""
 
+    if isinstance(alert, dict):
+        from app.engines.live_paper_parity import (
+            oct_paper_funnel_readiness_waived,
+            oct_paper_replica_active,
+        )
+
+        if oct_paper_replica_active(settings) and oct_paper_funnel_readiness_waived(
+            alert, settings=settings,
+        ):
+            return False, ""
+
     if snap is not None and isinstance(alert, dict):
         from app.engines.index_confirmed_local_base import index_confirmed_local_base
 
@@ -973,7 +984,20 @@ def live_explosion_confirmation_blocked(
         if midday_chop is None:
             midday_chop = _midday_chop_active()
         if midday_chop:
-            return True, "midday_no_ict_structure"
+            if isinstance(alert, dict):
+                from app.engines.live_paper_parity import (
+                    oct_paper_funnel_readiness_waived,
+                    oct_paper_replica_active,
+                )
+
+                if oct_paper_replica_active(settings) and oct_paper_funnel_readiness_waived(
+                    alert, settings=settings,
+                ):
+                    pass
+                else:
+                    return True, "midday_no_ict_structure"
+            else:
+                return True, "midday_no_ict_structure"
         if not (v3 >= hot_v3 and move >= early_min):
             return True, "no_ict_structure_confirmation"
 

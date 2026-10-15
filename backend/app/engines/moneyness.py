@@ -128,6 +128,11 @@ def atm_itm_entry_allows(
                     if runner_match or tier in ("ELITE", "EXPLODING"):
                         meta["shallowOtmNearStrikeEntry"] = True
                         return True, "ok", meta
+            from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+            if oct_paper_funnel_readiness_waived(alert, settings=settings):
+                meta["octPaperReplicaOtmWaived"] = True
+                return True, "ok", meta
         return False, "moneyness_atm_itm_only", meta
     return True, "ok", meta
 

@@ -211,6 +211,11 @@ def chop_weak_explosion_blocks_entry(
     if open_gap_chop_bypass(candidate, snap):
         return False, "ok"
 
+    from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+    if isinstance(alert, dict) and oct_paper_funnel_readiness_waived(alert, settings=settings):
+        return False, "oct_paper_replica_chop_immature_waived"
+
     # True flat→vertical with volume at early floor — allow on chop.
     if ict_flat and ict_vol and move >= early_min:
         return False, "ok"

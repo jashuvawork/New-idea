@@ -889,6 +889,12 @@ def check_explosion_entry(
         premium_capture=is_premium_capture_event(event, chart=chart),
     )
     timing_blocked, timing_reason = timing_blocks_entry(timing)
+    if timing_blocked and isinstance(alert, dict):
+        from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
+
+        if oct_paper_funnel_readiness_waived(alert, settings=settings):
+            timing_blocked = False
+            timing_reason = ""
     if (
         timing_blocked
         and not must_take
@@ -925,7 +931,16 @@ def check_explosion_entry(
                 side_val = event.side.value if hasattr(event.side, "value") else str(event.side).upper()
                 if not side_aligned_with_breadth(side_val, breadth.bias) and event.tier != "ELITE":
                     if not (premium_bypass and event.tier in ("EXPLODING", "ELITE", "BUILDING")):
-                        return False, "expiry_counter_breadth_elite_only"
+                        from app.engines.live_paper_parity import (
+                            oct_paper_funnel_readiness_waived,
+                        )
+
+                        if isinstance(alert, dict) and oct_paper_funnel_readiness_waived(
+                            alert, settings=settings,
+                        ):
+                            pass
+                        else:
+                            return False, "expiry_counter_breadth_elite_only"
 
     # The strict first-lift proof already requires a measured 15–25% local pad,
     # quality, sustained premium heat, volume and a live side-specific index turn.
