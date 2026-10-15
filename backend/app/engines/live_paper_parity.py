@@ -535,61 +535,135 @@ def _oct_paper_structural_launch_flags(evidence: Mapping[str, Any]) -> bool:
     )
 
 
-def oct_open_session_first_lift_lane_active(
+def _oct_paper_session_first_lift_min_score(settings: Any) -> float:
+    return max(
+        float(getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0),
+        float(getattr(settings, "oct_paper_open_first_lift_min_score", 84.0) or 84.0),
+    )
+
+
+def _oct_paper_oct1_index_moment_location_ok(
+    evidence: Mapping[str, Any],
+    *,
+    settings: Any,
+) -> bool:
+    """
+    Oct 1 paper ELITE fills (production EOD 2026-10-01): ~10.6–14.4% off base, all session.
+
+    Index-moment alignment — CE lift off session low / base band; PE slide off high — not
+    extended session-extreme chase (handled separately in chase_blocks).
+    """
+    side = str(evidence.get("side") or "").upper()
+    local = max(
+        _parity_number(evidence.get("localBaseMovePct")),
+        _parity_number(evidence.get("ictBaseRelativeMovePct")),
+    )
+    min_oct1 = float(
+        getattr(settings, "oct_paper_oct1_min_local_off_base_pct", 10.0) or 10.0
+    )
+    max_local = float(
+        getattr(settings, "oct_paper_first_lift_small_lift_max_local_pct", 40.0) or 40.0
+    )
+    max_late = float(
+        getattr(settings, "oct_paper_elite_rip_max_local_outside_open_pct", 28.0) or 28.0
+    )
+    try:
+        from app.engines.session_timing import in_open_premium_window
+
+        open_win = in_open_premium_window()
+    except Exception:
+        open_win = False
+    local_cap = max_local if open_win else max(max_local, max_late)
+    in_oct1_band = local >= min_oct1 - 1e-6 and local <= local_cap + 1e-6
+
+    if side == "CALL":
+        off_low = _parity_number(evidence.get("offLowMovePct"))
+        min_off = float(
+            getattr(settings, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
+        )
+        if in_oct1_band and off_low >= min_off - 1e-6:
+            return True
+        if in_oct1_band and open_win:
+            return True
+        if off_low >= min_off - 1e-6 and local <= local_cap + 1e-6:
+            return True
+        return False
+    if side == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_pad_context
+
+        if put_slide_pad_context(evidence, settings=settings):
+            return True
+        if in_oct1_band:
+            return True
+        dd = _parity_number(evidence.get("drawdownFromHighPct"))
+        min_off_high = float(
+            getattr(settings, "live_paper_parity_min_off_session_high_pct", 6.0) or 6.0
+        )
+        if dd > -min_off_high + 1e-6 and local <= local_cap + 1e-6:
+            return True
+    return False
+
+
+def oct_paper_session_first_lift_lane_active(
     evidence: Mapping[str, Any] | None,
     *,
     settings: Any = None,
 ) -> bool:
     """
-    Oct 1 open window (09:15–09:45): vertical / v-rip first lift without coil-pad proof.
+    Oct 1 paper session: first lift / v-rip / index-moment ELITE take without coil-pad proof.
 
-    Aligns selector, elite score, funnel waivers, and exec bypass — not the post-Oct pad guard.
+    Same stack all session (09:15–15:30) — production Oct 1 had ELITE entries through 14:48 IST.
     """
     s = settings or get_settings()
     if not oct_paper_structural_entry_waivers_active(s):
         return False
     if not isinstance(evidence, dict):
         return False
-    try:
-        from app.engines.session_timing import in_open_premium_window
-
-        if not in_open_premium_window():
-            return False
-    except Exception:
+    if not bool(getattr(s, "oct_paper_session_first_lift_lane_enabled", True)):
         return False
     tier = str(evidence.get("tier") or evidence.get("signalTier") or "").upper()
     if tier not in ("ELITE", "EXPLODING"):
         return False
     score = _parity_number(evidence.get("explosionScore") or evidence.get("score"))
-    min_score = max(
-        float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0),
-        float(getattr(s, "oct_paper_open_first_lift_min_score", 84.0) or 84.0),
-    )
-    if score < min_score - 1e-6:
+    if score < _oct_paper_session_first_lift_min_score(s) - 1e-6:
         return False
     from app.engines.open_rip_selector import open_rip_elite_structural_evidence
 
     if open_rip_elite_structural_evidence(evidence):
-        return True
+        local = max(
+            _parity_number(evidence.get("localBaseMovePct")),
+            _parity_number(evidence.get("ictBaseRelativeMovePct")),
+        )
+        if local <= 0:
+            return True
+        return _oct_paper_oct1_index_moment_location_ok(evidence, settings=s)
     v3 = _parity_number(evidence.get("velocity3s") or evidence.get("velocity_3s"))
     v9 = _parity_number(evidence.get("velocity9s") or evidence.get("velocity_9s"))
     hot_v3 = float(getattr(s, "explosion_live_confirm_hot_velocity_3s", 8.0) or 8.0)
+    hot_ok = v3 >= hot_v3 * 0.45 or v9 >= hot_v3 * 0.6
     side = str(evidence.get("side") or "").upper()
     if side == "CALL":
         off_low = _parity_number(evidence.get("offLowMovePct"))
         min_off = float(
             getattr(s, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
         )
-        if off_low >= min_off - 1e-6 or v3 >= hot_v3 * 0.45 or v9 >= hot_v3 * 0.6:
-            return True
+        if off_low >= min_off - 1e-6 or hot_ok:
+            return _oct_paper_oct1_index_moment_location_ok(evidence, settings=s)
     elif side == "PUT":
         from app.engines.put_slide_ce_mirror import put_slide_pad_context
 
-        if put_slide_pad_context(evidence, settings=s):
-            return True
-        if v3 >= hot_v3 * 0.45 or v9 >= hot_v3 * 0.6:
-            return True
+        if put_slide_pad_context(evidence, settings=s) or hot_ok:
+            return _oct_paper_oct1_index_moment_location_ok(evidence, settings=s)
     return False
+
+
+def oct_open_session_first_lift_lane_active(
+    evidence: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Backward-compatible alias — Oct 1 lane is all-session under paper replica."""
+    return oct_paper_session_first_lift_lane_active(evidence, settings=settings)
 
 
 def _oct_paper_open_session_chase_blocks(
@@ -651,7 +725,7 @@ def _oct_paper_base_lift_evidence(
         evidence, settings=settings, readiness_reason=readiness_reason,
     ):
         return True
-    if oct_open_session_first_lift_lane_active(evidence, settings=settings):
+    if oct_paper_session_first_lift_lane_active(evidence, settings=settings):
         return True
     if _oct_paper_local_base_in_first_lift_band(evidence, settings=settings):
         return True
@@ -717,7 +791,7 @@ def oct_paper_base_first_lift_take_allowed(
     )
     if not _oct_paper_base_lift_evidence(evidence, settings=s, readiness_reason=rr):
         return False
-    if oct_open_session_first_lift_lane_active(evidence, settings=s):
+    if oct_paper_session_first_lift_lane_active(evidence, settings=s):
         return not _oct_paper_open_session_chase_blocks(evidence, settings=s)
     return not _oct_paper_premium_chase_blocks(evidence, settings=s)
 
@@ -809,9 +883,9 @@ def enrich_alert_for_oct_paper_exec(
             row["side"] = (
                 side.value if hasattr(side, "value") else str(side or "").upper()
             )
-    if oct_open_session_first_lift_lane_active(row):
+    if oct_paper_session_first_lift_lane_active(row):
         row.setdefault("firstLift", True)
-        row.setdefault("firstLiftReadinessReason", "oct_open_session_first_lift")
+        row.setdefault("firstLiftReadinessReason", "oct_paper_session_first_lift")
         if str(row.get("side") or "").upper() == "CALL":
             row.setdefault("momentType", "v_rip_session_low")
             row.setdefault("vRipReady", True)

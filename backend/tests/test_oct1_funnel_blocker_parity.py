@@ -357,13 +357,55 @@ def test_open_session_off_low_allows_moderate_session_position_not_extended_chas
         "explosionScore": 92.0,
         "side": "CALL",
         "offLowMovePct": 10.0,
+        "localBaseMovePct": 13.5,
         "sessionRangePosition": 0.72,
     }
-    with patch("app.engines.session_timing.in_open_premium_window", return_value=True):
-        with patch(
-            "app.engines.oct1_pad_location.oct1_premium_location_chase_core",
-            return_value=(True, "oct1_chase"),
-        ):
+    with patch(
+        "app.engines.oct1_pad_location.oct1_premium_location_chase_core",
+        return_value=(True, "oct1_chase"),
+    ):
+        assert oct_paper_base_first_lift_take_allowed(alert, settings=s) is True
+
+
+@pytest.mark.parametrize(
+    "entry_clock,side,local,off_low",
+    [
+        ("10:31", "CALL", 13.5, 8.0),
+        ("11:40", "PUT", 11.0, 0.0),
+        ("09:50", "CALL", 13.5, 7.0),
+    ],
+)
+def test_oct1_all_session_first_lift_lane_matches_eod_trades(
+    entry_clock, side, local, off_low
+):
+    """Oct 1 paper took ELITE base lifts outside 09:45 open window (e.g. 09:50, 10:31, 11:40)."""
+    from app.engines.live_paper_parity import (
+        oct_paper_base_first_lift_take_allowed,
+        oct_paper_session_first_lift_lane_active,
+    )
+
+    s = _replica()
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 90.0,
+        "side": side,
+        "localBaseMovePct": local,
+        "sessionRangePosition": 0.42,
+        "velocity3s": 4.0,
+    }
+    if side == "CALL":
+        alert["offLowMovePct"] = off_low
+    else:
+        alert["drawdownFromHighPct"] = 8.0
+    with patch("app.engines.session_timing.in_open_premium_window", return_value=False):
+        if side == "PUT":
+            with patch(
+                "app.engines.put_slide_ce_mirror.put_slide_pad_context", return_value=True
+            ):
+                assert oct_paper_session_first_lift_lane_active(alert, settings=s) is True
+                assert oct_paper_base_first_lift_take_allowed(alert, settings=s) is True
+        else:
+            assert oct_paper_session_first_lift_lane_active(alert, settings=s) is True
             assert oct_paper_base_first_lift_take_allowed(alert, settings=s) is True
 
 
