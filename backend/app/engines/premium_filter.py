@@ -218,11 +218,43 @@ def explosion_alert_premium_tradeable(
         max_otm = int(getattr(settings, "explosion_shallow_otm_entry_steps", 1) or 1)
         if depth > max_otm:
             return False
-    from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+    from app.engines.live_paper_parity import (
+        oct_paper_entry_loosening_active,
+        oct_paper_first_lift_small_lift_context,
+        oct_paper_structural_pad_context,
+    )
 
-    slide_or_lift = oct_paper_slide_explosion_context_armed(
-        alert, snap, state, settings=settings,
-    ) or oct_paper_first_lift_small_lift_context(alert, settings=settings)
+    slide_or_lift = oct_paper_first_lift_small_lift_context(alert, settings=settings)
+    if oct_paper_entry_loosening_active(settings):
+        slide_or_lift = slide_or_lift or oct_paper_slide_explosion_context_armed(
+            alert, snap, state, settings=settings,
+        )
+    else:
+        slide_or_lift = slide_or_lift or oct_paper_structural_pad_context(
+            alert, settings=settings,
+        )
+        side_u = str(alert.get("side") or "").upper()
+        if not slide_or_lift and side_u == "PUT":
+            slide_or_lift = oct_paper_slide_explosion_context_armed(
+                alert, snap, state, settings=settings,
+            )
+        if not slide_or_lift and side_u == "CALL":
+            off_low = float(alert.get("offLowMovePct") or 0)
+            min_off = float(
+                getattr(settings, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
+            )
+            local = float(alert.get("localBaseMovePct") or 0)
+            min_local = float(
+                getattr(settings, "oct_paper_first_lift_small_lift_min_local_pct", 2.0)
+                or 2.0
+            )
+            max_local = float(
+                getattr(settings, "oct_paper_first_lift_small_lift_max_local_pct", 40.0)
+                or 40.0
+            )
+            slide_or_lift = off_low >= min_off - 1e-6 or (
+                min_local <= local <= max_local + 1e-6
+            )
     if not slide_or_lift:
         return False
     min_prem = _explosion_min_premium(
