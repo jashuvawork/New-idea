@@ -307,6 +307,66 @@ def test_tier_only_without_base_lift_not_waived():
     assert oct_paper_base_first_lift_take_allowed(alert, settings=s) is False
 
 
+@pytest.mark.parametrize("side,off_low_key,off_val", [("CALL", "offLowMovePct", 8.0), ("PUT", "drawdownFromHighPct", 8.0)])
+def test_open_session_first_lift_lane_funnel_exec_parity_ce_pe(side, off_low_key, off_val):
+    from app.engines.early_radar_pad_capture import building_coil_pad_live_blocked
+    from app.engines.live_paper_parity import (
+        oct_open_session_first_lift_lane_active,
+        oct_paper_base_first_lift_take_allowed,
+        oct_paper_exec_strict_bypass,
+        oct_paper_funnel_readiness_waived,
+    )
+
+    s = _replica(oct_paper_open_first_lift_min_score=84.0)
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 90.0,
+        "side": side,
+        "sessionRangePosition": 0.38,
+        "velocity3s": 5.0,
+        off_low_key: off_val,
+        "buildingCoilPadArmed": True,
+        "localBaseMovePct": 18.0,
+    }
+    with patch("app.engines.session_timing.in_open_premium_window", return_value=True):
+        if side == "PUT":
+            with patch(
+                "app.engines.put_slide_ce_mirror.put_slide_pad_context", return_value=True
+            ):
+                assert oct_open_session_first_lift_lane_active(alert, settings=s) is True
+                assert oct_paper_funnel_readiness_waived(alert, settings=s) is True
+                assert oct_paper_exec_strict_bypass(alert, settings=s) is True
+                assert oct_paper_base_first_lift_take_allowed(alert, settings=s) is True
+                blocked, reason = building_coil_pad_live_blocked(alert, settings=s)
+                assert blocked is False
+                assert reason == ""
+        else:
+            assert oct_open_session_first_lift_lane_active(alert, settings=s) is True
+            assert oct_paper_funnel_readiness_waived(alert, settings=s) is True
+            assert oct_paper_exec_strict_bypass(alert, settings=s) is True
+            blocked, reason = building_coil_pad_live_blocked(alert, settings=s)
+            assert blocked is False
+
+
+def test_open_session_off_low_allows_moderate_session_position_not_extended_chase():
+    from app.engines.live_paper_parity import oct_paper_base_first_lift_take_allowed
+
+    s = _replica()
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 92.0,
+        "side": "CALL",
+        "offLowMovePct": 10.0,
+        "sessionRangePosition": 0.72,
+    }
+    with patch("app.engines.session_timing.in_open_premium_window", return_value=True):
+        with patch(
+            "app.engines.oct1_pad_location.oct1_premium_location_chase_core",
+            return_value=(True, "oct1_chase"),
+        ):
+            assert oct_paper_base_first_lift_take_allowed(alert, settings=s) is True
+
+
 def test_replica_skips_put_index_pin_block():
     s = _replica(index_pin_put_block_enabled=True)
     event = MagicMock(side=Side.PUT)
