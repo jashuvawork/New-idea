@@ -829,7 +829,12 @@ def evaluate_replay_live_explosion_gates(
     s = settings or get_settings()
     candidate = _candidate_from_alert(alert, snap)
     blocked, reason, _meta = open_side_confirmation(
-        candidate.symbol, candidate.side, snap, now=now, settings=s,
+        candidate.symbol,
+        candidate.side,
+        snap,
+        now=now,
+        settings=s,
+        alert=alert if isinstance(alert, dict) else None,
     )
     if blocked:
         return False, reason or "open_side_unconfirmed"

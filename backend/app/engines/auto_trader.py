@@ -4725,8 +4725,15 @@ async def process(
                     break
                 from app.engines.open_side_confirmation import open_side_confirmation
 
+                _open_alert = (
+                    best.alert if isinstance(getattr(best, "alert", None), dict) else None
+                )
                 open_blocked, open_reason, open_meta = open_side_confirmation(
-                    best.symbol, best.side, snapshots.get(best.symbol), settings=settings,
+                    best.symbol,
+                    best.side,
+                    snapshots.get(best.symbol),
+                    settings=settings,
+                    alert=_open_alert,
                 )
                 if open_blocked:
                     skipped.append(
