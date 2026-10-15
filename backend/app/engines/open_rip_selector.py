@@ -79,12 +79,9 @@ def open_rip_elite_tradeable_preserve(
     )
     if score < min_score - 1e-6:
         return False
-    from app.engines.live_paper_parity import (
-        oct_paper_structural_pad_context,
-        oct_paper_entry_loosening_active,
-    )
+    from app.engines.live_paper_parity import oct_paper_structural_pad_context
 
-    if oct_paper_entry_loosening_active(s) and oct_paper_structural_pad_context(alert, settings=s):
+    if oct_paper_structural_pad_context(alert, settings=s):
         return True
     from app.engines.chop_worst_flip_capture import chop_worst_flip_selector_preserve
 
@@ -112,10 +109,7 @@ def open_rip_selector_lift_waiver(
 ) -> bool:
     """Treat as lift_ready in selector when tradeable was cleared but open rip ELITE is hot."""
     from app.config import get_settings
-    from app.engines.live_paper_parity import (
-        oct_paper_first_lift_small_lift_context,
-        oct_paper_entry_loosening_active,
-    )
+    from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
 
     s = settings or get_settings()
     if not isinstance(alert, dict):
@@ -124,7 +118,7 @@ def open_rip_selector_lift_waiver(
         return True
     from app.engines.live_paper_parity import oct_paper_structural_pad_context
 
-    if oct_paper_entry_loosening_active(s) and oct_paper_structural_pad_context(
+    if oct_paper_structural_pad_context(
         alert,
         settings=s,
         readiness_reason=readiness_reason,

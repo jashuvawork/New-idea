@@ -9,7 +9,11 @@ from app.engines.elite_score_engine import (
     elite_fvq_chase_blocked,
     elite_perfect_score_blocked,
 )
-from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
+from app.engines.live_paper_parity import (
+    oct_paper_first_lift_small_lift_context,
+    oct_paper_structural_entry_waivers_active,
+    oct_paper_structural_pad_context,
+)
 from app.engines.rally_capture import explosion_near_miss_waive
 from app.engines.trade_ranking import rank_trade_evidence
 from tests.mock_defaults import settings_mock
@@ -26,8 +30,37 @@ def _frozen_paper_settings(**kwargs):
     )
 
 
+def _replica_frozen_settings(**kwargs):
+    return _frozen_paper_settings(oct_paper_replica_enabled=True, **kwargs)
+
+
+def test_structural_waivers_active_under_oct_paper_replica():
+    s = _replica_frozen_settings()
+    assert oct_paper_structural_entry_waivers_active(s) is True
+
+
+def test_oct_first_lift_context_elite_base_ready_moment():
+    s = _replica_frozen_settings()
+    ev = {
+        "side": "CALL",
+        "tier": "ELITE",
+        "momentType": "ELITE_BASE_READY",
+        "eliteBaseReady": True,
+        "ictEliteBaseReady": True,
+        "localBaseMovePct": 4.0,
+        "offLowMovePct": 8.0,
+        "sessionRangePosition": 0.28,
+        "drawdownFromHighPct": -10.0,
+        "moneyness": "ATM",
+        "strikeStepsFromAtm": 0,
+        "explosionScore": 100.0,
+    }
+    assert oct_paper_first_lift_small_lift_context(ev, settings=s)
+    assert oct_paper_structural_pad_context(ev, settings=s)
+
+
 def test_oct_first_lift_context_ce_armed_base_at_pad():
-    s = _frozen_paper_settings()
+    s = _replica_frozen_settings()
     ev = {
         "side": "CALL",
         "tier": "ELITE",
@@ -304,7 +337,7 @@ def test_counter_trend_allows_oct_first_lift_afternoon():
     from app.engines.morning_premium_capture import counter_trend_entry_allowed
     from app.models.schemas import Side
 
-    s = _frozen_paper_settings()
+    s = _replica_frozen_settings()
     alert = {
         "side": "CALL",
         "tier": "ELITE",
