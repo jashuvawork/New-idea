@@ -105,259 +105,6 @@ def _record_selector_gate_rejection(candidate: EntryCandidate, reason: str) -> N
         pass
 
 
-def _record_explosion_alert_skip(
-    symbol: str,
-    alert: dict,
-    reason: str,
-) -> None:
-    """Funnel RCA when explosion alerts drop before candidate build (Oct 8 silent skips)."""
-    try:
-        from app.services.radar_learning import record_funnel_gate_block
-
-        record_funnel_gate_block(
-            str(symbol or "").upper(),
-            str(alert.get("side") or "").upper(),
-            float(alert.get("strike") or 0),
-            str(reason or "explosion_skipped"),
-            stage="SELECTOR_GATE",
-        )
-    except Exception:
-        pass
-
-
-def _high_signal_explosion_alert(alert: dict, *, min_score: float = 85.0) -> bool:
-    if not isinstance(alert, dict):
-        return False
-    tier_u = str(alert.get("tier") or "").upper()
-    if tier_u not in ("ELITE", "EXPLODING"):
-        return False
-    score = float(alert.get("explosionScore") or alert.get("score") or 0)
-    return score >= min_score
-
-
-def _maybe_record_high_signal_explosion_skip(
-    symbol: str,
-    alert: dict,
-    reason: str,
-) -> None:
-    """Oct 9 RCA — radar DETECTED ELITE 100 with no SELECTOR_GATE until hours later."""
-    if _high_signal_explosion_alert(alert):
-        _record_explosion_alert_skip(symbol, alert, reason)
-
-
-def diagnose_selector_feed_gaps(
-    snapshots: dict[str, SymbolSnapshot],
-    state: AutoTraderState,
-) -> list[dict[str, Any]]:
-    """Surface high-score explosion alerts dropped before candidate build (zero-trade RCA)."""
-    settings = get_settings()
-    notes: list[dict[str, Any]] = []
-    for symbol, snap in snapshots.items():
-        if not snap.dataAvailable:
-            continue
-        for alert in snap.explosionAlerts or []:
-            if not _high_signal_explosion_alert(alert, min_score=90.0):
-                continue
-            reason = _high_signal_pre_candidate_skip_reason(
-                symbol, alert, snap, state, settings,
-            )
-            if not reason:
-                continue
-            notes.append(
-                {
-                    "symbol": symbol,
-                    "side": str(alert.get("side") or "").upper() or None,
-                    "strike": float(alert.get("strike") or 0) or None,
-                    "reason": reason,
-                    "mode": "explosion",
-                    "message": "High-signal explosion alert never reached SELECTED",
-                    "score": float(alert.get("explosionScore") or 0),
-                    "tier": alert.get("tier"),
-                }
-            )
-    return notes
-
-
-def _high_signal_pre_candidate_skip_reason(
-    symbol: str,
-    alert: dict,
-    snap: SymbolSnapshot,
-    state: AutoTraderState,
-    settings,
-) -> str | None:
-    """Mirror early _explosion_candidates drops for ELITE/EXPLODING RCA (Oct 9 open rip)."""
-    from app.engines.early_radar_pad_capture import (
-        alert_has_building_coil_pad,
-        alert_has_early_radar_pad_capture,
-        alert_has_early_radar_pad_ready,
-        building_coil_pad_moneyness_ok,
-        early_radar_pad_shallow_otm_ok,
-    )
-    from app.engines.ict_breakout_monitor import first_lift_entry_readiness
-
-    first_lift_ready, first_lift_readiness_reason = first_lift_entry_readiness(
-        snap=snap,
-        alert=alert,
-        state=state,
-    )
-    oct_first_lift_pad = False
-    if isinstance(alert, dict):
-        from app.engines.live_paper_parity import oct_paper_structural_pad_context
-
-        oct_first_lift_pad = oct_paper_structural_pad_context(
-            alert,
-            settings=settings,
-            readiness_reason=first_lift_readiness_reason,
-        )
-        if oct_first_lift_pad:
-            first_lift_ready = True
-    early_pad = alert_has_early_radar_pad_ready(alert)
-    coil_pad = alert_has_building_coil_pad(alert)
-    from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
-
-    pad_lane_waive = pad_lane_early_near_miss_waive(
-        alert, readiness_reason=first_lift_readiness_reason,
-    )
-    if not pad_lane_waive:
-        from app.engines.rally_capture import explosion_near_miss_waive
-
-        pad_lane_waive = explosion_near_miss_waive(
-            alert,
-            snap=snap,
-            readiness_reason=first_lift_readiness_reason,
-            state=state,
-            settings=settings,
-        )
-    from app.engines.open_rip_selector import open_rip_selector_lift_waiver
-
-    open_rip_lift = open_rip_selector_lift_waiver(
-        alert,
-        snap,
-        state,
-        settings=settings,
-        readiness_reason=first_lift_readiness_reason,
-    )
-    lift_ready = (
-        first_lift_ready
-        or early_pad
-        or coil_pad
-        or pad_lane_waive
-        or oct_first_lift_pad
-        or open_rip_lift
-    )
-    chop_rally_capture = False
-    if (
-        str(alert.get("side") or "").upper() == "CALL"
-        and str(alert.get("tier") or "").upper() == "BUILDING"
-    ):
-        from app.engines.pe_win_ce_mirror import ce_best_trade_building_capture_ok
-
-        chop_rally_capture = ce_best_trade_building_capture_ok(
-            alert,
-            snap,
-            state,
-            readiness_reason=first_lift_readiness_reason,
-            settings=settings,
-        )
-    if not alert.get("tradeable") and not lift_ready and not chop_rally_capture:
-        from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
-
-        if not oct_paper_funnel_readiness_waived(
-            alert,
-            settings=settings,
-            readiness_reason=first_lift_readiness_reason,
-        ):
-            return "explosion_not_tradeable"
-    from app.engines.premium_filter import explosion_alert_premium_tradeable
-
-    prem_ok = explosion_alert_premium_tradeable(
-        alert.get("premium"),
-        peak_move_pct=float(alert.get("peakMovePct") or 0),
-        snap=snap,
-        alert=alert,
-        state=state,
-        settings=settings,
-    )
-    if not prem_ok:
-        from app.engines.live_paper_parity import (
-            oct_paper_funnel_readiness_waived,
-            oct_paper_structural_entry_waivers_active,
-        )
-
-        if oct_paper_structural_entry_waivers_active(settings) and (
-            lift_ready
-            or oct_paper_funnel_readiness_waived(
-                alert,
-                settings=settings,
-                readiness_reason=first_lift_readiness_reason,
-            )
-        ):
-            prem_ok = True
-    if not prem_ok:
-        return "explosion_premium_not_tradeable"
-    side_v = str(alert.get("side") or "").upper()
-    tier_u = str(alert.get("tier") or "").upper()
-    try:
-        strike_v = float(alert.get("strike") or 0)
-    except (TypeError, ValueError):
-        strike_v = 0.0
-    spot_v = float(snap.spot or 0)
-    atm_v = float(snap.atmStrike or 0)
-    if side_v in ("CALL", "PUT") and strike_v > 0 and spot_v > 0:
-        money = classify_moneyness(
-            Side(side_v),
-            strike_v,
-            spot_v,
-            symbol=symbol,
-            atm=atm_v if atm_v > 0 else None,
-        )
-        if money == "OTM":
-            from app.engines.moneyness import _depth_steps
-
-            depth = _depth_steps(
-                Side(side_v),
-                strike_v,
-                spot_v,
-                symbol,
-                atm_v if atm_v > 0 else spot_v,
-            )
-            max_steps = int(
-                getattr(settings, "explosion_shallow_otm_history_steps", 1) or 1
-            )
-            entry_steps = int(
-                getattr(settings, "explosion_shallow_otm_entry_steps", 1) or 1
-            )
-            pad_shallow_ok = early_radar_pad_shallow_otm_ok(alert, snap)
-            coil_moneyness_ok = building_coil_pad_moneyness_ok(alert, snap, settings)
-            shallow_elite_ok = (
-                bool(getattr(settings, "explosion_shallow_otm_entry_enabled", True))
-                and depth <= entry_steps
-                and tier_u in ("ELITE", "EXPLODING")
-            )
-            from app.engines.live_paper_parity import oct_paper_first_lift_otm_entry_ok
-            from app.engines.oct_open_index_flip_otm import oct_open_index_flip_otm_entry_ok
-
-            open_flip_otm = oct_open_index_flip_otm_entry_ok(
-                alert, snap, settings=settings,
-            )
-            oct_pad_otm = oct_paper_first_lift_otm_entry_ok(
-                alert, depth_steps=depth, settings=settings,
-            )
-            if not (
-                coil_moneyness_ok
-                or shallow_elite_ok
-                or open_flip_otm
-                or oct_pad_otm
-                or (
-                    (lift_ready or alert_has_early_radar_pad_capture(alert))
-                    and pad_shallow_ok
-                    and depth <= max_steps
-                )
-            ):
-                return "explosion_otm_shallow_not_allowed"
-    return None
-
-
 def rank_candidates_for_selection(
     candidates: list[EntryCandidate],
     legacy_score,
@@ -478,12 +225,7 @@ def _building_aligned_ict_alert_ok(
     # GainzAlgo-style Smart Ichimoku break-P on index chart.
     from app.engines.smart_ichimoku import ichimoku_break_supports_side
 
-    ok, _ = ichimoku_break_supports_side(
-        Side(side_raw),
-        snap,
-        require_confirmed=True,
-        alert=alert if isinstance(alert, dict) else None,
-    )
+    ok, _ = ichimoku_break_supports_side(Side(side_raw), snap, require_confirmed=True)
     return ok
 
 
@@ -578,17 +320,6 @@ def _explosion_candidates(
             alert=alert,
             state=state,
         )
-        oct_first_lift_pad = False
-        if isinstance(alert, dict):
-            from app.engines.live_paper_parity import oct_paper_structural_pad_context
-
-            oct_first_lift_pad = oct_paper_structural_pad_context(
-                alert,
-                settings=settings,
-                readiness_reason=first_lift_readiness_reason,
-            )
-            if oct_first_lift_pad:
-                first_lift_ready = True
         early_pad = alert_has_early_radar_pad_ready(alert)
         coil_pad = alert_has_building_coil_pad(alert)
         from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
@@ -601,10 +332,7 @@ def _explosion_candidates(
 
             pad_lane_waive = explosion_near_miss_waive(
                 alert if isinstance(alert, dict) else None,
-                snap=snap,
                 readiness_reason=first_lift_readiness_reason,
-                state=state,
-                settings=settings,
             )
         if not pad_lane_waive:
             from app.engines.best_trade_policy import symmetric_structural_near_miss_waive
@@ -631,23 +359,7 @@ def _explosion_candidates(
                 state=state,
                 readiness_reason=first_lift_readiness_reason,
             )
-        from app.engines.open_rip_selector import open_rip_selector_lift_waiver
-
-        open_rip_lift = open_rip_selector_lift_waiver(
-            alert if isinstance(alert, dict) else {},
-            snap,
-            state,
-            settings=settings,
-            readiness_reason=first_lift_readiness_reason,
-        )
-        lift_ready = (
-            first_lift_ready
-            or early_pad
-            or coil_pad
-            or pad_lane_waive
-            or oct_first_lift_pad
-            or open_rip_lift
-        )
+        lift_ready = first_lift_ready or early_pad or coil_pad or pad_lane_waive
         slow_grind_trough = bool(
             alert.get("slowGrindArmedTrough")
             or alert.get("ictSlowGrindArmedTrough")
@@ -672,45 +384,13 @@ def _explosion_candidates(
                 settings=settings,
             )
         if not alert.get("tradeable") and not lift_ready and not chop_rally_capture:
-            from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
-
-            waived = isinstance(alert, dict) and oct_paper_funnel_readiness_waived(
-                alert,
-                settings=settings,
-                readiness_reason=first_lift_readiness_reason,
-            )
-            if not waived:
-                if isinstance(alert, dict):
-                    _record_explosion_alert_skip(symbol, alert, "explosion_not_tradeable")
-                continue
-        from app.engines.premium_filter import explosion_alert_premium_tradeable
-
-        prem_ok = explosion_alert_premium_tradeable(
+            continue
+        if not premium_in_band(
             alert.get("premium"),
+            mode="explosion",
             peak_move_pct=float(alert.get("peakMovePct") or 0),
             snap=snap,
-            alert=alert if isinstance(alert, dict) else None,
-            state=state,
-            settings=settings,
-        )
-        if not prem_ok and isinstance(alert, dict):
-            from app.engines.live_paper_parity import (
-                oct_paper_funnel_readiness_waived,
-                oct_paper_structural_entry_waivers_active,
-            )
-
-            if oct_paper_structural_entry_waivers_active(settings) and (
-                lift_ready
-                or oct_paper_funnel_readiness_waived(
-                    alert,
-                    settings=settings,
-                    readiness_reason=first_lift_readiness_reason,
-                )
-            ):
-                prem_ok = True
-        if not prem_ok:
-            if isinstance(alert, dict):
-                _record_explosion_alert_skip(symbol, alert, "explosion_premium_not_tradeable")
+        ):
             continue
         side_v = str(alert.get("side") or "").upper()
         tier_u = str(alert.get("tier") or "").upper()
@@ -765,48 +445,29 @@ def _explosion_candidates(
                     and abs(float(runner.strike or 0) - strike_v) <= strike_step(symbol) * 0.51
                 ):
                     shallow_elite_ok = True
-                from app.engines.live_paper_parity import oct_paper_first_lift_otm_entry_ok
-                from app.engines.oct_open_index_flip_otm import oct_open_index_flip_otm_entry_ok
-
-                open_flip_otm = oct_open_index_flip_otm_entry_ok(
-                    alert, snap, settings=settings,
-                )
-                oct_pad_otm = oct_paper_first_lift_otm_entry_ok(
-                    alert, depth_steps=depth, settings=settings,
-                )
                 if not (
                     coil_moneyness_ok
                     or shallow_elite_ok
-                    or open_flip_otm
-                    or oct_pad_otm
                     or (
                         (lift_ready or alert_has_early_radar_pad_capture(alert))
                         and pad_shallow_ok
                         and depth <= max_steps
                     )
                 ):
-                    _maybe_record_high_signal_explosion_skip(
-                        symbol, alert, "explosion_otm_shallow_not_allowed",
-                    )
                     continue
         from app.engines.explosion_entry_guards import (
             deep_itm_near_strike_substitute_blocked,
             far_otm_near_base_substitute_blocked,
         )
 
-        itm_substitute, itm_reason = deep_itm_near_strike_substitute_blocked(
+        itm_substitute, _itm_reason = deep_itm_near_strike_substitute_blocked(
             Side(side_v),
             strike_v,
             snap,
         )
         if itm_substitute:
-            _maybe_record_high_signal_explosion_skip(
-                symbol,
-                alert,
-                str(itm_reason or "deep_itm_near_strike_substitute"),
-            )
             continue
-        far_otm, far_reason = far_otm_near_base_substitute_blocked(
+        far_otm, _far_reason = far_otm_near_base_substitute_blocked(
             Side(side_v),
             strike_v,
             snap,
@@ -814,15 +475,10 @@ def _explosion_candidates(
             candidate_score=float(alert.get("score") or 0),
         )
         if far_otm:
-            _maybe_record_high_signal_explosion_skip(
-                symbol,
-                alert,
-                str(far_reason or "far_otm_near_base_substitute"),
-            )
             continue
         tier_u = str(alert.get("tier") or "").upper()
         elite_only = bool(getattr(settings, "explosion_elite_exploding_only", True))
-        top_only = bool(getattr(settings, "top_moments_only_enabled", False))
+        top_only = bool(getattr(settings, "top_moments_only_enabled", True))
         if elite_only:
             if tier_u not in ("ELITE", "EXPLODING"):
                 # Early BUILDING flat→vertical when chart-aligned — catch the base
@@ -902,14 +558,11 @@ def _explosion_candidates(
                     side_v = _Side(side_raw)
                 except Exception:
                     side_v = None
-            from app.engines.index_rally_side_flip import index_flip_waives_chart_align
-
             if (
                 side_v is not None
                 and snap.spotChart is not None
                 and not side_aligned_with_chart(side_v, snap.spotChart)
                 and not lift_ready
-                and not index_flip_waives_chart_align(side_v, snap, settings=settings)
             ):
                 # A confirmed local base off which the side is breaking may survive the
                 # chart-align drop — mirror check_explosion_entry so a genuine base rip
@@ -948,24 +601,7 @@ def _explosion_candidates(
                 candlestick_ok = ftv_candlestick_chart_bypass(
                     side_v, snap, alert=alert,
                 )
-                oct_chart_ok = False
-                from app.engines.live_paper_parity import oct_paper_structural_pad_context
-
-                oct_chart_ok = oct_paper_structural_pad_context(
-                    alert,
-                    settings=settings,
-                    readiness_reason=first_lift_readiness_reason,
-                )
-                if (
-                    not local_base_ok
-                    and not pad_lane_ok
-                    and not grade_a_ok
-                    and not candlestick_ok
-                    and not oct_chart_ok
-                ):
-                    _maybe_record_high_signal_explosion_skip(
-                        symbol, alert, "chart_not_aligned",
-                    )
+                if not local_base_ok and not pad_lane_ok and not grade_a_ok and not candlestick_ok:
                     continue
         score_val = float(alert.get("explosionScore", 0))
         daily_move = float(alert.get("dailyMovePct") or alert.get("openPremiumMove") or 0)
@@ -1022,9 +658,6 @@ def _explosion_candidates(
                 ),
             )
         if score_val < min_explosion_score:
-            _maybe_record_high_signal_explosion_skip(
-                symbol, alert, "explosion_score_below_min",
-            )
             continue
         # Explosion score is primary quality — don't block on low symbol TQS alone
         if (
@@ -1032,9 +665,6 @@ def _explosion_candidates(
             and snap.tradeQualityScore < 25
             and score_val < settings.aggressive_min_explosion_score + 10
         ):
-            _maybe_record_high_signal_explosion_skip(
-                symbol, alert, "symbol_tqs_low",
-            )
             continue
 
         event = ExplosionEvent(
@@ -1058,9 +688,6 @@ def _explosion_candidates(
         if not counter_trend_entry_allowed(
             event.side, snap, explosion_event=event, alert=alert if isinstance(alert, dict) else None,
         ):
-            _maybe_record_high_signal_explosion_skip(
-                symbol, alert, "counter_trend_requires_elite",
-            )
             continue
         from app.engines.winner_entry_guards import chop_weak_explosion_blocks_entry
 
@@ -1071,13 +698,8 @@ def _explosion_candidates(
             tqs=snap.tradeQualityScore,
             tier=event.tier, explosion_event=event, alert=alert,
         )
-        chop_blocked, chop_reason = chop_weak_explosion_blocks_entry(cand_probe, snap)
+        chop_blocked, _ = chop_weak_explosion_blocks_entry(cand_probe, snap)
         if chop_blocked:
-            _maybe_record_high_signal_explosion_skip(
-                symbol,
-                alert,
-                str(chop_reason or "chop_weak_explosion"),
-            )
             continue
         suggestion = SuggestedTrade(
             id=alert.get("id", "x"),
@@ -1092,7 +714,7 @@ def _explosion_candidates(
         blocked = state.calibrationBlocks.get(event.side.value, False)
         moment, _ = index_moment_active(snap)
         moment_surge = moment and side_aligned_with_index_moment(event.side, snap)
-        passed, entry_fail_reason = check_explosion_entry(
+        passed, _ = check_explosion_entry(
             event, suggestion, snap.breadth, blocked,
             index_moment=moment_surge,
             chart=snap.spotChart,
@@ -1100,29 +722,18 @@ def _explosion_candidates(
             alert=alert if isinstance(alert, dict) else None,
         )
         if not passed:
-            _maybe_record_high_signal_explosion_skip(
-                symbol,
-                alert,
-                str(entry_fail_reason or "explosion_entry_blocked"),
-            )
             continue
 
         from app.engines.rally_capture import cross_side_chase_blocked
 
-        blocked_x, cross_reason = cross_side_chase_blocked(event, snap)
+        blocked_x, _ = cross_side_chase_blocked(event, snap)
         if blocked_x:
-            _maybe_record_high_signal_explosion_skip(
-                symbol,
-                alert,
-                str(cross_reason or "cross_side_chase_blocked"),
-            )
             continue
 
         blocked, reason = _reentry_blocked(
             symbol, event.side, event.strike, snap, explosion_event=event, state=state,
         )
         if blocked:
-            _maybe_record_high_signal_explosion_skip(symbol, alert, str(reason))
             continue
 
         rank = score_val * 0.55 + snap.tradeQualityScore * 0.25
@@ -1326,7 +937,6 @@ def _explosion_candidates(
             event,
             ict=ict,
             alert=alert,
-            snap=snap,
         )
         if chase_blocked and not first_lift_ready and not early_pad:
             continue
@@ -1346,13 +956,9 @@ def _explosion_candidates(
         from app.engines.advanced_indicators import squeeze_early_base_active
 
         window_blocked, _window_reason = explosion_entry_window_blocked(
-            event,
-            ict=ict,
-            top_must_take=must_take,
+            event, ict=ict, top_must_take=must_take,
             squeeze_early_base=squeeze_early_base_active(event, snap),
             bullish_local_base=bool(bullish_base.get("active")),
-            alert=alert if isinstance(alert, dict) else None,
-            snap=snap,
         )
         if window_blocked and not first_lift_ready:
             continue
@@ -1376,11 +982,6 @@ def _explosion_candidates(
             premium_capture=is_premium_capture_event(event, chart=snap.spotChart),
         )
         timing_blocked, _timing_reason = timing_blocks_entry(timing)
-        if timing_blocked and isinstance(alert, dict):
-            from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
-
-            if oct_paper_funnel_readiness_waived(alert, settings=settings):
-                timing_blocked = False
         if (
             timing_blocked
             and not must_take
@@ -2223,9 +1824,6 @@ def find_best_entry(
         from app.engines.index_session_dominant_trend import index_trend_rank_adjustment
 
         c.score += index_trend_rank_adjustment(c, snapshots, state)
-        from app.engines.chop_worst_flip_capture import chop_worst_flip_rank_bonus
-
-        c.score += chop_worst_flip_rank_bonus(c, state, snapshots)
         from app.engines.best_trade_policy import best_trade_base_rank_adjustment
 
         c.score += best_trade_base_rank_adjustment(c)
@@ -2289,13 +1887,11 @@ def find_best_entry(
                 session_same_strike_loss_reentry_blocked,
             )
 
-            _fail_alert = c.alert if isinstance(getattr(c, "alert", None), dict) else None
             fail_blocked, _ = failed_launch_reentry_blocked(
                 state,
                 symbol=c.symbol,
                 side=c.side,
                 strike=float(c.strike or 0),
-                alert=_fail_alert,
             )
             if fail_blocked:
                 c.pretrade_meta = {
@@ -2367,7 +1963,6 @@ def find_best_entry(
                 _record_selector_gate_rejection(c, reason)
                 continue
 
-            alert_for_ml = c.alert if isinstance(getattr(c, "alert", None), dict) else {}
             ml_blocked, ml_meta = reentry_ml_win_prob_blocked(
                 state,
                 symbol=c.symbol,
@@ -2375,7 +1970,6 @@ def find_best_entry(
                 strike=float(c.strike or 0),
                 snap=c.snap,
                 confidence=float(c.score or 0),
-                alert=alert_for_ml,
             )
             if ml_blocked:
                 c.pretrade_meta = {
@@ -2440,7 +2034,7 @@ def find_best_entry(
         causal_ranking = rank_entry_candidate(c, exhausted_reentry=exhausted)
         policy_ok = True
         policy_reason = "disabled"
-        if bool(getattr(settings, "ftv_elite_top_only_enabled", False)):
+        if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
             from app.engines.moneyness import atm_itm_entry_allows
 
             money_ok, _, _ = atm_itm_entry_allows(c.side, c.strike, c.snap)
@@ -2467,7 +2061,7 @@ def find_best_entry(
             "causalRanking": causal_ranking,
             "ftvEliteTopPolicy": {
                 "enabled": bool(
-                    getattr(settings, "ftv_elite_top_only_enabled", False)
+                    getattr(settings, "ftv_elite_top_only_enabled", True)
                 ),
                 "passed": policy_ok,
                 "reason": policy_reason,
@@ -2477,52 +2071,21 @@ def find_best_entry(
         }
 
     kept_candidates: list[EntryCandidate] = []
-    ftv_elite_top = bool(getattr(settings, "ftv_elite_top_only_enabled", False))
     for c in candidates:
         meta = c.pretrade_meta or {}
         ranking = meta.get("causalRanking") or {}
-        policy = meta.get("ftvEliteTopPolicy") or {}
-        if ftv_elite_top and policy.get("passed"):
-            kept_candidates.append(c)
-            continue
         if ranking.get("grade") == "REJECT":
-            from app.engines.live_paper_parity import (
-                oct_paper_skip_live_only_session_gates,
-                oct_paper_structural_pad_context,
-            )
-            from app.engines.trade_ranking import selector_rejection_reason
-
-            tier_u = str(
-                ranking.get("signalTier")
-                or getattr(c.explosion_event, "tier", "")
-                or ""
-            ).upper()
-            min_score = float(
-                getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0
-            )
-            alert = getattr(c, "alert", None) if isinstance(getattr(c, "alert", None), dict) else {}
-            expl_score = float(
-                getattr(getattr(c, "explosion_event", None), "explosion_score", 0)
-                or alert.get("explosionScore")
-                or getattr(c, "score", 0)
-                or 0
-            )
-            rank_evidence = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
-            pad_evidence = {**rank_evidence, "tier": tier_u, "explosionScore": expl_score}
-            oct_keep = (
-                oct_paper_skip_live_only_session_gates(settings)
-                and tier_u in ("ELITE", "EXPLODING")
-                and expl_score >= min_score - 1e-6
-            ) or oct_paper_structural_pad_context(pad_evidence, settings=settings)
-            if not oct_keep:
-                _record_selector_gate_rejection(c, selector_rejection_reason(ranking))
-                continue
-        if ftv_elite_top and not policy.get("passed"):
-            _record_selector_gate_rejection(
-                c,
-                str(policy.get("reason") or "ftv_elite_top_policy"),
-            )
+            reasons = ranking.get("reasons") or ["selector_rejected"]
+            _record_selector_gate_rejection(c, str(reasons[0]))
             continue
+        if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
+            policy = meta.get("ftvEliteTopPolicy") or {}
+            if not policy.get("passed"):
+                _record_selector_gate_rejection(
+                    c,
+                    str(policy.get("reason") or "ftv_elite_top_policy"),
+                )
+                continue
         kept_candidates.append(c)
     candidates = kept_candidates
     if not candidates:
@@ -2541,7 +2104,7 @@ def find_best_entry(
         day_mode = resolve_policy_day_mode(state)
 
     elite_engine = bool(getattr(settings, "elite_trade_engine_enabled", False))
-    if elite_engine or bool(getattr(settings, "top_moments_only_enabled", False)):
+    if elite_engine or bool(getattr(settings, "top_moments_only_enabled", True)):
         from app.engines.top_moment_gate import top_moment_entry_allowed
 
         min_grade = str(getattr(settings, "top_moments_min_grade", "A") or "A")
@@ -3213,12 +2776,11 @@ def diagnose_missed_entries(
                 from app.engines.bullish_local_base import alert_bullish_local_base_active
                 from app.engines.ftv_candlestick_confirm import ftv_candlestick_chart_bypass
                 from app.engines.spot_direction import index_trough_momentum_turn
-                from app.engines.index_rally_side_flip import index_flip_waives_chart_align
 
                 side_raw = str(alert.get("side") or "").upper()
-                index_turn_ok = side_raw in ("CALL", "PUT") and (
-                    index_trough_momentum_turn(side_raw, snap.spotChart)
-                    or index_flip_waives_chart_align(side_raw, snap, settings=settings)
+                index_turn_ok = (
+                    side_raw in ("CALL", "PUT")
+                    and index_trough_momentum_turn(side_raw, snap.spotChart)
                 )
                 if side_raw in ("CALL", "PUT") and snap.spotChart is not None:
                     pad_lane_chart_ok = False
@@ -3256,43 +2818,7 @@ def diagnose_missed_entries(
                     ):
                         blockers.append("chart_not_aligned")
             if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):
-                oob_near_miss = True
-                try:
-                    from app.engines.sep917_legacy_profile import (
-                        atm_itm_fixed_premium_band_only,
-                    )
-
-                    if atm_itm_fixed_premium_band_only(settings):
-                        side_raw = str(alert.get("side") or "").upper()
-                        strike_v = float(alert.get("strike") or 0)
-                        spot_v = float(snap.spot or 0)
-                        atm_v = float(snap.atmStrike or 0)
-                        if side_raw in ("CALL", "PUT") and strike_v > 0 and spot_v > 0:
-                            from app.engines.moneyness import _depth_steps
-
-                            money = classify_moneyness(
-                                Side(side_raw),
-                                strike_v,
-                                spot_v,
-                                symbol=symbol,
-                                atm=atm_v if atm_v > 0 else None,
-                            )
-                            depth = _depth_steps(
-                                Side(side_raw),
-                                strike_v,
-                                spot_v,
-                                symbol,
-                                atm_v if atm_v > 0 else spot_v,
-                            )
-                            max_itm = int(
-                                getattr(settings, "moneyness_max_itm_steps", 2) or 2
-                            )
-                            if money == "ITM" and depth > max_itm:
-                                oob_near_miss = False
-                except Exception:
-                    pass
-                if oob_near_miss:
-                    blockers.append("premium_out_of_band")
+                blockers.append("premium_out_of_band")
             if score < min_score:
                 blockers.append(f"explosion_score<{min_score:.0f}")
             if snap.tradeQualityScore < 25 and score < settings.aggressive_min_explosion_score + 10:

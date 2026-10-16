@@ -19,8 +19,6 @@ _EMERGENCY_EXITS = frozenset({
     "adaptive_stop_loss",
     "simple_stop_loss",
     "adaptive_sl",
-    "explosion_never_green_hard_stop",
-    "explosion_catastrophic_loss_stop",
 })
 
 

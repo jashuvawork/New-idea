@@ -28,17 +28,6 @@ def _f(v: Any, d: float = 0.0) -> float:
         return d
 
 
-def _replay_daily_stop(settings: Any) -> float:
-    from app.engines.capital_risk_limits import (
-        capital_scaled_risk_limits_active,
-        risk_limit_inr,
-    )
-
-    if capital_scaled_risk_limits_active(settings):
-        return risk_limit_inr("daily_loss_stop_inr", settings, runtime=False)
-    return _f(getattr(settings, "daily_loss_stop_inr", 20_000.0), 20_000.0)
-
-
 def _ignition_ok(
     series: list[tuple[datetime, float, float]], i: int, *, window_s: float, min_rise: float
 ) -> bool:
@@ -408,7 +397,7 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
         t.pop("_exitDt", None)
     total = round(sum(_f(t.get("pnlInr")) for t in taken), 0)
     wins = sum(1 for t in taken if _f(t.get("pnlInr")) > 0)
-    daily_stop = _replay_daily_stop(settings)
+    daily_stop = _f(getattr(settings, "daily_loss_stop_inr", 20_000.0), 20_000.0)
     return {
         "date": date,
         "status": "ok",
@@ -446,8 +435,7 @@ def apply_portfolio_limits(
     once the day's loss stop is hit. With 1 slot this is the old one-at-a-time behaviour.
     """
     s = settings or get_settings()
-    daily_stop = _replay_daily_stop(s)
-    expiry_bypass = getattr(s, "expiry_daily_loss_stop_bypass_enabled", True) is True
+    daily_stop = _f(getattr(s, "daily_loss_stop_inr", 20_000.0), 20_000.0)
     max_conc = max(1, int(_f(getattr(s, "eod_report_max_concurrent", 1), 1)))
     same_side_cap = max(1, int(_f(getattr(s, "eod_report_same_side_cap", 2), 2)))
     ordered = sorted(candidates, key=lambda t: t.get("_entryDt") or datetime.now(IST))
@@ -460,10 +448,7 @@ def apply_portfolio_limits(
         xdt = t.get("_exitDt")
         side = str(t.get("side") or "").upper()
         if daily_stop > 0 and cum <= -abs(daily_stop):
-            # Daily loss stop hit — only legs flagged for the expiry top-trade bypass
-            # (expiry_daily_loss_stop_bypass_enabled) may still enter.
-            if not (t.get("dailyLossStopBypass") and expiry_bypass):
-                continue
+            break  # daily loss stop hit — no more entries today
         if edt is not None:
             open_positions = [(xu, sd) for (xu, sd) in open_positions if xu is None or xu > edt]
         if len(open_positions) >= max_conc:

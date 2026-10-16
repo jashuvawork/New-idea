@@ -318,7 +318,6 @@ def _write_archive(
 
 
 def _prune_old_archives(directory: Path, now: datetime, retention_days: int) -> None:
-    """Remove radar-*.zip older than retention_days. retention_days <= 0 keeps every EOD ZIP."""
     if retention_days <= 0:
         return
     cutoff = now.date() - timedelta(days=retention_days)

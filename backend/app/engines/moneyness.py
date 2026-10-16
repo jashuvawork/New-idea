@@ -75,11 +75,6 @@ def atm_itm_entry_allows(
         "strikeStepsFromAtm": _depth_steps(side, strike, spot, symbol, atm),
     }
     if money == "OTM":
-        from app.engines.sep917_legacy_profile import strict_atm_itm_execution
-
-        settings = get_settings()
-        if strict_atm_itm_execution(settings):
-            return False, "moneyness_atm_itm_only", meta
         if isinstance(alert, dict) and bool(
             alert.get("buildingCoilPad") or alert.get("buildingCoilPadReady")
         ):
@@ -103,7 +98,7 @@ def atm_itm_entry_allows(
                 meta["indexConfirmedMoneyness"] = True
                 return True, "ok", meta
             settings = get_settings()
-            if bool(getattr(settings, "explosion_shallow_otm_entry_enabled", False)):
+            if bool(getattr(settings, "explosion_shallow_otm_entry_enabled", True)):
                 max_steps = int(
                     getattr(settings, "explosion_shallow_otm_entry_steps", 1) or 1
                 )
@@ -128,11 +123,6 @@ def atm_itm_entry_allows(
                     if runner_match or tier in ("ELITE", "EXPLODING"):
                         meta["shallowOtmNearStrikeEntry"] = True
                         return True, "ok", meta
-            from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
-
-            if oct_paper_funnel_readiness_waived(alert, settings=settings):
-                meta["octPaperReplicaOtmWaived"] = True
-                return True, "ok", meta
         return False, "moneyness_atm_itm_only", meta
     return True, "ok", meta
 

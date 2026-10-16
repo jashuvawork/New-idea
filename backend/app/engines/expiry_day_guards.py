@@ -1233,14 +1233,7 @@ def check_expiry_entry_allowed(
             return True, "ok", meta
         return False, "expiry_evening_block", meta
 
-    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
-
-    if (
-        not oct_paper_skip_live_only_session_gates(settings)
-        and not in_expiry_morning_window()
-        and settings.expiry_morning_only
-        and has_expiry_today
-    ):
+    if not in_expiry_morning_window() and settings.expiry_morning_only and has_expiry_today:
         if pm_itm:
             return True, "ok", meta
         from app.engines.morning_premium_capture import (
@@ -1292,11 +1285,7 @@ def check_expiry_entry_allowed(
                 return True, "ok", meta
             return False, cap_reason, meta
 
-        if (
-            is_worst
-            and settings.expiry_worst_day_halt_entries
-            and not oct_paper_skip_live_only_session_gates(settings)
-        ):
+        if is_worst and settings.expiry_worst_day_halt_entries:
             if _session_declining(state, snapshots):
                 if (
                     getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True)

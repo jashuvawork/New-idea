@@ -313,11 +313,6 @@ def check_session_whipsaw_pause(
     if not settings.whipsaw_guards_enabled:
         return False, "ok", {}
 
-    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
-
-    if oct_paper_skip_live_only_session_gates(settings):
-        return False, "oct_paper_whipsaw_skipped", {"octPaperWhipsawSkipped": True}
-
     if momentum_rally_bypass_whipsaw(snapshots):
         return False, "momentum_rally_bypass", {"momentumRallyBypass": True}
 

@@ -648,10 +648,6 @@ def building_coil_pad_live_blocked(
 ) -> tuple[bool, str]:
     """Block live entry when coil base is armed but expansion is not confirmed."""
     s = settings or get_settings()
-    from app.engines.live_paper_parity import oct_paper_session_first_lift_lane_active
-
-    if oct_paper_session_first_lift_lane_active(alert, settings=s):
-        return False, ""
     if not building_coil_pad_lane_active(alert, s):
         return False, ""
     if building_coil_pad_lift_confirmed(alert, s):
@@ -775,12 +771,8 @@ def building_coil_pad_moneyness_ok(
 ) -> bool:
     """Expansion strikes may sit 2–3 steps OTM during BUILDING coil pad (Aug28 24050)."""
     s = settings or get_settings()
-    from app.engines.sep917_legacy_profile import strict_atm_itm_execution
-
     side = str(alert.get("side") or "").upper()
     strike = _number(alert.get("strike"))
-    if strict_atm_itm_execution(s):
-        return _atm_itm_ok(side=side, strike=strike, snap=snap)
     if _atm_itm_ok(side=side, strike=strike, snap=snap):
         return True
     if early_radar_pad_shallow_otm_ok(alert, snap):
@@ -1060,10 +1052,6 @@ def otm_reversal_entry_allowed(
     allowance. Opt-in, default off.
     """
     settings = get_settings()
-    from app.engines.sep917_legacy_profile import strict_atm_itm_execution
-
-    if strict_atm_itm_execution(settings):
-        return False
     if not bool(getattr(settings, "otm_reversal_entry_enabled", False)):
         return False
     if snap is None:

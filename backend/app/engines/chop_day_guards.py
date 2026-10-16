@@ -38,9 +38,7 @@ def record_session_trade_close(pnl_inr: float) -> None:
         return
     _reset_session_if_new_day()
     now = datetime.now(IST)
-    from app.engines.capital_risk_limits import risk_limit_inr
-
-    if pnl_inr <= -risk_limit_inr("session_large_loss_pause_inr", settings):
+    if pnl_inr <= -settings.session_large_loss_pause_inr:
         _large_loss_pause_until = now + timedelta(seconds=settings.session_large_loss_pause_seconds)
     if pnl_inr < -50:
         _session_loss_streak += 1
@@ -582,10 +580,10 @@ def resolve_daily_trade_cap(
     snapshots: dict[str, SymbolSnapshot],
 ) -> tuple[bool, str, dict[str, Any]]:
     """
-    Hard daily trade-cap gate with elite-top lift on expiry_worst / expiry_day.
+    Hard daily trade-cap gate with elite-top lift on expiry_worst.
 
-    When closed trades hit expiry max (e.g. 3>=3_expiry_worst or 6>=6_expiry_day)
-    but a top ELITE / EXPLODING is on radar, do not block the session — caller must
+    When closed trades hit expiry_worst max (e.g. 3>=3) but an early-window
+    ELITE / top EXPLODING is on radar, do not block the session — caller must
     restrict entries to those candidates only (meta dailyCapEliteOnly).
     """
     meta: dict[str, Any] = {}
@@ -593,21 +591,13 @@ def resolve_daily_trade_cap(
     if not hit:
         return False, "ok", meta
 
-    is_expiry_cap = "expiry_worst" in reason or "expiry_day" in reason
-    if not is_expiry_cap:
+    if "expiry_worst" not in reason:
         return True, reason, meta
 
     settings = get_settings()
     if not getattr(settings, "expiry_worst_day_elite_top_bypass_enabled", True):
         return True, reason, meta
-    cap_bypass = bool(
-        getattr(settings, "expiry_worst_day_elite_top_bypasses_trade_cap", True)
-    )
-    if "expiry_day" in reason and "expiry_worst" not in reason:
-        cap_bypass = cap_bypass and bool(
-            getattr(settings, "expiry_day_elite_top_bypasses_trade_cap", True)
-        )
-    if not cap_bypass:
+    if not getattr(settings, "expiry_worst_day_elite_top_bypasses_trade_cap", True):
         return True, reason, meta
 
     from app.engines.top_signal_session_lift import snapshots_have_top_signal_session_lift
@@ -813,17 +803,6 @@ def _session_side_alignment_hud(
     )
 
 
-def _open_side_confirmation_hud(snapshots: dict[str, SymbolSnapshot]) -> dict[str, Any]:
-    from app.engines.open_side_confirmation import open_side_confirmation_summary
-
-    try:
-        return open_side_confirmation_summary(
-            {s: snap for s, snap in snapshots.items() if snap.dataAvailable}
-        )
-    except Exception:
-        return {"enabled": False, "symbols": {}}
-
-
 def _index_dominant_trend_hud(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
@@ -923,7 +902,6 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "controlledDailyCapSource": cap_source,
         "whipsawGuards": whipsaw_guard_summary(state, snapshots),
         "directionalLock": directional_lock_summary(snapshots),
-        "openSideConfirmation": _open_side_confirmation_hud(snapshots),
         "indexSessionDominantTrend": _index_dominant_trend_hud(state, snapshots),
         "symmetricBestTradeCapture": bool(
             getattr(settings, "symmetric_best_trade_capture_enabled", True)

@@ -1764,11 +1764,7 @@ def first_lift_entry_readiness(
         else {}
     )
     if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
-        from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
-
-        evidence = alert if isinstance(alert, dict) else row
-        if not oct_paper_funnel_readiness_waived(evidence, settings=settings):
-            return False, "mid_rip_armed_coil_rejected"
+        return False, "mid_rip_armed_coil_rejected"
 
     # BUILDING bullish-rip sleeve — mid-rip OK while still expanding to max.
     # Runs before first-lift chart gate so option-led BUILDING rips still authorize.
@@ -2236,13 +2232,7 @@ def first_lift_entry_readiness(
             if not grade_a_lane and not top_ftv_v_lane:
                 min_move = min(min_move, bd_floors["minMove"])
     if not (min_move <= base_move <= max_move):
-        from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
-
-        evidence = alert if isinstance(alert, dict) else row
-        if oct_paper_funnel_readiness_waived(evidence, settings=settings):
-            pass
-        else:
-            return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
+        return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
 
     # Option-led lane: a strong ATM/ITM option can lead before the 5m index chart turns
     # and before the generic explosion-score floor is met. Evaluated here so it is not
@@ -2426,18 +2416,7 @@ def first_lift_entry_readiness(
     v3 = max(v3, float(persisted.get("velocity3s") or 0))
     v9 = max(v9, float(persisted.get("velocity9s") or 0))
     if live_v3 < 0:
-        from app.engines.live_paper_parity import oct_paper_first_lift_negative_velocity_ok
-
-        if not oct_paper_first_lift_negative_velocity_ok(
-            row,
-            live_v3=live_v3,
-            v9=v9,
-            settings=settings,
-        ):
-            from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
-
-            if not oct_paper_funnel_readiness_waived(row, settings=settings):
-                return False, "first_lift_live_velocity_negative"
+        return False, "first_lift_live_velocity_negative"
     if v_rip_lane:
         min_v3 = float(
             getattr(settings, "ict_v_rip_min_velocity_3s", 1.2) or 1.2
@@ -2560,11 +2539,6 @@ def first_lift_entry_readiness(
         if _entry_policy.consolidation_cold_v3_at_base:
             min_v3 = 0.0
             min_v9 = 0.0
-    from app.engines.rally_capture import elite_near_atm_index_rip_first_lift_waive
-
-    if elite_near_atm_index_rip_first_lift_waive(row, settings=settings):
-        min_v3 = 0.0
-        min_v9 = 0.0
     if not sustained_lift and v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"
     if not sustained_lift and v9 < min_v9:

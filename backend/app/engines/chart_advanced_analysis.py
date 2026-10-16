@@ -503,9 +503,6 @@ def build_mtf_reads(
     return reads
 
 
-_INDICATOR_CLOSES_KEEP = 120
-
-
 def build_chart_analysis(
     candles_1m: list,
     candles_5m: list,
@@ -613,19 +610,12 @@ def build_chart_analysis(
     # price-anchored session mean (still gives position + reclaim for turn confirmation).
     vwap = asdict(compute_vwap(highs, lows, closes, volumes))
 
-    from app.engines.spot_direction import _indicator_closes
-
-    indicator_closes = [
-        round(c, 2) for c in _indicator_closes(candles_5m, candles_1m)[-_INDICATOR_CLOSES_KEEP:]
-    ]
-
     return ChartAnalysis(
         consensus=consensus,
         alignedCount=aligned,
         totalTimeframes=len(mtf_reads),
         timeframes={k: v.model_dump() for k, v in mtf_reads.items()},
         recentCloses=recent_closes,
-        indicatorCloses=indicator_closes,
         fibonacci=fib,
         fibExtension=fib.get("extension", {}),
         pivots=pivots,

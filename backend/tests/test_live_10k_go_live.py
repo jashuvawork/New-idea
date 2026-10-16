@@ -1,4 +1,4 @@
-"""Live overlays (₹2L default, ₹10k legacy) and milestone bypass for go-live."""
+"""₹10k live overlay and milestone bypass for small-cap go-live."""
 
 import asyncio
 from datetime import datetime, timedelta
@@ -16,70 +16,17 @@ IST = ZoneInfo("Asia/Kolkata")
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _overlay_values(name: str) -> dict[str, str]:
+def _overlay_values() -> dict[str, str]:
     values: dict[str, str] = {}
-    for line in (ROOT / "deploy" / name).read_text().splitlines():
+    for line in (ROOT / "deploy/env.live-10k.overlay").read_text().splitlines():
         if "=" in line and not line.lstrip().startswith("#"):
             key, value = line.split("=", 1)
             values[key] = value
     return values
 
 
-def test_live_paper_parity_deploy_scripts_exist():
-    root = ROOT / "deploy"
-    assert (root / "apply-live-paper-parity-env.sh").is_file()
-    assert (root / "audit-live-paper-env.sh").is_file()
-
-
-def test_live_200k_overlay_scales_capital_and_risk():
-    env = _overlay_values("env.live-200k.overlay")
-    assert env["FALLBACK_CAPITAL_INR"] == "200000"
-    assert env["MAX_SIZING_CAPITAL_INR"] == "200000"
-    assert env["USE_UPSTOX_CAPITAL_FOR_SIZING"] == "false"
-    assert env["SEP917_LEGACY_PROFILE_ENABLED"] == "true"
-    assert env["TOP_MOMENTS_ONLY_ENABLED"] == "false"
-    assert env["PAPER_SIMPLE_PROFIT_MODE"] == "true"
-    assert env["LIVE_MILESTONE_REQUIRED"] == "false"
-    assert env["DAILY_LOSS_STOP_INR"] == "20000"
-    assert env["EMERGENCY_STOP_INR"] == "20000"
-    assert env["SESSION_LARGE_LOSS_PAUSE_INR"] == "8000"
-    assert env["MAX_RISK_PER_TRADE_INR"] == "4000"
-    assert env["DAILY_PROFIT_TARGET_FROM_CAPITAL"] == "true"
-    assert env["ENABLE_LIVE_TRADING"] == "false"
-    assert env["LIVE_PAPER_PARITY_ENABLED"] == "true"
-    assert env["LIVE_TRADE_SELECTION_PARITY_WITH_PAPER"] == "true"
-    assert env["LIVE_BEST_TRADES_ONLY_ENABLED"] == "false"
-    assert env["TOP_MOMENTS_MIN_GRADE"] == "A"
-    assert env["WORST_DAY_BLOCKS_LIVE"] == "false"
-    assert env["FTV_ALLOCATION_MAX_POSITIONS"] == "3"
-    assert env["LIVE_HOLD_TO_STRUCTURAL_SL"] == "false"
-    assert env["CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
-    assert env["LIVE_BROKER_RECONCILIATION_ENABLED"] == "false"
-
-
-def test_worst_day_blocks_live_off_when_selection_parity():
-    from unittest.mock import MagicMock, patch
-
-    from app.engines.worst_day_guard import worst_day_blocks_live
-    from app.models.schemas import AutoTraderState
-
-    settings = MagicMock()
-    settings.live_trade_selection_parity_with_paper = True
-    settings.worst_day_blocks_live = True
-    settings.enable_live_trading = True
-    verdict = SimpleNamespace(is_worst=True, to_dict=lambda: {"isWorst": True})
-    with (
-        patch("app.engines.worst_day_guard.get_settings", return_value=settings),
-        patch("app.engines.worst_day_guard.identify_worst_day", return_value=verdict),
-    ):
-        blocked, reason, _ = worst_day_blocks_live(AutoTraderState(), {})
-    assert blocked is False
-    assert reason == "ok"
-
-
 def test_live_10k_overlay_scales_capital_and_risk():
-    env = _overlay_values("env.live-10k.overlay")
-    assert env["LEGACY_LIVE_NARROW_STACK_ENABLED"] == "true"
+    env = _overlay_values()
     assert env["FALLBACK_CAPITAL_INR"] == "10000"
     assert env["MAX_SIZING_CAPITAL_INR"] == "10000"
     assert env["USE_UPSTOX_CAPITAL_FOR_SIZING"] == "true"
@@ -153,28 +100,11 @@ def test_readiness_skips_milestone_when_not_required():
             "app.engines.worst_day_guard.worst_day_blocks_live",
             return_value=(False, "", {}),
         ),
-        patch(
-            "app.engines.live_paper_parity.live_paper_profile_ok",
-            return_value=(True, []),
-        ),
-        patch(
-            "app.engines.october_frozen_profile.october_frozen_profile_ok",
-            return_value=(True, []),
-        ),
-        patch(
-            "app.engines.october_frozen_profile.october_frozen_profile_summary",
-            return_value={
-                "active": True,
-                "padEntryGuardEnabled": True,
-                "symmetricBestTradeCaptureEnabled": True,
-            },
-        ),
     ):
         payload = asyncio.run(deployment_readiness())
 
     assert payload["checks"]["milestoneRequired"] is False
     assert payload["checks"]["milestonePassed"] is True
-    assert payload["checks"]["livePaperProfileOk"] is True
     assert payload["readyForLive"] is True
 
 
@@ -208,8 +138,6 @@ def test_live_hold_skips_inr_force_stop_and_rides_to_adaptive_sl():
         patch.object(s, "explosion_peak_fade_lock_enabled", False),
         patch.object(s, "explosion_peak_capture_enabled", False),
         patch.object(s, "explosion_no_progress_enabled", False),
-        patch("app.engines.explosion_profit.get_settings", return_value=s),
-        patch("app.engines.adaptive_exits.get_settings", return_value=s),
     ):
         reason, _ = evaluate_explosion_exit(trade, 48.0, "ELITE", 65, live_velocity_3s=-1.0)
     assert reason not in (
@@ -225,9 +153,6 @@ def test_live_hold_skips_inr_force_stop_and_rides_to_adaptive_sl():
         patch.object(s, "explosion_peak_fade_lock_enabled", False),
         patch.object(s, "explosion_peak_capture_enabled", False),
         patch.object(s, "explosion_no_progress_enabled", False),
-        patch("app.engines.explosion_profit.get_settings", return_value=s),
-        patch("app.engines.adaptive_exits.get_settings", return_value=s),
-        patch("app.engines.explosion_profit._adaptive_stop_min_hold", return_value=0),
     ):
         reason2, _ = evaluate_explosion_exit(trade, 43.0, "ELITE", 65, live_velocity_3s=-1.0)
     assert reason2 in ("adaptive_stop_loss", "explosion_stop_loss")
@@ -266,10 +191,6 @@ def test_live_structural_hold_bypasses_entry_per_trade_risk_cap():
     with (
         patch("app.engines.risk_engine.get_settings", return_value=settings),
         patch("app.engines.risk_engine.get_capital_snapshot", return_value=cap),
-        patch(
-            "app.engines.live_paper_parity.legacy_live_narrow_stack_active",
-            return_value=True,
-        ),
     ):
         ok, reason = engine.check_new_entry(
             state,

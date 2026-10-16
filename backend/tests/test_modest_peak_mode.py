@@ -204,8 +204,8 @@ def test_sep03_modest_peak_exits_on_fade(mock_ms, mock_s, _hc, _mp):
 @patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=False)
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.moment_stage_trail.get_settings")
-def test_without_modest_peak_sep03_arms_via_premium_scaled_point_arm(mock_ms, mock_s, _hc, _mp):
-    """Without modestPeakMode, +16.4pt / 20.6% still arms: point arm is min(20pt, 15% of entry)."""
+def test_without_modest_peak_sep03_would_not_arm_pct_floor(mock_ms, mock_s, _hc, _mp):
+    """Without modestPeakMode, +16.4pt / 20.6% gain fails both arm paths."""
     s = _settings()
     mock_s.return_value = s
     mock_ms.return_value = s
@@ -214,5 +214,4 @@ def test_without_modest_peak_sep03_arms_via_premium_scaled_point_arm(mock_ms, mo
     trade.entryContext["exitPlan"] = dict(trade.entryContext["exitPlan"])
     trade.entryContext["exitPlan"].pop("modestPeakMode", None)
     floor = ftv_runner_pct_floor(trade, 16.4, settings=s)
-    assert floor is not None
-    assert abs(floor - 16.4 * 0.75) < 0.05
+    assert floor is None

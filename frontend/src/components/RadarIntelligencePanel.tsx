@@ -76,13 +76,6 @@ interface RadarHealth {
     lastFastCycleMs?: number;
     lastFullCycleMs?: number;
     fullRestRebuildRunning?: boolean;
-    lastHeavyCycleMs?: number | null;
-    lastOverlayBroadcastAgeMs?: number | null;
-  };
-  latency?: {
-    lastFastCycleMs?: number | null;
-    lastHeavyCycleMs?: number | null;
-    lastOverlayBroadcastAgeMs?: number | null;
   };
 }
 
@@ -495,14 +488,6 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
                 Download ZIP
               </a>
             ) : null}
-            <a
-              href={`${API_BASE}/api/auto-trader/trade-archives/${selectedDate}`}
-              download={`trades-${selectedDate}.zip`}
-              className="h-10 sm:h-8 inline-flex items-center rounded-lg border border-nexus-green/35 bg-nexus-green/10 px-3 text-[10px] font-semibold text-nexus-green hover:bg-nexus-green/20"
-              title="Paper + live fills for this session (daily archive)"
-            >
-              Trades ZIP
-            </a>
             <button
               type="button"
               onClick={() => Promise.all([loadOverview(), loadDay(selectedDate)])}
@@ -831,8 +816,7 @@ export function RadarIntelligencePanel({ pollMs = 30_000 }: { pollMs?: number })
                 <h3 className="text-[10px] uppercase tracking-[0.12em] text-gray-300 mb-2">Scan cadence</h3>
                 <div className="space-y-1.5 text-[10px]">
                   <div className="flex justify-between"><span className="text-nexus-muted">Entry target</span><span className="font-mono">{compactNumber(health?.cadence?.entryScanIntervalMs, 'ms')}</span></div>
-                  <div className="flex justify-between"><span className="text-nexus-muted">SSE push age</span><span className="font-mono">{compactNumber(health?.cadence?.lastOverlayBroadcastAgeMs ?? health?.latency?.lastOverlayBroadcastAgeMs ?? undefined, 'ms')}</span></div>
-                  <div className="flex justify-between"><span className="text-nexus-muted">Trader pass</span><span className="font-mono">{compactNumber(health?.cadence?.lastHeavyCycleMs ?? health?.latency?.lastHeavyCycleMs ?? health?.cadence?.lastFastCycleMs ?? undefined, 'ms')}</span></div>
+                  <div className="flex justify-between"><span className="text-nexus-muted">Fast cycle</span><span className="font-mono">{compactNumber(health?.cadence?.lastFastCycleMs, 'ms')}</span></div>
                   <div className="flex justify-between"><span className="text-nexus-muted">Full cycle</span><span className="font-mono">{compactNumber(health?.cadence?.lastFullCycleMs, 'ms')}</span></div>
                   <div className="flex justify-between"><span className="text-nexus-muted">REST rebuild</span><span>{health?.cadence?.fullRestRebuildRunning ? 'Running' : 'Idle'}</span></div>
                 </div>

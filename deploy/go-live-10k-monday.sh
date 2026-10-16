@@ -1,36 +1,23 @@
 #!/usr/bin/env bash
-# Prepare or arm live trading on EC2 (default ₹2L capital / overlay).
+# Prepare or arm ₹10k live trading on EC2.
 #
 # Run ON the EC2 instance (as root):
-#   # Step 1 — before open: apply capital/risk overlay (still paper)
+#   # Step 1 — before Monday: apply capital/risk overlay (still paper)
 #   sudo bash deploy/go-live-10k-monday.sh --prepare
 #
-#   # Step 2 — before 9:15 IST: flip live execution + restart
+#   # Step 2 — Monday before 9:15 IST: flip live execution + restart
 #   sudo bash deploy/go-live-10k-monday.sh --arm-live
 #
 #   # After session / when done with live: back to paper
 #   sudo bash deploy/go-live-10k-monday.sh --paper
 #
 # Options:
-#   --prepare     Apply env.live-200k.overlay (default; still paper)
+#   --prepare     Apply env.live-10k.overlay (capital ₹10k, scaled risk; paper mode)
 #   --arm-live    Apply overlay + ENABLE_LIVE_TRADING=true, PAPER_TRADING=false, restart backend
 #   --paper       Stop auto-trader, flip back to paper mode, restart backend, resume auto-trader
 #   --dry-run     Print actions without writing env or restarting
 #   ENV_FILE=     Override env path (default /opt/nexusquant/env)
 #   REPO_DIR=     Override repo path (default /opt/nexusquant/New-idea)
-#   RULES_OVERLAY= Frozen October rules (default deploy/env.october-frozen.overlay)
-#   LIVE_OVERLAY= Capital + execution overlay (default deploy/env.live-capital.overlay)
-#   LIVE_CAPITAL_INR= Day capital when arming — any amount ≥ 45000 (default 100000); risk
-#                    limits follow it as % of the book (env.live-capital.overlay)
-#   PAPER_CAPITAL_INR= Paper capital when disarming (default 150000)
-#   PAPER_OVERLAY=  Capital/risk overlay on --paper (default deploy/env.paper-150k.overlay)
-#   Any day budget (default): LIVE_CAPITAL_INR=120000 (env.live-capital.overlay)
-#   ₹1.5L live: LIVE_OVERLAY=deploy/env.live-150k.overlay LIVE_CAPITAL_INR=150000
-#   ₹50k + Oct frozen: LIVE_OVERLAY=deploy/env.live-50k.overlay LIVE_CAPITAL_INR=50000 \
-#     PAPER_OVERLAY=deploy/env.paper-50k.overlay PAPER_CAPITAL_INR=50000
-#   ₹1L live: LIVE_OVERLAY=deploy/env.live-100k.overlay LIVE_CAPITAL_INR=100000 \
-#     PAPER_OVERLAY=deploy/env.paper-100k.overlay PAPER_CAPITAL_INR=100000
-#   Small-cap legacy (NOT Oct frozen stack): LIVE_OVERLAY=deploy/env.live-10k.overlay LIVE_CAPITAL_INR=10000
 #
 set -euo pipefail
 
@@ -46,15 +33,12 @@ if [ -z "$REPO_DIR" ]; then
 fi
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
-RULES_OVERLAY="${RULES_OVERLAY:-${REPO_DIR}/deploy/env.october-frozen.overlay}"
-OVERLAY="${LIVE_OVERLAY:-${REPO_DIR}/deploy/env.live-capital.overlay}"
+OVERLAY="${REPO_DIR}/deploy/env.live-10k.overlay"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
-STATUS_URL="${STATUS_URL:-http://127.0.0.1:8000/api/deployment/status}"
 READINESS_URL="${READINESS_URL:-http://127.0.0.1:8000/api/deployment/readiness}"
 CAPITAL_URL="${CAPITAL_URL:-http://127.0.0.1:8000/api/auto-trader/capital}"
-PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-150000}"
-LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-100000}"
-PAPER_OVERLAY="${PAPER_OVERLAY:-${REPO_DIR}/deploy/env.paper-150k.overlay}"
+PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-200000}"
+LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-10000}"
 
 MODE=""
 DRY_RUN=0
@@ -82,23 +66,9 @@ if [ "$(id -u)" -ne 0 ] && [ "$DRY_RUN" -eq 0 ]; then
   exit 1
 fi
 
-if [ ! -f "$RULES_OVERLAY" ]; then
-  echo "ERROR: rules overlay not found at $RULES_OVERLAY" >&2
+if [ ! -f "$OVERLAY" ]; then
+  echo "ERROR: overlay not found at $OVERLAY" >&2
   exit 1
-fi
-if [ "$MODE" != "paper" ] && [ ! -f "$OVERLAY" ] && [ "$MODE" = "arm-live" ]; then
-  echo "ERROR: capital overlay not found at $OVERLAY" >&2
-  exit 1
-fi
-SCALED_CAPITAL_OVERLAY=0
-if grep -q '^CAPITAL_SCALED_RISK_LIMITS_ENABLED=true' "$OVERLAY" 2>/dev/null; then
-  SCALED_CAPITAL_OVERLAY=1
-fi
-if [ "$MODE" = "arm-live" ] && [ "$SCALED_CAPITAL_OVERLAY" -eq 1 ]; then
-  if ! [[ "$LIVE_CAPITAL_INR" =~ ^[0-9]+$ ]] || [ "$LIVE_CAPITAL_INR" -lt 45000 ]; then
-    echo "ERROR: LIVE_CAPITAL_INR must be a whole rupee amount ≥ 45000 (got '$LIVE_CAPITAL_INR')" >&2
-    exit 1
-  fi
 fi
 
 _set_env_key() {
@@ -116,45 +86,20 @@ _set_env_key() {
   echo "  ${key}=${val}"
 }
 
-echo "=== NexusQuant live go-live ($MODE) capital=₹${LIVE_CAPITAL_INR} $(date -Iseconds) ==="
-echo "Rules overlay: $RULES_OVERLAY"
-echo "Capital overlay: $OVERLAY"
+echo "=== NexusQuant ₹10k go-live ($MODE) $(date -Iseconds) ==="
 echo "Env: $ENV_FILE | Repo: $REPO_DIR"
-
-_apply_overlay_file() {
-  local path="$1"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "[dry-run] apply overlay $path"
-    return
-  fi
-  ENV_FILE="$ENV_FILE" bash "$REPO_DIR/deploy/apply-env-overlay.sh" "$path"
-}
 
 if [ "$MODE" != "paper" ]; then
   if [ "$DRY_RUN" -eq 0 ]; then
     mkdir -p "$(dirname "$ENV_FILE")"
     touch "$ENV_FILE"
-  fi
-  _apply_overlay_file "$RULES_OVERLAY"
-  if [ "$MODE" = "prepare" ]; then
-    _apply_overlay_file "$PAPER_OVERLAY"
-  elif [ -f "$OVERLAY" ]; then
-    _apply_overlay_file "$OVERLAY"
-    if [ "$MODE" = "arm-live" ] && [ "$SCALED_CAPITAL_OVERLAY" -eq 1 ]; then
-      echo "Day capital ₹${LIVE_CAPITAL_INR} (risk limits scale with it)..."
-      _set_env_key FALLBACK_CAPITAL_INR "$LIVE_CAPITAL_INR"
-      _set_env_key MAX_SIZING_CAPITAL_INR "$LIVE_CAPITAL_INR"
-    fi
+    ENV_FILE="$ENV_FILE" bash "$REPO_DIR/deploy/apply-env-overlay.sh" "$OVERLAY"
+  else
+    echo "[dry-run] apply overlay $OVERLAY"
   fi
 fi
 
 if [ "$MODE" = "paper" ]; then
-  if [ -f "$PAPER_OVERLAY" ] && [ "$DRY_RUN" -eq 0 ]; then
-    echo "Applying paper capital/risk overlay: $PAPER_OVERLAY"
-    ENV_FILE="$ENV_FILE" bash "$REPO_DIR/deploy/apply-env-overlay.sh" "$PAPER_OVERLAY"
-  elif [ -f "$PAPER_OVERLAY" ]; then
-    echo "[dry-run] apply paper overlay $PAPER_OVERLAY"
-  fi
   echo "Stopping auto-trader before returning to paper mode..."
   curl -sf -X POST "http://127.0.0.1:8000/api/execution/stop" >/dev/null 2>&1 || true
   echo "Disarming live execution (paper mode)..."
@@ -166,28 +111,12 @@ if [ "$MODE" = "paper" ]; then
   echo "Restoring paper capital to ₹${PAPER_CAPITAL_INR}..."
   _set_env_key FALLBACK_CAPITAL_INR "$PAPER_CAPITAL_INR"
   _set_env_key MAX_SIZING_CAPITAL_INR "$PAPER_CAPITAL_INR"
-  echo "Clearing session calibration after disarm..."
-  curl -sf -X POST "http://127.0.0.1:8000/api/auto-trader/reset" >/dev/null 2>&1 || true
 fi
 
 if [ "$MODE" = "arm-live" ]; then
-  if grep -q '^OCTOBER_FROZEN_PROFILE_ENABLED=true' "$RULES_OVERLAY" 2>/dev/null \
-    && [[ "$OVERLAY" == *live-10k* ]]; then
-    echo "ERROR: env.live-10k overlay is incompatible with Frozen October rules overlay" >&2
-    echo "Use env.live-50k.overlay or env.live-150k.overlay with Oct frozen stack." >&2
-    exit 1
-  fi
-  echo "Stopping auto-trader and clearing session before live arm..."
+  echo "Stopping auto-trader and clearing paper session before live arm..."
   curl -sf -X POST "http://127.0.0.1:8000/api/execution/stop" >/dev/null 2>&1 || true
-  curl -sf -X POST "http://127.0.0.1:8000/api/auto-trader/reset" >/dev/null 2>&1 || true
-  echo "Auditing env against Frozen October + capital overlay before arming..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "[dry-run] audit $ENV_FILE vs $RULES_OVERLAY + $OVERLAY"
-  elif ! ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" RULES_OVERLAY="$RULES_OVERLAY" \
-      CAPITAL_OVERLAY="$OVERLAY" bash "$REPO_DIR/deploy/audit-live-paper-env.sh"; then
-    echo "ERROR: env drifted from paper rules — refusing to arm live (still paper)" >&2
-    exit 1
-  fi
+  curl -sf -X POST "http://127.0.0.1:8000/api/auto-trader/purge-logs" >/dev/null 2>&1 || true
   echo "Arming live execution..."
   _set_env_key ENABLE_LIVE_TRADING true
   _set_env_key PAPER_TRADING false
@@ -251,64 +180,6 @@ if d.get('armLiveSteps'):
         print('   -', s)
 " 2>/dev/null || echo "  (readiness endpoint not ready yet)"
 
-if [ "$MODE" = "arm-live" ]; then
-  echo "Deployment flags:"
-  EXPECT_CAPITAL="${LIVE_CAPITAL_INR}" \
-  curl -sf "$STATUS_URL" | python3 -c "
-import json, os, sys
-d = json.load(sys.stdin)
-f = d.get('flags') or {}
-expect_cap = float(os.environ.get('EXPECT_CAPITAL', '100000') or 100000)
-expect_loss = expect_cap * 0.10
-print('  commit:', d.get('commit'))
-if not d.get('commit'):
-    raise SystemExit('ERROR: deployment status missing commit — backend not ready')
-print('  enableLiveTrading:', f.get('enableLiveTrading'))
-print('  paperTrading:', f.get('paperTrading'))
-print('  livePaperParityEnabled:', f.get('livePaperParityEnabled'))
-print('  liveBestTradesOnlyEnabled:', f.get('liveBestTradesOnlyEnabled'))
-print('  entryGatesMatchPaper:', f.get('entryGatesMatchPaper'))
-print('  tradingRulesMatchPaper:', f.get('tradingRulesMatchPaper'))
-print('  fallbackCapitalInr:', f.get('fallbackCapitalInr'))
-print('  dailyLossStopInr:', f.get('dailyLossStopInr'))
-if not f.get('enableLiveTrading') or f.get('paperTrading'):
-    raise SystemExit('ERROR: live arm failed — still on paper')
-if f.get('livePaperParityEnabled') is not True:
-    raise SystemExit('ERROR: livePaperParityEnabled is not true — apply env.october-frozen.overlay')
-frozen = d.get('frozenOctoberProfile') or {}
-print('  frozenOctoberProfileOk:', frozen.get('profileOk'))
-if frozen.get('profileIssues'):
-    print('  frozenOctoberIssues:', frozen.get('profileIssues'))
-if frozen.get('profileOk') is not True:
-    raise SystemExit('ERROR: Frozen October profile not OK — run --prepare with october-frozen overlay')
-prof = f.get('livePaperProfile') or {}
-print('  livePaperProfileOk:', prof.get('profileOk'))
-if prof.get('profileIssues'):
-    print('  profileIssues:', prof.get('profileIssues'))
-if prof.get('profileOk') is not True:
-    raise SystemExit('ERROR: live env is not Oct paper profile — run --prepare and restart')
-if f.get('entryGatesMatchPaper') is not True or f.get('tradingRulesMatchPaper') is not True:
-    raise SystemExit('ERROR: live must have entryGatesMatchPaper and tradingRulesMatchPaper true')
-cap = float(f.get('fallbackCapitalInr') or 0)
-loss = float(f.get('dailyLossStopInr') or 0)
-if abs(cap - expect_cap) > 1.0:
-    raise SystemExit(f'ERROR: fallbackCapitalInr {cap} != expected {expect_cap}')
-if abs(loss - expect_loss) > 1.0:
-    raise SystemExit(f'ERROR: dailyLossStopInr {loss} != expected {expect_loss}')
-" 2>/dev/null || echo "  (deployment status not ready yet)"
-  echo "Readiness gate:"
-  curl -sf "$READINESS_URL" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-print('  readyForLive:', d.get('readyForLive'))
-if d.get('readyForLive') is not True:
-    steps = d.get('armLiveSteps') or []
-    for s in steps[:6]:
-        print('   -', s)
-    print('WARN: readyForLive false (expected when market closed) — re-check before 9:15 IST')
-" 2>/dev/null || echo "  (readiness endpoint not ready yet)"
-fi
-
 echo ""
 if [ "$MODE" = "prepare" ]; then
   echo "Prepared — still PAPER. Before 9:15 IST Monday run:"
@@ -318,5 +189,5 @@ elif [ "$MODE" = "paper" ]; then
   echo "Back on paper trading at ₹${PAPER_CAPITAL_INR}. To arm live again:"
   echo "  sudo bash deploy/go-live-10k-monday.sh --arm-live"
 else
-  echo "Live armed at ₹${LIVE_CAPITAL_INR}. Confirm Upstox token + readiness before session open."
+  echo "Live armed at ₹10k. Confirm Upstox token + readiness before session open."
 fi

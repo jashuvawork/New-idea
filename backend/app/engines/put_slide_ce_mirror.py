@@ -20,7 +20,6 @@ from app.engines.pe_win_ce_mirror import (
     _evidence_has_premium_local_base,
     _side_val,
     _trade_closed_at,
-    mirror_win_min_pnl_inr,
 )
 from app.engines.rally_capture import _grade_meets_min
 from app.models.schemas import Side, SymbolSnapshot
@@ -38,7 +37,9 @@ def session_call_win_meta(
     if not bool(getattr(settings, "ce_win_pe_mirror_enabled", True)):
         return False, {}
 
-    min_pnl = mirror_win_min_pnl_inr("CALL", settings=settings)
+    min_pnl = float(
+        getattr(settings, "ce_win_pe_mirror_min_call_win_inr", 1000.0) or 1000.0
+    )
     trades = _collect_session_trades(state)
     call_wins: list[Any] = []
     for trade in trades:
@@ -97,7 +98,9 @@ def _seconds_since_last_call_win(state: Any, *, settings: Any = None) -> float |
     if not call_win:
         return None
     trades = _collect_session_trades(state)
-    min_pnl = mirror_win_min_pnl_inr("CALL", settings=settings)
+    min_pnl = float(
+        getattr(settings, "ce_win_pe_mirror_min_call_win_inr", 1000.0) or 1000.0
+    )
     latest: datetime | None = None
     for trade in trades:
         status = str(
@@ -136,60 +139,6 @@ def _seconds_since_last_call_win(state: Any, *, settings: Any = None) -> float |
     return max(0.0, (now - latest).total_seconds())
 
 
-def put_slide_unlock_call_opposite_blocked(
-    candidate: Any,
-    state: Any,
-    snapshots: dict[str, SymbolSnapshot],
-    *,
-    settings: Any = None,
-) -> tuple[bool, str, dict[str, Any]]:
-    """Block CALL explosions while PUT slide unlock is armed (dominant SLIDE)."""
-    settings = settings or get_settings()
-    meta: dict[str, Any] = {}
-    if not bool(getattr(settings, "put_slide_unlock_block_opposite_call_enabled", True)):
-        return False, "ok", meta
-    if str(getattr(candidate, "mode", "") or "") != "explosion":
-        return False, "ok", meta
-    if _side_val(getattr(candidate, "side", None)) != "CALL":
-        return False, "ok", meta
-
-    sym = str(getattr(candidate, "symbol", "") or "").upper()
-    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
-    if snap is None or state is None:
-        return False, "ok", meta
-
-    armed, arm_reason, arm_meta = put_slide_entry_unlock_armed(
-        state, snap, sym, settings=settings,
-    )
-    meta.update(arm_meta)
-    if not armed:
-        return False, "ok", meta
-    meta["putSlideUnlockArmed"] = True
-    meta["putSlideUnlockReason"] = arm_reason
-
-    from app.engines.index_session_dominant_trend import (
-        index_session_dominant_trend,
-        side_aligns_with_dominant_trend,
-    )
-
-    dominant, trend_meta = index_session_dominant_trend(
-        sym, snap, state, settings=settings, track_flip=False,
-    )
-    meta["dominantTrend"] = dominant
-    meta.update(trend_meta)
-
-    if side_aligns_with_dominant_trend("CALL", dominant):
-        return False, "ok", meta
-
-    from app.engines.index_tick_helpers import index_trend_breakout
-
-    if index_trend_breakout(sym, "CALL", snap).get("breakout"):
-        meta["callRallyBreakout"] = True
-        return False, "ok", meta
-
-    return True, "put_slide_unlock_block_opposite_call", meta
-
-
 def ce_win_pe_mirror_call_chase_blocked(
     candidate: Any,
     state: Any,
@@ -202,21 +151,11 @@ def ce_win_pe_mirror_call_chase_blocked(
     meta: dict[str, Any] = {}
     if not bool(getattr(settings, "ce_win_pe_mirror_enabled", True)):
         return False, "ok", meta
+    if not bool(getattr(settings, "ce_win_pe_mirror_block_call_chase_enabled", True)):
+        return False, "ok", meta
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         return False, "ok", meta
     if _side_val(getattr(candidate, "side", None)) != "CALL":
-        return False, "ok", meta
-
-    slide_call_blocked, slide_call_reason, slide_call_meta = (
-        put_slide_unlock_call_opposite_blocked(
-            candidate, state, snapshots, settings=settings,
-        )
-    )
-    meta.update(slide_call_meta)
-    if slide_call_blocked:
-        return True, slide_call_reason, meta
-
-    if not bool(getattr(settings, "ce_win_pe_mirror_block_call_chase_enabled", True)):
         return False, "ok", meta
 
     elapsed = _seconds_since_last_call_win(state, settings=settings)
@@ -235,14 +174,17 @@ def ce_win_pe_mirror_call_chase_blocked(
         return False, "ok", meta
 
     sym = str(getattr(candidate, "symbol", "") or "").upper()
-    win_sym = str(call_meta.get("callWinSymbol") or "").upper()
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+    if snap is not None:
+        from app.engines.index_tick_helpers import index_trend_breakout
 
+        if index_trend_breakout(sym, "CALL", snap).get("breakout"):
+            meta["callRallyBreakout"] = True
+            return False, "ok", meta
+
+    win_sym = str(call_meta.get("callWinSymbol") or "").upper()
     if win_sym and sym != win_sym:
         return True, "ce_win_pe_mirror_block_cross_index_call", meta
-
-    alert_d = getattr(candidate, "alert", None)
-    if not isinstance(alert_d, dict):
-        alert_d = {}
 
     for other_sym, other_snap in (snapshots or {}).items():
         if not other_snap or not getattr(other_snap, "dataAvailable", True):
@@ -251,50 +193,10 @@ def ce_win_pe_mirror_call_chase_blocked(
             state, other_snap, str(other_sym).upper(), settings=settings,
         )
         if armed:
-            from app.engines.session_mode_feedback import (
-                same_strike_post_win_v_rip_reentry_waive,
-            )
-
-            waived, waive_meta = same_strike_post_win_v_rip_reentry_waive(
-                state,
-                symbol=sym,
-                side=getattr(candidate, "side", None),
-                strike=float(getattr(candidate, "strike", 0) or 0),
-                alert=alert_d,
-                confidence=float(getattr(candidate, "score", 0) or 0),
-                settings=settings,
-            )
-            if waived:
-                meta.update(waive_meta)
-                meta["ceWinPeMirrorWaived"] = True
-                return False, "ok", meta
             meta["putLegArmedSymbol"] = str(other_sym).upper()
             meta["putLegArmedReason"] = reason
             meta.update(arm_meta)
             return True, "ce_win_pe_mirror_block_call_for_put_leg", meta
-
-    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
-    if snap is not None and win_sym and sym == win_sym:
-        from app.engines.index_tick_helpers import index_trend_breakout
-
-        if index_trend_breakout(sym, "CALL", snap).get("breakout"):
-            meta["callRallyBreakout"] = True
-            return False, "ok", meta
-
-    from app.engines.session_mode_feedback import same_strike_post_win_v_rip_reentry_waive
-
-    waived, waive_meta = same_strike_post_win_v_rip_reentry_waive(
-        state,
-        symbol=sym,
-        side=getattr(candidate, "side", None),
-        strike=float(getattr(candidate, "strike", 0) or 0),
-        alert=alert_d,
-        confidence=float(getattr(candidate, "score", 0) or 0),
-        settings=settings,
-    )
-    if waived:
-        meta.update(waive_meta)
-        return False, "ok", meta
 
     return True, "ce_win_pe_mirror_block_call_chase_window", meta
 
@@ -364,66 +266,6 @@ def ce_win_pe_mirror_armed(
         return True, "ce_win_pe_mirror", {**call_meta, **slide_meta, "mirrorReason": slide_reason}
 
     return True, "ce_win_pe_mirror", call_meta
-
-
-def _put_slide_moment_blob(evidence: Mapping[str, Any]) -> str:
-    return " ".join(
-        str(evidence.get(key) or "")
-        for key in ("momentType", "reason", "liftReason", "readinessReason")
-    ).lower()
-
-
-def put_slide_pad_context(evidence: Mapping[str, Any], *, settings: Any = None) -> bool:
-    """True when PUT evidence is at/near a session-high pad (slide capture), not extended chase."""
-    settings = settings or get_settings()
-    if str(evidence.get("side") or "").upper() != "PUT":
-        return False
-    blob = _put_slide_moment_blob(evidence)
-    if "v_rip_session_high" in blob:
-        return True
-    min_off = float(
-        getattr(settings, "put_premium_local_base_min_off_high_pct", 2.0) or 2.0
-    )
-    off_high = _number(evidence.get("offHighMovePct"))
-    local = max(
-        _number(evidence.get("localBaseMovePct")),
-        _number(evidence.get("ictBaseRelativeMovePct")),
-    )
-    max_local = float(
-        getattr(settings, "put_slide_cold_velocity_max_local_pct", 22.0) or 22.0
-    )
-    if off_high >= min_off - 1e-6 and 2.0 <= local <= max_local + 1e-6:
-        return True
-    if evidence.get("putSlideUnlockArmed") or evidence.get("putSlideUnlock"):
-        return True
-    return False
-
-
-def put_slide_cold_velocity_ok(
-    evidence: Mapping[str, Any], v3: float, v9: float
-) -> bool:
-    """Mildly negative premium velocity on PUT slide pads (mirror v_rip_session_low for CE)."""
-    settings = get_settings()
-    if not bool(getattr(settings, "put_slide_cold_velocity_enabled", True)):
-        return False
-    if not put_slide_pad_context(evidence, settings=settings):
-        return False
-    tier = str(evidence.get("tier") or "").upper()
-    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
-        return False
-    local = max(
-        _number(evidence.get("localBaseMovePct")),
-        _number(evidence.get("ictBaseRelativeMovePct")),
-    )
-    max_local = float(
-        getattr(settings, "put_slide_cold_velocity_max_local_pct", 22.0) or 22.0
-    )
-    if local > max_local + 1e-6 or local < 2.0 - 1e-6:
-        return False
-    min_v3 = float(getattr(settings, "put_slide_cold_velocity_min_v3", -2.5) or -2.5)
-    max_v3 = float(getattr(settings, "put_slide_cold_velocity_max_v3", 1.5) or 1.5)
-    min_v9 = float(getattr(settings, "put_slide_cold_velocity_min_v9", -1.2) or -1.2)
-    return min_v3 <= v3 <= max_v3 and v9 >= min_v9
 
 
 def put_slide_unlock_armed(
@@ -813,13 +655,6 @@ def put_slide_near_miss_waive(
     if tier not in ("ELITE", "EXPLODING", "BUILDING"):
         return False
     rr = str(readiness_reason or "").lower()
-    if tier in ("ELITE", "EXPLODING"):
-        if "premium_out_of_band" in rr or "premium_above" in rr:
-            return True
-        score = float(alert.get("explosionScore") or alert.get("score") or 0)
-        min_score = float(getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0)
-        if score >= min_score:
-            return True
     if "building" in rr or "rip" in rr:
         return True
     if alert.get("armedBaseLaunch") or alert.get("firstLift"):

@@ -67,44 +67,6 @@ def strict_atm_itm_scan(settings: Any = None) -> bool:
     return True
 
 
-def _oct_paper_replica(settings: Any) -> bool:
-    from app.engines.live_paper_parity import oct_paper_replica_active
-
-    return oct_paper_replica_active(settings)
-
-
-def atm_itm_fixed_premium_band_only(settings: Any = None) -> bool:
-    """ATM/ITM monitor uses global ₹18–350 only — no deep-ITM intrinsic scan bypass."""
-    from app.config import get_settings
-
-    settings = settings or get_settings()
-    if _oct_paper_replica(settings):
-        return False
-    return sep917_legacy_profile_active(settings)
-
-
-def strict_atm_itm_execution(settings: Any = None) -> bool:
-    """When True, no OTM bypass may make a contract executable (orders ATM/ITM only)."""
-    from app.config import get_settings
-
-    settings = settings or get_settings()
-    if _oct_paper_replica(settings):
-        return False
-    if sep917_legacy_profile_active(settings):
-        return True
-    return bool(getattr(settings, "moneyness_explosion_atm_itm_only", True)) and bool(
-        getattr(settings, "moneyness_explosion_block_otm", True)
-    )
-
-
-def near_strike_waiver_excluded_moneyness(settings: Any = None) -> str:
-    """Near-strike armed/v-rip waivers skip this moneyness: OTM (ATM/ITM book) or ITM (Oct 5 paper)."""
-    from app.config import get_settings
-
-    settings = settings or get_settings()
-    return "ITM" if _oct_paper_replica(settings) else "OTM"
-
-
 def sep917_legacy_profile_summary(settings: Any = None) -> dict[str, Any]:
     from app.config import get_settings
 
@@ -118,10 +80,6 @@ def sep917_legacy_profile_summary(settings: Any = None) -> dict[str, Any]:
         },
         "atmItmOnly": active
         or bool(getattr(settings, "moneyness_explosion_block_otm", True)),
-        "strictAtmItmExecution": strict_atm_itm_execution(settings),
-        "otmReversalEntryEnabled": bool(
-            getattr(settings, "otm_reversal_entry_enabled", False)
-        ),
         "cheapBaseRankPriority": bool(
             getattr(settings, "best_trade_cheap_base_rank_priority_enabled", False)
         ),

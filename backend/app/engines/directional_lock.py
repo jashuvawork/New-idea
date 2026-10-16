@@ -301,19 +301,6 @@ def check_directional_side_lock(
     if rally_ok:
         return False, "ok"
 
-    from app.engines.chop_worst_flip_capture import chop_worst_flip_directional_bypass
-
-    flip_ok, _flip_cap_reason, _flip_cap_meta = chop_worst_flip_directional_bypass(
-        symbol,
-        side_v,
-        snap,
-        state=state,
-        candidate=candidate,
-        settings=settings,
-    )
-    if flip_ok:
-        return False, "ok"
-
     from app.engines.best_side_selection import dominant_side_flip_bypass
     from app.engines.power_hour_guards import in_power_hour_window
 

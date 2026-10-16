@@ -613,21 +613,6 @@ def validate_candidate(
     """
     settings = get_settings()
     policy_meta: dict[str, Any] = {}
-    if str(getattr(candidate, "mode", "") or "").lower() == "explosion":
-        sym = str(getattr(candidate, "symbol", "") or "")
-        snap_for_enrich = (
-            (snapshots or {}).get(sym)
-            if snapshots
-            else getattr(candidate, "snap", None)
-        )
-        raw_alert = getattr(candidate, "alert", None)
-        from app.engines.live_paper_parity import enrich_alert_for_oct_paper_exec
-
-        candidate.alert = enrich_alert_for_oct_paper_exec(
-            raw_alert if isinstance(raw_alert, dict) else {},
-            snap=snap_for_enrich,
-            event=getattr(candidate, "explosion_event", None),
-        )
     from app.engines.power_hour_guards import (
         candidate_qualifies_power_hour_top_trade,
         in_power_hour_window,
@@ -664,7 +649,7 @@ def validate_candidate(
         policy_meta["dailyLossStopExpiryTopOnly"] = True
         return False, "daily_loss_stop_expiry_top_only", policy_meta
 
-    if bool(getattr(settings, "ftv_elite_top_only_enabled", False)):
+    if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
         from app.engines.moneyness import atm_itm_entry_allows
         from app.engines.session_mode_feedback import (
             exhausted_ftv_reentry_blocked,
@@ -759,27 +744,6 @@ def validate_candidate(
         }
         if not policy_ok:
             return False, policy_reason, policy_meta
-
-    if str(getattr(candidate, "mode", "") or "").lower() == "explosion":
-        from app.engines.live_oct1_pad_entry_guard import (
-            live_oct1_pad_entry_blocked,
-            oct1_pad_entry_guard_active,
-        )
-
-        if oct1_pad_entry_guard_active(settings):
-            sym_pad = str(getattr(candidate, "symbol", "") or "").upper()
-            snap_pad = None
-            if snapshots:
-                snap_pad = snapshots.get(sym_pad)
-            if snap_pad is None:
-                snap_pad = getattr(candidate, "snap", None)
-            oct1_blocked, oct1_reason, oct1_meta = live_oct1_pad_entry_blocked(
-                candidate, snap_pad, settings=settings,
-            )
-            policy_meta["liveOct1PadGuard"] = oct1_meta
-            if oct1_blocked:
-                return False, oct1_reason, policy_meta
-
     if not settings.controlled_trading_enabled:
         return True, "ok", policy_meta
 
@@ -1135,28 +1099,18 @@ def validate_candidate(
             if isinstance(getattr(candidate, "alert", None), dict)
             else None,
         )
-        alert_dict = (
-            getattr(candidate, "alert", None)
-            if isinstance(getattr(candidate, "alert", None), dict)
-            else None
-        )
         from app.engines.ict_breakout_monitor import first_lift_entry_ready
 
         strict_base_ready = first_lift_entry_ready(
             snap=snap,
             event=explosion_event,
             ict=trap_ict,
-            alert=alert_dict,
+            alert=(
+                getattr(candidate, "alert", None)
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None
+            ),
         )
-        if not strict_base_ready and alert_dict is not None:
-            from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
-
-            if oct_paper_first_lift_small_lift_context(
-                alert_dict,
-                settings=settings,
-            ):
-                strict_base_ready = True
-                meta["octPaperFirstLiftPad"] = True
         from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
         must_take = elite_must_take_bypass_allowed(
@@ -1175,28 +1129,32 @@ def validate_candidate(
             snap,
             explosion_event,
             trap_ict,
-            alert=alert_dict,
+            alert=(
+                getattr(candidate, "alert", None)
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None
+            ),
         )
 
         window_blocked, window_reason = explosion_entry_window_blocked(
-            explosion_event,
-            ict=trap_ict,
-            top_must_take=must_take,
+            explosion_event, ict=trap_ict, top_must_take=must_take,
             squeeze_early_base=squeeze_early_base_active(explosion_event, snap),
             bullish_local_base=bool(bullish_base.get("active")),
-            alert=alert_dict,
-            snap=snap,
         )
         if window_blocked and not strict_base_ready:
             return False, window_reason, meta
 
         post_session_win, _post_win_meta = _post_session_win(state)
+        alert_dict = (
+            getattr(candidate, "alert", None)
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None
+        )
 
         pad_chase, pad_reason = tier_promotion_pad_chase_blocked(
             explosion_event,
             ict=trap_ict,
             alert=alert_dict,
-            snap=snap,
         )
         if pad_chase and not (strict_base_ready and not post_session_win):
             return False, pad_reason, meta
@@ -1562,12 +1520,6 @@ def validate_candidate(
         index_trough_bypass = index_trough_momentum_turn(
             candidate.side, snap.spotChart,
         )
-    if not index_trough_bypass:
-        from app.engines.index_rally_side_flip import index_flip_waives_chart_align
-
-        if index_flip_waives_chart_align(candidate.side, snap):
-            index_trough_bypass = True
-            meta["indexFlipChartBypass"] = True
     if index_trough_bypass:
         meta["indexTroughChartBypass"] = True
     blocked_chart, chart_reason = chart_blocks_side(

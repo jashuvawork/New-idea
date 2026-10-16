@@ -155,56 +155,12 @@ def _file_lock(path: Path) -> Iterator[None]:
 
 
 def _append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
-    _append_jsonl_lines(path, [json.dumps(payload, default=str, separators=(",", ":"))])
-
-
-def _append_jsonl_lines(path: Path, lines: list[str]) -> None:
-    # Telemetry is best-effort analysis data: a per-line fsync on a throttled EBS volume
-    # turned hundreds of funnel/tape appends per minute into >20s event-loop stalls
-    # (Oct 13 watchdog restart loop). flush() still hands the bytes to the OS page cache.
-    if not lines:
-        return
+    line = json.dumps(payload, default=str, separators=(",", ":"))
     with _file_lock(path):
         with path.open("a", encoding="utf-8") as handle:
-            handle.write("\n".join(lines) + "\n")
+            handle.write(line + "\n")
             handle.flush()
-            if bool(getattr(get_settings(), "radar_telemetry_fsync_enabled", False)):
-                os.fsync(handle.fileno())
-
-
-_deferred_funnel_lock = threading.Lock()
-_deferred_funnel_rows: list[tuple[str, dict[str, Any]]] = []
-_DEFERRED_FUNNEL_MAX_ROWS = 20_000
-
-
-def _on_event_loop_thread() -> bool:
-    import asyncio
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return False
-    return True
-
-
-def _defer_funnel_row(date: str, row: dict[str, Any]) -> None:
-    with _deferred_funnel_lock:
-        if len(_deferred_funnel_rows) >= _DEFERRED_FUNNEL_MAX_ROWS:
-            del _deferred_funnel_rows[: len(_deferred_funnel_rows) // 2]
-        _deferred_funnel_rows.append((date, row))
-
-
-def drain_deferred_funnel_rows() -> int:
-    """Write funnel rows queued from the event loop. Call from a worker thread."""
-    with _deferred_funnel_lock:
-        rows = list(_deferred_funnel_rows)
-        _deferred_funnel_rows.clear()
-    by_date: dict[str, list[str]] = defaultdict(list)
-    for date, row in rows:
-        by_date[date].append(json.dumps(row, default=str, separators=(",", ":")))
-    for date, lines in by_date.items():
-        _append_jsonl_lines(funnel_path(date), lines)
-    return len(rows)
+            os.fsync(handle.fileno())
 
 
 def _read_bytes_locked(path: Path) -> bytes:
@@ -286,17 +242,17 @@ def record_pipeline_event(
             and (current - previous).total_seconds() < max(0.0, throttle_seconds)
         ):
             return False
+        _append_jsonl(
+            pipeline_history_path(date),
+            {
+                "ts": current.isoformat(),
+                "event": str(event).upper(),
+                "source": source,
+                "detail": dict(detail or {}),
+            },
+        )
         if key:
             _last_pipeline_event[key] = current
-    _append_jsonl(
-        pipeline_history_path(date),
-        {
-            "ts": current.isoformat(),
-            "event": str(event).upper(),
-            "source": source,
-            "detail": dict(detail or {}),
-        },
-    )
     return True
 
 
@@ -400,11 +356,6 @@ def _snapshot_contracts(snapshots: Mapping[str, Any]) -> list[dict[str, Any]]:
                             )
                             if peak > 0:
                                 contract["sessionPeak"] = round(peak, 4)
-                                if premium > 0 and premium < peak:
-                                    contract["offHighMovePct"] = round(
-                                        ((peak - premium) / peak) * 100.0,
-                                        2,
-                                    )
                     except Exception:
                         pass
                 alert = alert_by_key.get(key)
@@ -638,27 +589,27 @@ def record_market_observations(
             and (current - previous).total_seconds() < interval
         ):
             return 0
+        _append_jsonl(
+            premium_tape_path(date),
+            {
+                "ts": current.isoformat(),
+                "source": source,
+                "volumeReliable": source != "ws_entry_scan",
+                "contracts": contracts,
+            },
+        )
+        if bool(getattr(settings, "radar_alerts_tape_enabled", True)):
+            alerts = _snapshot_alerts(snapshots)
+            if alerts:
+                _append_jsonl(
+                    alerts_tape_path(date),
+                    {
+                        "ts": current.isoformat(),
+                        "source": source,
+                        "alerts": alerts,
+                    },
+                )
         _last_tape_sample[sample_key] = current
-    _append_jsonl(
-        premium_tape_path(date),
-        {
-            "ts": current.isoformat(),
-            "source": source,
-            "volumeReliable": source != "ws_entry_scan",
-            "contracts": contracts,
-        },
-    )
-    if bool(getattr(settings, "radar_alerts_tape_enabled", True)):
-        alerts = _snapshot_alerts(snapshots)
-        if alerts:
-            _append_jsonl(
-                alerts_tape_path(date),
-                {
-                    "ts": current.isoformat(),
-                    "source": source,
-                    "alerts": alerts,
-                },
-            )
     record_pipeline_event(
         "PREMIUM_SAMPLE_WRITTEN",
         source=source,
@@ -1076,7 +1027,6 @@ def _causal_selected_keys(
     """Return archived contracts selected after their first retained detection."""
     selected: set[str] = set()
     event_count = 0
-    drain_deferred_funnel_rows()
     for event in _read_jsonl(funnel_path(date)):
         if str(event.get("event") or "").upper() != "SELECTED":
             continue
@@ -1287,8 +1237,7 @@ def record_funnel_state(
     current = _aware(now)
     date = current.strftime("%Y-%m-%d")
     dedupe_seconds = max(1, int(settings.radar_funnel_dedupe_seconds))
-    drain_deferred_funnel_rows()
-    lines: list[str] = []
+    written = 0
     with _lock:
         for raw in skipped:
             row = dict(raw)
@@ -1313,7 +1262,8 @@ def record_funnel_state(
             previous = _last_funnel_event.get(signature)
             if previous and (current - previous).total_seconds() < dedupe_seconds:
                 continue
-            lines.append(json.dumps(
+            _append_jsonl(
+                funnel_path(date),
                 {
                     "ts": current.isoformat(),
                     "key": key,
@@ -1329,12 +1279,10 @@ def record_funnel_state(
                     "score": row.get("score"),
                     "tier": row.get("tier"),
                 },
-                default=str,
-                separators=(",", ":"),
-            ))
+            )
             _last_funnel_event[signature] = current
-    _append_jsonl_lines(funnel_path(date), lines)
-    return len(lines)
+            written += 1
+    return written
 
 
 def record_funnel_gate_block(
@@ -1366,23 +1314,21 @@ def record_funnel_gate_block(
         previous = _last_funnel_event.get(signature)
         if previous and (current - previous).total_seconds() < dedupe_seconds:
             return False
+        _append_jsonl(
+            funnel_path(date),
+            {
+                "ts": current.isoformat(),
+                "key": key,
+                "event": "GATED",
+                "symbol": sym,
+                "side": sd,
+                "strike": stk,
+                "stage": stage,
+                "cycleId": cycle_id,
+                "reason": reason_s,
+            },
+        )
         _last_funnel_event[signature] = current
-    row = {
-        "ts": current.isoformat(),
-        "key": key,
-        "event": "GATED",
-        "symbol": sym,
-        "side": sd,
-        "strike": stk,
-        "stage": stage,
-        "cycleId": cycle_id,
-        "reason": reason_s,
-    }
-    # The selector runs on the event loop; file I/O there is what froze it.
-    if _on_event_loop_thread():
-        _defer_funnel_row(date, row)
-    else:
-        _append_jsonl(funnel_path(date), row)
     return True
 
 
@@ -1408,11 +1354,11 @@ def record_funnel_event(
             previous = _last_funnel_event.get(signature)
             if previous and (current - previous).total_seconds() < dedupe_seconds:
                 return False
+            _append_jsonl(
+                funnel_path(target_date),
+                {"ts": current.isoformat(), **row},
+            )
             _last_funnel_event[signature] = current
-        _append_jsonl(
-            funnel_path(target_date),
-            {"ts": current.isoformat(), **row},
-        )
         return True
     payload = {
         "ts": current.isoformat(),
@@ -1426,7 +1372,6 @@ def build_funnel_report(date: str) -> dict[str, Any]:
     from app.services import trade_store
 
     radars = read_archive_entries(date)
-    drain_deferred_funnel_rows()
     blocked_rows = _read_jsonl(funnel_path(date))
     trades = list((trade_store.get_day_detail(date) or {}).get("trades") or [])
     blockers: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -1649,11 +1594,7 @@ def _prune_learning_files(
     protect_dates: frozenset[str] | None = None,
 ) -> None:
     current = _aware(now)
-    settings = get_settings()
-    retention_days = max(
-        1,
-        int(getattr(settings, "radar_telemetry_retention_days", 7) or 7),
-    )
+    retention_days = max(1, int(get_settings().radar_archive_retention_days))
     cutoff = current.date() - timedelta(days=retention_days)
     protected = protect_dates or frozenset()
     for path in _telemetry_dir().glob("*.jsonl"):
@@ -1744,26 +1685,11 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
         pipeline_file = pipeline_history_path(date)
         if pipeline_file.exists():
             artifacts["pipeline_history.jsonl"] = _read_bytes_locked(pipeline_file)
-    drain_deferred_funnel_rows()
     funnel_file = funnel_path(date)
     if funnel_file.exists():
         artifacts["funnel_events.jsonl"] = _read_bytes_locked(funnel_file)
     tape_present = tape.exists()
-    try:
-        from app.services.trade_store import finalize_daily_trades_archive, get_day_detail
-
-        day_detail = get_day_detail(date)
-        artifacts["session_trades.json"] = json.dumps(day_detail, indent=2, default=str)
-    except Exception as exc:
-        logger.warning("Failed to bundle session trades into radar ZIP for %s: %s", date, exc)
     path = add_archive_artifacts(date, artifacts)
-    trade_archive: dict[str, Any] = {}
-    try:
-        from app.services.trade_store import finalize_daily_trades_archive
-
-        trade_archive = finalize_daily_trades_archive(date)
-    except Exception as exc:
-        logger.warning("Daily trade archive failed for %s: %s", date, exc)
     tape_bundled = False
     try:
         with zipfile.ZipFile(path, "r") as archive:
@@ -1822,7 +1748,6 @@ def _finalize_daily_review_unlocked(date: str) -> dict[str, Any]:
         "analysisOnly": analysis_only,
         "premiumTapeBundled": tape_bundled,
         "purgedTelemetry": purged,
-        "tradeArchive": trade_archive,
     }
 
 
