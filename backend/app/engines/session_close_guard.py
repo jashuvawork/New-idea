@@ -1,4 +1,4 @@
-"""Force-flat open live / live-parity legs at the 15:30 IST session close."""
+"""Force-flat open live / live-parity legs at the 15:45 IST broker last print."""
 
 from __future__ import annotations
 

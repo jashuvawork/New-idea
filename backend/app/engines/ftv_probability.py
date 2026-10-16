@@ -104,9 +104,13 @@ def normalize_candles(rows: Iterable[Any]) -> list[dict[str, Any]]:
 
 
 def _market_candles(candles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from app.config import get_settings
+
+    settings = get_settings()
+    end = int(settings.power_hour_end_hour) * 60 + int(settings.power_hour_end_minute)
     return [
         candle for candle in candles
-        if 9 * 60 + 15 <= candle["ts"].hour * 60 + candle["ts"].minute <= 15 * 60 + 30
+        if 9 * 60 + 15 <= candle["ts"].hour * 60 + candle["ts"].minute <= end
     ]
 
 
