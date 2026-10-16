@@ -33,7 +33,7 @@ def _runner_trade(entry=68.0, best=0.0):
         id="r", symbol="SENSEX", side=Side.CALL, strike=77600.0,
         entryPremium=entry, currentPremium=entry, lots=10,
         strategyType=StrategyType.EXPLOSIVE,
-        openedAt=datetime.now(IST) - timedelta(seconds=120),
+        openedAt=datetime.now(IST) - timedelta(seconds=600),
         bestPnlPoints=best, entryContext=ctx,
     )
 
