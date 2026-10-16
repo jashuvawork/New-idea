@@ -1054,6 +1054,42 @@ def _hold_seconds(trade: PaperTrade) -> float:
     return (datetime.now(IST) - opened.astimezone(IST)).total_seconds()
 
 
+def _seconds_since_peak(trade: PaperTrade) -> Optional[float]:
+    """Age of the last new high. None when the trade never stamped a peak time."""
+    peak_at = getattr(trade, "maxLtpAt", None)
+    if peak_at is None:
+        raw = (trade.entryContext or {}).get("maxLtpAt")
+        if isinstance(raw, str) and raw:
+            try:
+                peak_at = datetime.fromisoformat(raw)
+            except ValueError:
+                peak_at = None
+    if peak_at is None or not isinstance(peak_at, datetime):
+        return None
+    if peak_at.tzinfo is None:
+        peak_at = peak_at.replace(tzinfo=IST)
+    return (datetime.now(IST) - peak_at.astimezone(IST)).total_seconds()
+
+
+def _green_profit_hold_ready(
+    trade: PaperTrade,
+    hold_seconds: float,
+    settings: Any,
+) -> bool:
+    """True once a winner has been open long enough and the high is no longer fresh."""
+    if hold_seconds < _cfg_float(settings, "unified_profit_ladder_min_hold_seconds", 180.0):
+        return False
+    min_after_peak = _cfg_float(
+        settings, "unified_profit_ladder_min_seconds_after_peak", 180.0
+    )
+    if min_after_peak <= 0:
+        return True
+    since_peak = _seconds_since_peak(trade)
+    if since_peak is None:
+        return True
+    return since_peak + 1e-6 >= min_after_peak
+
+
 def _armed_base_expires_at_iso(trade: PaperTrade) -> str:
     ctx = trade.entryContext or {}
     iso = str(ctx.get("armedBaseExpiresAt") or "")
@@ -2030,6 +2066,8 @@ def peak_velocity_reversal_keep_reason(
 
     if _defer_peak_velocity_reversal_for_elite_runner(trade, best=best, settings=settings):
         return None
+    if not _green_profit_hold_ready(trade, _hold_seconds(trade), settings):
+        return None
 
     if _peak_fade_bullish_continuation(trade, pnl_pts=pnl_pts, settings=settings):
         return None
@@ -2176,7 +2214,7 @@ def unified_profit_ladder_exit_reason(
 
     if pnl_pts > floor_pts + 1e-6:
         return None
-    if hold_seconds < _cfg_float(settings, "unified_profit_ladder_min_hold_seconds", 60.0):
+    if not _green_profit_hold_ready(trade, hold_seconds, settings):
         return None
     return f"explosion_profit_ladder_{layer}"
 
@@ -2527,7 +2565,7 @@ def evaluate_explosion_exit(
         else None
     )
     min_pct_best = _cfg_float(settings, "ftv_runner_pct_trail_min_best_points", 6.0)
-    stage_min_hold = _cfg_float(settings, "explosion_stage_trail_min_hold_seconds", 90.0)
+    stage_min_hold = _cfg_float(settings, "explosion_stage_trail_min_hold_seconds", 180.0)
     ctx_stage = trade.entryContext or {}
     if ctx_stage.get("vBaseFtvRunner") or ctx_stage.get("eliteRunnerExitBundle"):
         stage_min_hold = max(
@@ -2539,6 +2577,7 @@ def evaluate_explosion_exit(
         and best >= min_pct_best
         and pnl_pts <= pct_keep_floor
         and hold >= stage_min_hold
+        and _green_profit_hold_ready(trade, hold, settings)
     ):
         # Aug28 24100 PE: peaked +31pt, faded to +10 — stage_armed waits for +45pt
         # so the 75% peak-keep floor must exit even before stage 1 completes.
