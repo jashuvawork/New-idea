@@ -160,3 +160,43 @@ def test_oct_paper_session_first_lift_waives_open_side_before_index_confirms(sid
             )
     assert blocked is False
     assert meta.get("openSideWaived") == "oct_paper_session_first_lift"
+
+
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+def test_oct_paper_session_first_lift_waives_at_91540_not_late(side):
+    """First lift at stamp — not blocked for 1m open-side wait."""
+    s = settings_mock(
+        october_frozen_profile_enabled=True,
+        live_paper_parity_enabled=True,
+        oct_paper_replica_enabled=True,
+        open_side_confirmation_enabled=True,
+        open_side_confirmation_min_minutes=1.0,
+    )
+    snap = _tape("NIFTY", open_=22300.0, hi=22310.0, lo=22290.0, last=22300.0)
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 90.0,
+        "side": side.value,
+        "localBaseMovePct": 13.0,
+        "armedBaseLaunch": True,
+        "sessionRangePosition": 0.4,
+        "velocity3s": 5.0,
+    }
+    if side == Side.CALL:
+        alert["offLowMovePct"] = 8.0
+    else:
+        alert["drawdownFromHighPct"] = 8.0
+    with patch("app.engines.session_timing.in_open_premium_window", return_value=True):
+        if side == Side.PUT:
+            with patch(
+                "app.engines.put_slide_ce_mirror.put_slide_pad_context", return_value=True,
+            ):
+                blocked, reason, meta = open_side_confirmation(
+                    "NIFTY", side, snap, now=_at(9, 15, 40), settings=s, alert=alert,
+                )
+        else:
+            blocked, reason, meta = open_side_confirmation(
+                "NIFTY", side, snap, now=_at(9, 15, 40), settings=s, alert=alert,
+            )
+    assert blocked is False
+    assert meta.get("openSideWaived") == "oct_paper_session_first_lift"

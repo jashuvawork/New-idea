@@ -2734,6 +2734,9 @@ def find_best_entry(
         from app.engines.explosion_confidence import missed_explosion_rank_bonus
 
         bonus += missed_explosion_rank_bonus(c, c.snap)
+        from app.engines.live_paper_parity import oct_paper_open_ce_first_lift_rank_bonus
+
+        bonus += oct_paper_open_ce_first_lift_rank_bonus(c, settings=settings)
         breadth_bias = (c.snap.breadth.bias if c.snap.breadth else "NEUTRAL") or "NEUTRAL"
         if c.mode == "explosion":
             from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass

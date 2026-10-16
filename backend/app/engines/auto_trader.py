@@ -4713,7 +4713,37 @@ async def process(
                     )
                     continue
 
-                if explosion_early_ok and not entries_ok and best.mode != "explosion":
+                from app.engines.live_paper_parity import (
+                    enrich_alert_for_oct_paper_exec,
+                    oct_paper_replica_active,
+                )
+                from app.engines.session_timing import (
+                    oct_paper_first_lift_entry_allowed_for_candidate,
+                )
+
+                _open_alert = (
+                    best.alert if isinstance(getattr(best, "alert", None), dict) else {}
+                )
+                if oct_paper_replica_active(settings):
+                    enriched = enrich_alert_for_oct_paper_exec(
+                        _open_alert,
+                        snap=best.snap or snapshots.get(best.symbol),
+                        event=getattr(best, "explosion_event", None),
+                    )
+                    best.alert = enriched
+                    _open_alert = enriched
+
+                first_lift_early, _first_lift_early_reason = (
+                    oct_paper_first_lift_entry_allowed_for_candidate(
+                        _open_alert, settings=settings,
+                    )
+                )
+                if (
+                    explosion_early_ok
+                    and not entries_ok
+                    and best.mode != "explosion"
+                    and not first_lift_early
+                ):
                     skipped.append(
                         {
                             "symbol": best.symbol,
@@ -4725,9 +4755,6 @@ async def process(
                     break
                 from app.engines.open_side_confirmation import open_side_confirmation
 
-                _open_alert = (
-                    best.alert if isinstance(getattr(best, "alert", None), dict) else None
-                )
                 open_blocked, open_reason, open_meta = open_side_confirmation(
                     best.symbol,
                     best.side,

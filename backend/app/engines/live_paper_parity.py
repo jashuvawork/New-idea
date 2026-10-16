@@ -161,13 +161,24 @@ def oct_paper_first_lift_small_lift_context(
         if not location_ok:
             location_ok = bool(oct1_open_moment_pad_waived(side, evidence, settings=s)[0])
         if not location_ok:
-            try:
-                from app.engines.session_timing import in_open_premium_window
+            session_lane = oct_paper_session_first_lift_lane_active(
+                evidence, settings=s,
+            )
+            pad_lift = (
+                launch
+                and min_move <= local <= max_move + 1e-6
+                and not chase_blocked
+            )
+            if session_lane and pad_lift:
+                pass
+            else:
+                try:
+                    from app.engines.session_timing import in_open_premium_window
 
-                if not in_open_premium_window():
+                    if not in_open_premium_window():
+                        return False
+                except Exception:
                     return False
-            except Exception:
-                return False
 
     if local <= 0 and session_pad:
         local = min_move
@@ -330,9 +341,14 @@ def oct_paper_elite_rip_context(
     except Exception:
         return True
 
-    # After 09:45: same pad policy as #721/#722 first-lift (all session), not a separate chase lane.
+    # After 09:45: session first-lift lane — pad lift is not “late”; chase_core blocks extremes.
     if oct_paper_first_lift_small_lift_context(evidence, settings=s):
         return True
+    lane_chase = _oct_paper_session_lane_pad_chase_ok(evidence, settings=s)
+    if lane_chase is True:
+        return True
+    if lane_chase is False:
+        return False
 
     side = str(evidence.get("side") or "").upper()
     local = _parity_number(evidence.get("localBaseMovePct"))
@@ -577,10 +593,17 @@ def _oct_paper_oct1_index_moment_location_ok(
     in_oct1_band = local >= min_oct1 - 1e-6 and local <= local_cap + 1e-6
 
     if side == "CALL":
+        from app.engines.open_rip_selector import open_rip_elite_structural_evidence
+
         off_low = _parity_number(evidence.get("offLowMovePct"))
         min_off = float(
             getattr(settings, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
         )
+        structural_pad = open_rip_elite_structural_evidence(evidence) or _oct_paper_structural_launch_flags(
+            evidence,
+        )
+        if structural_pad and in_oct1_band:
+            return True
         if in_oct1_band and off_low >= min_off - 1e-6:
             return True
         if in_oct1_band and open_win:
@@ -664,6 +687,53 @@ def oct_open_session_first_lift_lane_active(
 ) -> bool:
     """Backward-compatible alias — Oct 1 lane is all-session under paper replica."""
     return oct_paper_session_first_lift_lane_active(evidence, settings=settings)
+
+
+def _oct_paper_session_lane_pad_chase_ok(
+    evidence: Mapping[str, Any],
+    *,
+    settings: Any,
+) -> bool | None:
+    """
+    Session first-lift lane: pad lift off local base is not “late” vs session range position.
+
+    Returns None when this helper does not apply; True/False when lane decides rip/chase.
+    """
+    if not oct_paper_session_first_lift_lane_active(evidence, settings=settings):
+        return None
+    if not _oct_paper_structural_launch_flags(evidence):
+        return None
+    if not _oct_paper_local_base_in_first_lift_band(evidence, settings=settings):
+        return None
+    side = str(evidence.get("side") or "").upper()
+    pos_raw = evidence.get("sessionRangePosition")
+    if pos_raw is None or str(pos_raw).strip() == "":
+        return True
+    pos = _parity_number(pos_raw)
+    dd = _parity_number(evidence.get("drawdownFromHighPct"))
+    dd_present = (
+        evidence.get("drawdownFromHighPct") is not None
+        and str(evidence.get("drawdownFromHighPct")).strip() != ""
+    )
+    from app.engines.oct1_pad_location import oct1_premium_location_chase_core
+
+    chase_blocked, chase_reason = oct1_premium_location_chase_core(
+        side,
+        pos,
+        dd,
+        evidence,
+        settings=settings,
+        dd_present=dd_present,
+    )
+    if not chase_blocked:
+        return True
+    if chase_reason == "live_oct1_chase_at_session_high":
+        return False
+    if chase_reason == "live_oct1_chase_session_range_high":
+        return True
+    if chase_reason == "live_oct1_put_chase_at_session_low":
+        return False
+    return False
 
 
 def _oct_paper_open_session_chase_blocks(
@@ -792,6 +862,11 @@ def oct_paper_base_first_lift_take_allowed(
     if not _oct_paper_base_lift_evidence(evidence, settings=s, readiness_reason=rr):
         return False
     if oct_paper_session_first_lift_lane_active(evidence, settings=s):
+        lane_chase = _oct_paper_session_lane_pad_chase_ok(evidence, settings=s)
+        if lane_chase is True:
+            return True
+        if lane_chase is False:
+            return False
         return not _oct_paper_open_session_chase_blocks(evidence, settings=s)
     return not _oct_paper_premium_chase_blocks(evidence, settings=s)
 
@@ -1186,6 +1261,49 @@ def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
             getattr(s, "live_paper_parity_max_session_range_position", 0.52) or 0.52
         ),
     }
+
+
+def oct_paper_open_ce_first_lift_rank_bonus(
+    candidate: Any,
+    *,
+    settings: Any = None,
+) -> float:
+    """
+    Open window tie-break: when NIFTY/SENSEX is already off session low, prefer CE
+    session first-lift over opposite-side ELITE at the same score band.
+    """
+    s = settings or get_settings()
+    if not oct_paper_replica_active(s):
+        return 0.0
+    try:
+        from app.engines.session_timing import in_open_premium_window
+
+        if not in_open_premium_window():
+            return 0.0
+    except Exception:
+        return 0.0
+    side = getattr(candidate, "side", None)
+    side_v = (
+        side.value
+        if hasattr(side, "value")
+        else str(side or "").upper()
+    )
+    if side_v != "CALL":
+        return 0.0
+    alert = getattr(candidate, "alert", None)
+    if not isinstance(alert, dict):
+        return 0.0
+    if not oct_paper_session_first_lift_lane_active(alert, settings=s):
+        return 0.0
+    off_low = _parity_number(alert.get("offLowMovePct"))
+    min_off = float(
+        getattr(s, "live_paper_parity_min_off_session_low_pct", 6.0) or 6.0
+    )
+    if off_low >= min_off - 1e-6:
+        return float(
+            getattr(s, "oct_paper_open_ce_first_lift_rank_bonus", 12.0) or 12.0
+        )
+    return 0.0
 
 
 def should_use_live_broker_capital_for_summary(settings: Any) -> bool:

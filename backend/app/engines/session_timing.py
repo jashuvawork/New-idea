@@ -1,6 +1,9 @@
 """IST session entry window — avoid first-minute open chaos."""
 
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Any, Mapping, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
@@ -37,6 +40,46 @@ def entries_allowed_now() -> tuple[bool, str]:
         label = f"{settings.entry_earliest_hour:02d}:{settings.entry_earliest_minute:02d}"
         return False, f"before_entry_window_{label}_IST"
     return True, "ok"
+
+
+def oct_paper_first_lift_entry_allowed_for_candidate(
+    alert: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """
+    Oct 1 replica: ELITE/EXPLODING session first-lift may enter 09:15–09:16 IST
+    even when ``best.mode`` is not ``explosion`` (pad lift is not “wait until 09:16”).
+    """
+    settings = settings or get_settings()
+    if get_market_phase() != "LIVE_MARKET":
+        return False, "market_not_live"
+    current = _minutes_now()
+    explosion_start = (
+        settings.explosion_entry_earliest_hour * 60
+        + settings.explosion_entry_earliest_minute
+    )
+    general_start = (
+        int(getattr(settings, "entry_earliest_hour", 9)) * 60
+        + int(getattr(settings, "entry_earliest_minute", 20))
+    )
+    if current < explosion_start or current >= general_start:
+        return False, ""
+    if not isinstance(alert, dict):
+        return False, "no_alert"
+    from app.engines.live_paper_parity import (
+        oct_paper_replica_active,
+        oct_paper_session_first_lift_lane_active,
+    )
+
+    if not oct_paper_replica_active(settings):
+        return False, ""
+    tier = str(alert.get("tier") or alert.get("signalTier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False, ""
+    if oct_paper_session_first_lift_lane_active(alert, settings=settings):
+        return True, "oct_paper_first_lift_open_minute"
+    return False, ""
 
 
 def explosion_entries_allowed_now() -> tuple[bool, str]:

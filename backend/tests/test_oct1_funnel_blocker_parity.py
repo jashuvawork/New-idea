@@ -409,6 +409,65 @@ def test_oct1_all_session_first_lift_lane_matches_eod_trades(
             assert oct_paper_base_first_lift_take_allowed(alert, settings=s) is True
 
 
+@pytest.mark.parametrize("side", ["CALL", "PUT"])
+def test_post_open_window_first_lift_not_late_chase(side):
+    """After 09:45, pad lift with high session range position is not auto-rejected."""
+    from app.engines.live_paper_parity import (
+        oct_paper_base_first_lift_take_allowed,
+        oct_paper_elite_rip_context,
+        oct_paper_session_first_lift_lane_active,
+    )
+
+    s = _replica()
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 92.0,
+        "side": side,
+        "localBaseMovePct": 12.0,
+        "sessionRangePosition": 0.62,
+        "armedBaseLaunch": True,
+        "velocity3s": 5.0,
+        "drawdownFromHighPct": 18.0,
+    }
+    if side == "CALL":
+        alert["offLowMovePct"] = 3.0
+        alert["drawdownFromHighPct"] = -12.0
+    with patch("app.engines.session_timing.in_open_premium_window", return_value=False):
+        if side == "PUT":
+            with patch(
+                "app.engines.put_slide_ce_mirror.put_slide_pad_context", return_value=True
+            ):
+                assert oct_paper_session_first_lift_lane_active(alert, settings=s) is True
+                assert oct_paper_elite_rip_context(alert, settings=s) is True
+                assert oct_paper_base_first_lift_take_allowed(alert, settings=s) is True
+        else:
+            assert oct_paper_session_first_lift_lane_active(alert, settings=s) is True
+            assert oct_paper_elite_rip_context(alert, settings=s) is True
+            assert oct_paper_base_first_lift_take_allowed(alert, settings=s) is True
+
+
+def test_session_timing_oct_paper_first_lift_open_minute():
+    from app.engines.session_timing import oct_paper_first_lift_entry_allowed_for_candidate
+
+    s = _replica(entry_earliest_hour=9, entry_earliest_minute=16)
+    alert = {
+        "tier": "ELITE",
+        "explosionScore": 90.0,
+        "side": "CALL",
+        "localBaseMovePct": 13.0,
+        "offLowMovePct": 8.0,
+        "sessionRangePosition": 0.4,
+        "velocity3s": 5.0,
+    }
+    with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
+        with patch("app.engines.session_timing._minutes_now", return_value=9 * 60 + 15):
+            ok, reason = oct_paper_first_lift_entry_allowed_for_candidate(
+                alert, settings=s,
+            )
+            assert ok is True, reason
+            assert reason == "oct_paper_first_lift_open_minute"
+
+
 def test_replica_skips_put_index_pin_block():
     s = _replica(index_pin_put_block_enabled=True)
     event = MagicMock(side=Side.PUT)
