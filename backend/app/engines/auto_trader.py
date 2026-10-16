@@ -113,6 +113,9 @@ from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
 from app.services.order_executor import (
     find_existing_exit_order,
+    live_order_fill,
+    live_order_fill_complete,
+    live_order_fill_rejected,
     place_entry_order,
     place_exit_order,
 )
@@ -3085,6 +3088,14 @@ async def _open_from_candidate(
                     "lotSize": order.get("lot_size", lot_mult),
                     "brokerSimulated": False,
                 })
+                entry_fill = await live_order_fill(client, str(order.get("order_id") or ""))
+                if live_order_fill_complete(entry_fill):
+                    fill_premium = round(float(entry_fill["averagePrice"]), 2)
+                    slip_meta = dict(slip_meta or {})
+                    slip_meta["signalPremium"] = round(float(signal_premium), 2)
+                    slip_meta["fillPremium"] = fill_premium
+                    ctx_extra["slippage"] = slip_meta
+                    ctx_extra["brokerEntryFillPremium"] = fill_premium
                 state.liveOrdersPlaced += 1
             else:
                 order = await simulate_entry_order(
@@ -3392,6 +3403,23 @@ async def _process_open_trades(
             continue
 
         broker_ctx = dict(trade.entryContext or {})
+        is_live_book = settings.enable_live_trading and settings.auto_trading_enabled
+        if (
+            is_live_book
+            and client is not None
+            and broker_ctx.get("brokerOrderId")
+            and not broker_ctx.get("brokerEntryFillPremium")
+            and not broker_ctx.get("brokerSimulated")
+        ):
+            entry_fill = await live_order_fill(client, str(broker_ctx["brokerOrderId"]))
+            if live_order_fill_complete(entry_fill):
+                bought = round(float(entry_fill["averagePrice"]), 2)
+                trade.entryPremium = bought
+                broker_ctx["brokerEntryFillPremium"] = bought
+                slip = dict(broker_ctx.get("slippage") or {})
+                slip["fillPremium"] = bought
+                broker_ctx["slippage"] = slip
+                trade.entryContext = broker_ctx
         raw_ltp = resolve_trade_premium(
             snap, trade.strike, trade.side, broker_ctx.get("instrumentKey"),
         )
@@ -3445,11 +3473,32 @@ async def _process_open_trades(
         update_live_chart_trail(trade, snap)
         plan_dict = (trade.entryContext or {}).get("exitPlan") or plan_dict
         exit_reason, pnl = None, 0.0
+        if is_live_book and client is not None and broker_ctx.get("brokerExitOrderId"):
+            pending_fill = await live_order_fill(client, str(broker_ctx["brokerExitOrderId"]))
+            if live_order_fill_rejected(pending_fill):
+                broker_ctx.pop("brokerExitOrderId", None)
+                broker_ctx.pop("brokerExitReason", None)
+                trade.entryContext = broker_ctx
+                trade.exitReason = None
+            elif live_order_fill_complete(pending_fill):
+                eval_premium = round(float(pending_fill["averagePrice"]), 2)
+                _pts, pnl = mark_to_market(
+                    trade.entryPremium, eval_premium, trade.lots, lot_mult,
+                )
+                exit_reason = str(
+                    broker_ctx.get("brokerExitReason") or trade.exitReason or "live_broker_fill"
+                )
+                trade.currentPremium = eval_premium
+                broker_ctx["brokerExitFillPremium"] = eval_premium
+                trade.entryContext = broker_ctx
+            else:
+                continue
         from app.engines.session_close_guard import live_session_close_force_exit
 
-        session_close = live_session_close_force_exit(trade, eval_premium, lot_mult)
-        if session_close:
-            exit_reason, pnl = session_close
+        if not exit_reason:
+            session_close = live_session_close_force_exit(trade, eval_premium, lot_mult)
+            if session_close:
+                exit_reason, pnl = session_close
 
         if not exit_reason and settings.edge_engine_enabled:
             edge_exit, edge_pnl = check_edge_realtime_exit(
@@ -3568,6 +3617,27 @@ async def _process_open_trades(
                         if existing_exit_id
                         else await place_exit_order(client, trade)
                     )
+                    sell_fill = await live_order_fill(
+                        client, str(exit_result.get("order_id") or ""),
+                    )
+                    broker_ctx["brokerExitReason"] = exit_reason
+                    broker_ctx["brokerExitMarkPremium"] = round(float(eval_premium), 2)
+                    if live_order_fill_complete(sell_fill):
+                        eval_premium = round(float(sell_fill["averagePrice"]), 2)
+                        _pts, pnl = mark_to_market(
+                            trade.entryPremium, eval_premium, trade.lots, lot_mult,
+                        )
+                        trade.currentPremium = eval_premium
+                        broker_ctx["brokerExitFillPremium"] = eval_premium
+                    else:
+                        broker_ctx["brokerExitOrderId"] = exit_result.get("order_id")
+                        broker_ctx["brokerExitSimulated"] = False
+                        trade.entryContext = broker_ctx
+                        trade.exitReason = exit_reason
+                        trade_store.record_trade_mark(trade)
+                        state.liveOrdersPlaced += 1
+                        _release_exit_claim(trade.id, exit_claim)
+                        continue
                 else:
                     exit_result = await simulate_exit_order(client, trade, current)
                     sim_fill = exit_result.get("fill_premium", eval_premium)
@@ -3606,7 +3676,7 @@ async def _process_open_trades(
             except Exception:
                 _release_exit_claim(trade.id, exit_claim)
                 raise
-        elif should_simulate_slippage(trade):
+        elif should_simulate_slippage(trade) and not broker_ctx.get("brokerExitFillPremium"):
             pnl = finalize_closed_pnl_inr(
                 pnl,
                 entry_premium=trade.entryPremium,
