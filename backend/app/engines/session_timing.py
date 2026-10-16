@@ -40,7 +40,7 @@ def entries_allowed_now() -> tuple[bool, str]:
 
 
 def explosion_entries_allowed_now() -> tuple[bool, str]:
-    """9:15–09:20 IST — explosion-only window before general entries."""
+    """9:16–09:20 IST — explosion-only window before general entries."""
     settings = get_settings()
     if not settings.explosion_open_entry_enabled:
         return False, "explosion_open_entry_disabled"

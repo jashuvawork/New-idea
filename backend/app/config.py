@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     shadow_trade_all_signals: bool = True
     # Live: skip INR force-stops / scratch exits — let open trades hit structural SL.
     live_hold_to_structural_sl: bool = True
-    # Live / paper-live parity: flatten all open legs at power_hour_end (default 15:30 IST).
+    # Live / paper-live parity: flatten all open legs at power_hour_end (15:45 IST, broker last print).
     live_session_close_force_exit_enabled: bool = True
     # Open-trade MTM: reject WS/REST spike glitches vs entry, heatmap, and tick median.
     open_trade_ltp_sanity_enabled: bool = True
@@ -2278,12 +2278,12 @@ class Settings(BaseSettings):
     expiry_evening_block_enabled: bool = True
     expiry_evening_block_hour: int = 15
     expiry_evening_block_minute: int = 0
-    # Power hour on all sessions — only top trades after 15:00 until 15:30 close.
+    # Power hour on all sessions — only top trades after 15:00 until the 15:45 last print.
     power_hour_top_only_enabled: bool = True
     power_hour_start_hour: int = 15
     power_hour_start_minute: int = 0
     power_hour_end_hour: int = 15
-    power_hour_end_minute: int = 30
+    power_hour_end_minute: int = 45
     expiry_min_rank_score: float = 62.0
     expiry_cheap_premium_threshold_inr: float = 55.0
     expiry_cheap_premium_lot_cap: int = 55
@@ -2955,6 +2955,12 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
+    # 09:16 → 09:45: side must match today's index tape. The first minute (09:15)
+    # is blocked so a blind open print cannot pick the wrong side (Oct 13 22300 PE).
+    open_side_confirmation_enabled: bool = True
+    open_side_confirmation_min_minutes: float = 1.0
+    open_side_confirmation_min_index_move_pct: float = 0.10
+    open_side_confirmation_min_range_position: float = 0.6
     open_caution_min_explosion_score: int = 45
     open_caution_score_bonus: int = 0
     open_caution_min_rank_score: float = 55.0
@@ -3026,10 +3032,11 @@ class Settings(BaseSettings):
     premium_led_counter_breadth_min_score: float = 90.0
     premium_led_elite_counter_min_score: float = 90.0
     premium_led_explosion_bypass_enabled: bool = True
-    # Explosion-only entries from 9:15 — catch open premium rips before 9:20 general window
+    # Explosion-only entries from 9:16 — one minute of today's tape before the first order.
+    # Oct 1's first fill was 09:31. The 09:15:37 Oct 13 NIFTY 22300 PE was the wrong-side loss.
     explosion_open_entry_enabled: bool = True
     explosion_entry_earliest_hour: int = 9
-    explosion_entry_earliest_minute: int = 15
+    explosion_entry_earliest_minute: int = 16
     # Open premium explosion — NIFTY PE 60→160 style gap rips at 9:15
     open_premium_explosion_enabled: bool = True
     open_premium_min_move_pct: float = 25.0

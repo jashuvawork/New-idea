@@ -186,7 +186,7 @@ def generate_rule_brief(context: dict[str, Any]) -> ComposerBrief:
     if expiry.get("eveningBlockActive"):
         stand_down = True
         risks.append("expiry_evening_theta_gamma")
-        actions.append("Expiry power hour: FTV/V/ELITE/explosives allowed until 15:30 close")
+        actions.append("Expiry power hour: FTV/V/ELITE/explosives allowed until the 15:45 last print")
 
     if expiry.get("worstDay"):
         risks.extend(expiry.get("worstDayReasons") or ["worst_expiry_day"])
