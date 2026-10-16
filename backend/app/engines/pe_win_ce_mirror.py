@@ -56,34 +56,6 @@ def _side_val(side: Any) -> str:
     return str(side or "").upper()
 
 
-def mirror_win_min_pnl_inr(side: str, *, settings: Any = None) -> float:
-    """Smallest trail-exit win that counts as a proved CE/PE capture for the mirror leg.
-
-    Capital-scaled so a real but modest win (Oct 7 SENSEX 72600 CE +₹542 on a ₹2L book)
-    still arms the opposite-side mirror and the post-win chase block. The fixed INR
-    setting stays an upper bound; the floor keeps scratch exits out.
-    """
-    settings = settings or get_settings()
-    key = (
-        "pe_win_ce_mirror_min_put_win_inr"
-        if str(side).upper() == "PUT"
-        else "ce_win_pe_mirror_min_call_win_inr"
-    )
-    fixed = float(getattr(settings, key, 1000.0) or 1000.0)
-    pct = float(getattr(settings, "mirror_win_min_capital_pct", 0.0) or 0.0)
-    if pct <= 0:
-        return fixed
-    capital = float(
-        getattr(settings, "max_sizing_capital_inr", 0)
-        or getattr(settings, "fallback_capital_inr", 0)
-        or 0
-    )
-    if capital <= 0:
-        return fixed
-    floor = float(getattr(settings, "mirror_win_min_floor_inr", 250.0) or 0.0)
-    return min(fixed, max(floor, capital * pct))
-
-
 def session_put_win_meta(
     state: Any = None,
     *,
@@ -94,7 +66,9 @@ def session_put_win_meta(
     if not bool(getattr(settings, "pe_win_ce_mirror_enabled", True)):
         return False, {}
 
-    min_pnl = mirror_win_min_pnl_inr("PUT", settings=settings)
+    min_pnl = float(
+        getattr(settings, "pe_win_ce_mirror_min_put_win_inr", 1000.0) or 1000.0
+    )
     trades = _collect_session_trades(state)
     put_wins: list[Any] = []
     for trade in trades:
@@ -155,7 +129,9 @@ def _seconds_since_last_put_win(state: Any, *, settings: Any = None) -> float | 
     if not pe_win:
         return None
     trades = _collect_session_trades(state)
-    min_pnl = mirror_win_min_pnl_inr("PUT", settings=settings)
+    min_pnl = float(
+        getattr(settings, "pe_win_ce_mirror_min_put_win_inr", 1000.0) or 1000.0
+    )
     latest: datetime | None = None
     for trade in trades:
         if str(
@@ -188,65 +164,6 @@ def _seconds_since_last_put_win(state: Any, *, settings: Any = None) -> float | 
     return max(0.0, (now - latest).total_seconds())
 
 
-def call_rally_unlock_put_opposite_blocked(
-    candidate: Any,
-    state: Any,
-    snapshots: dict[str, SymbolSnapshot],
-    *,
-    settings: Any = None,
-) -> tuple[bool, str, dict[str, Any]]:
-    """
-    Block PUT explosions on an index while CE rally unlock is armed (dominant RALLY).
-
-    Independent of the post-PUT-win chase window — Oct 1 SENSEX PUT @13:33 after
-    CE fade reject while index was still in rally unlock.
-    """
-    settings = settings or get_settings()
-    meta: dict[str, Any] = {}
-    if not bool(getattr(settings, "call_rally_unlock_block_opposite_put_enabled", True)):
-        return False, "ok", meta
-    if str(getattr(candidate, "mode", "") or "") != "explosion":
-        return False, "ok", meta
-    if _side_val(getattr(candidate, "side", None)) != "PUT":
-        return False, "ok", meta
-
-    sym = str(getattr(candidate, "symbol", "") or "").upper()
-    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
-    if snap is None or state is None:
-        return False, "ok", meta
-
-    armed, arm_reason, arm_meta = call_rally_entry_unlock_armed(
-        state, snap, sym, settings=settings,
-    )
-    meta.update(arm_meta)
-    if not armed:
-        return False, "ok", meta
-    meta["callRallyUnlockArmed"] = True
-    meta["callRallyUnlockReason"] = arm_reason
-
-    from app.engines.index_session_dominant_trend import (
-        index_session_dominant_trend,
-        side_aligns_with_dominant_trend,
-    )
-
-    dominant, trend_meta = index_session_dominant_trend(
-        sym, snap, state, settings=settings, track_flip=False,
-    )
-    meta["dominantTrend"] = dominant
-    meta.update(trend_meta)
-
-    if side_aligns_with_dominant_trend("PUT", dominant):
-        return False, "ok", meta
-
-    from app.engines.index_tick_helpers import index_trend_breakout
-
-    if index_trend_breakout(sym, "PUT", snap).get("breakout"):
-        meta["putSlideBreakout"] = True
-        return False, "ok", meta
-
-    return True, "call_rally_unlock_block_opposite_put", meta
-
-
 def pe_win_ce_mirror_put_chase_blocked(
     candidate: Any,
     state: Any,
@@ -264,21 +181,11 @@ def pe_win_ce_mirror_put_chase_blocked(
     meta: dict[str, Any] = {}
     if not bool(getattr(settings, "pe_win_ce_mirror_enabled", True)):
         return False, "ok", meta
+    if not bool(getattr(settings, "pe_win_ce_mirror_block_put_chase_enabled", True)):
+        return False, "ok", meta
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         return False, "ok", meta
     if _side_val(getattr(candidate, "side", None)) != "PUT":
-        return False, "ok", meta
-
-    rally_put_blocked, rally_put_reason, rally_put_meta = (
-        call_rally_unlock_put_opposite_blocked(
-            candidate, state, snapshots, settings=settings,
-        )
-    )
-    meta.update(rally_put_meta)
-    if rally_put_blocked:
-        return True, rally_put_reason, meta
-
-    if not bool(getattr(settings, "pe_win_ce_mirror_block_put_chase_enabled", True)):
         return False, "ok", meta
 
     elapsed = _seconds_since_last_put_win(state, settings=settings)
@@ -297,10 +204,15 @@ def pe_win_ce_mirror_put_chase_blocked(
         return False, "ok", meta
 
     sym = str(getattr(candidate, "symbol", "") or "").upper()
-    win_sym = str(pe_meta.get("putWinSymbol") or "").upper()
+    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
+    if snap is not None:
+        from app.engines.index_tick_helpers import index_trend_breakout
 
-    # Hard blocks before index_trend_breakout waiver — Oct 1 SENSEX PUT after NIFTY win
-    # was allowed when a local PUT "breakout" fired during the mirrored CE rally window.
+        if index_trend_breakout(sym, "PUT", snap).get("breakout"):
+            meta["putSlideBreakout"] = True
+            return False, "ok", meta
+
+    win_sym = str(pe_meta.get("putWinSymbol") or "").upper()
     if win_sym and sym != win_sym:
         return True, "pe_win_ce_mirror_block_cross_index_put", meta
 
@@ -315,14 +227,6 @@ def pe_win_ce_mirror_put_chase_blocked(
             meta["callLegArmedReason"] = reason
             meta.update(arm_meta)
             return True, "pe_win_ce_mirror_block_put_for_call_leg", meta
-
-    snap = snapshots.get(sym) or getattr(candidate, "snap", None)
-    if snap is not None and win_sym and sym == win_sym:
-        from app.engines.index_tick_helpers import index_trend_breakout
-
-        if index_trend_breakout(sym, "PUT", snap).get("breakout"):
-            meta["putSlideBreakout"] = True
-            return False, "ok", meta
 
     return True, "pe_win_ce_mirror_block_put_chase_window", meta
 
@@ -1450,7 +1354,7 @@ def pe_win_ce_mirror_premium_fade_bypass(
         settings=settings,
     ):
         return True
-    if call_rally_entry_unlock_fingerprint(
+    return call_rally_entry_unlock_fingerprint(
         ev,
         ranking,
         assessment,
@@ -1458,44 +1362,7 @@ def pe_win_ce_mirror_premium_fade_bypass(
         snap=snap,
         symbol=sym,
         settings=settings,
-    ):
-        return True
-    if call_rally_entry_unlock_armed(state, snap, sym, settings=settings)[0]:
-        tier = str(
-            (assessment or {}).get("eliteTier")
-            or (assessment or {}).get("tier")
-            or ev.get("tier")
-            or ""
-        ).upper()
-        return tier in ("ELITE", "EXPLODING", "BUILDING")
-    return False
-
-
-def ranked_allocation_rally_unlock_ce_waiver(
-    candidate: Any,
-    state: Any,
-    *,
-    settings: Any = None,
-) -> bool:
-    """Allow ranked sleeve for rally-unlocked ELITE CE without strict FTV ICT flags."""
-    settings = settings or get_settings()
-    if not bool(getattr(settings, "ftv_allocation_rally_unlock_ce_waiver_enabled", True)):
-        return False
-    if _side_val(getattr(candidate, "side", None)) != "CALL":
-        return False
-    if str(getattr(candidate, "mode", "") or "") != "explosion":
-        return False
-    snap = getattr(candidate, "snap", None)
-    if snap is None or state is None:
-        return False
-    sym = str(getattr(candidate, "symbol", "") or getattr(snap, "symbol", "") or "").upper()
-    if not call_rally_entry_unlock_armed(state, snap, sym, settings=settings)[0]:
-        return False
-    alert = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
-    tier = str(
-        alert.get("tier") or getattr(candidate, "tier", "") or ""
-    ).upper()
-    return tier in ("ELITE", "EXPLODING")
+    )
 
 
 def call_rally_entry_unlock_expiry_otm_bypass(

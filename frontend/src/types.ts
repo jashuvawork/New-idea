@@ -1133,8 +1133,6 @@ export interface DeploymentReadiness {
       latencyMode?: string;
       entryScanIntervalMs?: number;
       lastFastCycleMs?: number | null;
-      lastHeavyCycleMs?: number | null;
-      lastOverlayBroadcastAgeMs?: number | null;
       lastFullCycleMs?: number | null;
       buildInProgress?: boolean;
     };

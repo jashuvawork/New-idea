@@ -128,10 +128,6 @@ def pad_lane_cold_velocity_ok(
         and (v9 >= -1.0 if peak_confirmed_pad else v9 >= -0.8)
     ):
         return True
-    from app.engines.put_slide_ce_mirror import put_slide_cold_velocity_ok
-
-    if put_slide_cold_velocity_ok(evidence, v3, v9):
-        return True
     return False
 
 
@@ -1529,15 +1525,11 @@ def resolve_strict_pad_lane_for_entry(
         explosion_event,
     )
     armed_pad_strict = _armed_base_launch_pad_chart_signal(row, explosion_event)
-    from app.engines.live_paper_parity import oct_paper_exec_strict_bypass
-
-    oct_paper_strict = oct_paper_exec_strict_bypass(row)
     strict_bypass = (
         armed_base_chart_bypass
         or pad_lane_chart_bypass
         or shallow_otm_bypass
         or armed_pad_strict
-        or oct_paper_strict
     )
     return pad_lane_chart_bypass, strict_bypass
 

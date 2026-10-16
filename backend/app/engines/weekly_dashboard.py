@@ -231,9 +231,7 @@ def _assess_goals(
 ) -> dict[str, Any]:
     stats = _stats_for_trades(trades)
     exp = _expectancy(trades)
-    from app.engines.capital_risk_limits import risk_limit_inr
-
-    emergency = risk_limit_inr("emergency_stop_inr", settings)
+    emergency = settings.emergency_stop_inr
     daily_target = settings.daily_profit_target_inr
 
     max_daily_loss = min((r["netPnlInr"] for r in daily_rows), default=0.0)

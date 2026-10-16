@@ -70,10 +70,6 @@ def explosion_exhausted(event: ExplosionEvent) -> tuple[bool, str]:
 def index_pin_blocks_put_explosion(event: ExplosionEvent, snap: SymbolSnapshot) -> tuple[bool, str]:
     """Block PE fades when index pins at day high with bullish stock breadth."""
     settings = get_settings()
-    from app.engines.live_paper_parity import oct_paper_replica_active
-
-    if oct_paper_replica_active(settings):
-        return False, "ok"
     if not settings.index_pin_put_block_enabled:
         return False, "ok"
     if _side_val(event.side) != "PUT":
@@ -377,11 +373,7 @@ def infer_alert_causal_grade(
     v3 = float(alert.get("velocity3s") or 0)
     v9 = float(alert.get("velocity9s") or 0)
     steps = float(alert.get("strikeStepsFromAtm") or 0)
-    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
-
-    near_strike = 0 < steps <= 2 and str(
-        alert.get("moneyness") or ""
-    ).upper() != near_strike_waiver_excluded_moneyness()
+    near_strike = 0 < steps <= 2 and str(alert.get("moneyness") or "").upper() != "ITM"
     armed_top_local = armed and near_strike and local <= 15.0
     if (
         tier in ("ELITE", "EXPLODING")
@@ -501,65 +493,13 @@ def armed_base_pad_near_miss_waive(
     score = float(alert.get("explosionScore") or alert.get("score") or 0)
     if score < min_score - 1e-6:
         return False
-    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
-
-    money = str(alert.get("moneyness") or "").upper()
-    if near_strike_waiver_excluded_moneyness(s) == "ITM":
-        if money == "ITM":
-            steps = float(alert.get("strikeStepsFromAtm") or 0)
-            max_steps = int(
-                getattr(s, "near_strike_armed_near_miss_max_steps", 2) or 2
-            )
-            if steps > max_steps + 1e-6:
-                return False
-        return True
-    if money == "OTM":
-        return False
-    return True
-
-
-def elite_near_atm_index_rip_first_lift_waive(
-    alert: Optional[dict[str, Any]],
-    *,
-    settings: Any = None,
-) -> bool:
-    """Oct-style index-led ELITE near-ATM rip when tick v3 is stale (ws snapshot gap)."""
-    s = settings or get_settings()
-    if not bool(getattr(s, "elite_near_atm_index_rip_waive_enabled", True)):
-        return False
-    if not isinstance(alert, dict):
-        return False
-    if str(alert.get("tier") or "").upper() != "ELITE":
-        return False
-    score = float(alert.get("explosionScore") or alert.get("score") or 0)
-    if score < float(getattr(s, "elite_near_atm_index_rip_min_score", 95.0) or 95.0):
-        return False
-    steps = float(alert.get("strikeStepsFromAtm") or 0)
-    max_steps = float(getattr(s, "elite_near_atm_index_rip_max_strike_steps", 2.0) or 2.0)
-    if steps <= 0 or steps > max_steps + 1e-6:
-        return False
-    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
-
-    if str(alert.get("moneyness") or "").upper() == near_strike_waiver_excluded_moneyness(s):
-        return False
-    move = max(
-        float(alert.get("dailyMovePct") or 0),
-        float(alert.get("peakMovePct") or 0),
-    )
-    if move < float(getattr(s, "elite_near_atm_index_rip_min_move_pct", 25.0) or 25.0):
-        return False
-    if not (
-        bool(alert.get("ictFirstLift"))
-        or bool(alert.get("ictFlatThenVertical"))
-        or bool(alert.get("ictArmedBaseLaunch"))
-    ):
-        return False
-    if not (
-        bool(alert.get("indexMomAlign"))
-        or bool(alert.get("indexConfirmedLocalBase"))
-        or bool(alert.get("indexHelpersConfirm"))
-    ):
-        return False
+    if str(alert.get("moneyness") or "").upper() == "ITM":
+        steps = float(alert.get("strikeStepsFromAtm") or 0)
+        max_steps = int(
+            getattr(s, "near_strike_armed_near_miss_max_steps", 2) or 2
+        )
+        if steps > max_steps + 1e-6:
+            return False
     return True
 
 
@@ -570,110 +510,18 @@ def explosion_near_miss_waive(
     ranking: Optional[dict[str, Any]] = None,
     readiness_reason: str = "",
     settings: Any = None,
-    state: Any = None,
 ) -> bool:
     """Unified near-miss waiver for explosion first-lift / quality / tier lag."""
-    s = settings or get_settings()
     rr = str(readiness_reason or "").lower()
-    if isinstance(alert, dict):
-        from app.engines.live_paper_parity import (
-            oct_paper_entry_loosening_active,
-            oct_paper_first_lift_small_lift_context,
-            oct_paper_structural_entry_waivers_active,
-        )
-
-        if oct_paper_structural_entry_waivers_active(s):
-            if oct_paper_first_lift_small_lift_context(
-                alert,
-                settings=s,
-                readiness_reason=readiness_reason,
-            ):
-                if "negative" in rr and "velocity" in rr:
-                    from app.engines.live_paper_parity import (
-                        oct_paper_first_lift_negative_velocity_ok,
-                    )
-
-                    v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
-                    v9 = float(alert.get("velocity9s") or alert.get("velocity_9s") or 0)
-                    if not oct_paper_first_lift_negative_velocity_ok(
-                        alert, live_v3=v3, v9=v9, settings=s,
-                    ):
-                        return False
-                return True
-        from app.engines.live_paper_parity import oct_paper_replica_active
-
-        tier = str(alert.get("tier") or "").upper()
-        score = float(alert.get("explosionScore") or alert.get("score") or 0)
-        min_score = float(getattr(s, "aggressive_min_explosion_score", 45.0) or 45.0)
-        if (
-            oct_paper_replica_active(s)
-            and tier in ("ELITE", "EXPLODING")
-            and score >= min_score
-        ):
-            oct1_premium_near_miss = (
-                "premium_out_of_band",
-                "premium_above",
-                "premium_below",
-            )
-            if rr.startswith(oct1_premium_near_miss):
-                return True
-        if oct_paper_entry_loosening_active(s):
-            if tier in ("ELITE", "EXPLODING") and score >= min_score:
-                oct_near_miss_prefixes = (
-                    "first_lift_quality",
-                    "explosion_score",
-                    "tier_not_elite",
-                    "symbol_tqs_low",
-                    "premium_out_of_band",
-                    "premium_above",
-                    "premium_below",
-                )
-                if rr.startswith(oct_near_miss_prefixes):
-                    return True
-                if "chart_not_aligned" in rr and score >= 70.0:
-                    return True
-                if snap is not None:
-                    from app.engines.premium_filter import (
-                        oct_paper_slide_explosion_context_armed,
-                    )
-                    from app.models.schemas import AutoTraderState
-
-                    st = state if state is not None else AutoTraderState()
-                    if oct_paper_slide_explosion_context_armed(
-                        alert, snap, st, settings=s,
-                    ):
-                        return True
-    if rr.startswith("first_lift_live_velocity_negative"):
-        if isinstance(alert, dict):
-            from app.engines.live_paper_parity import (
-                oct_paper_first_lift_negative_velocity_ok,
-            )
-
-            v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
-            v9 = float(alert.get("velocity9s") or alert.get("velocity_9s") or 0)
-            if oct_paper_first_lift_negative_velocity_ok(
-                alert, live_v3=v3, v9=v9, settings=s,
-            ):
-                return True
-        return False
     if rr.startswith(
         (
+            "first_lift_live_velocity_negative",
             "mid_rip_armed_coil_rejected",
             "first_lift_base_move_outside",
         )
     ):
-        if isinstance(alert, dict):
-            from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
-
-            if oct_paper_funnel_readiness_waived(
-                alert,
-                settings=s,
-                readiness_reason=readiness_reason,
-            ):
-                return True
         return False
-    if elite_near_atm_index_rip_first_lift_waive(alert, settings=s):
-        return True
+    s = settings or get_settings()
     if isinstance(alert, dict) and bool(
         getattr(s, "live_entry_best_trade_capture_waives_near_miss", True)
     ):
@@ -714,9 +562,7 @@ def near_strike_armed_near_miss_waive(
     steps = float(alert.get("strikeStepsFromAtm") or 0)
     if steps <= 0 or steps > max_steps + 1e-6:
         return False
-    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
-
-    if str(alert.get("moneyness") or "").upper() == near_strike_waiver_excluded_moneyness(s):
+    if str(alert.get("moneyness") or "").upper() == "ITM":
         return False
     if not _near_miss_otm_allowed(alert, snap, settings=s):
         return False

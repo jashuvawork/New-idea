@@ -4,11 +4,6 @@ from fastapi import APIRouter
 
 from app.config import audit_week_local_base_overrides, get_settings
 from app.engines.capital_allocator import get_lot_sizes_meta
-from app.engines.capital_risk_limits import (
-    book_capital_inr,
-    capital_risk_limits_summary,
-    risk_limit_inr,
-)
 from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.engines.sep917_legacy_profile import sep917_legacy_profile_summary as _sep917_legacy_profile_summary
 from app.engines.structural_guard_settings import structural_guard_summary
@@ -27,63 +22,11 @@ from app.routers.market import latency_stats
 router = APIRouter(tags=["health"])
 
 
-def __entry_gates_match_paper(settings) -> bool:
-    from app.engines.live_paper_parity import entry_gates_match_paper
-
-    return entry_gates_match_paper(settings)
-
-
-def __trading_rules_match_paper(settings) -> bool:
-    from app.engines.live_paper_parity import trading_rules_match_paper
-
-    return trading_rules_match_paper(settings)
-
-
-def __legacy_live_narrow_stack_active(settings) -> bool:
-    from app.engines.live_paper_parity import legacy_live_narrow_stack_active
-
-    return legacy_live_narrow_stack_active(settings)
-
-
-def __live_paper_profile_flags(settings) -> dict:
-    from app.engines.live_paper_parity import live_paper_profile_ok, live_paper_profile_summary
-
-    summary = live_paper_profile_summary(settings)
-    ok, issues = live_paper_profile_ok(settings)
-    summary["profileOk"] = ok
-    summary["profileIssues"] = issues
-    return summary
-
-
-def __frozen_october_profile_flags(settings) -> dict:
-    from app.engines.october_frozen_profile import (
-        october_frozen_profile_ok,
-        october_frozen_profile_summary,
-    )
-
-    summary = october_frozen_profile_summary(settings)
-    ok, issues = october_frozen_profile_ok(settings)
-    summary["profileOk"] = ok
-    summary["profileIssues"] = issues
-    summary["cePeSymmetricOk"] = ok
-    return summary
-
-
 @router.get("/health")
 async def health():
     from app.loop_watchdog import watchdog_status
 
     return {"status": "ok", "loopWatchdog": watchdog_status()}
-
-
-@router.get("/api/deployment/loop-stalls")
-async def loop_stalls(limit: int = 10):
-    """Event-loop stalls (blocked-thread stacks) recorded by the watchdog, newest first."""
-    import asyncio
-
-    from app.loop_watchdog import recent_stalls
-
-    return {"stalls": await asyncio.to_thread(recent_stalls, min(max(limit, 1), 50))}
 
 
 @router.get("/api/deployment/status")
@@ -95,16 +38,12 @@ async def deployment_status():
     token_status = await get_daily_token_status()
     store_health = trade_store.check_store_health()
     today_counts = trade_store.count_today_trades()
-    live_paper_profile = __live_paper_profile_flags(settings)
     return {
         "status": "ok",
         "commit": settings.commit_sha,
         "environment": settings.environment,
-        "livePaperProfile": live_paper_profile,
-        "legacyLiveNarrowStackActive": __legacy_live_narrow_stack_active(settings),
         "loopWatchdog": watchdog_status(),
         "radarHealth": health_status(),
-        "frozenOctoberProfile": __frozen_october_profile_flags(settings),
         "upstox": {
             "hasToken": await has_upstox_token(),
             "validToday": token_status.get("validToday", False),
@@ -120,17 +59,6 @@ async def deployment_status():
         "flags": {
             "symbols": settings.symbols,
             "enableLiveTrading": settings.enable_live_trading,
-            "livePaperParityEnabled": bool(
-                getattr(settings, "live_paper_parity_enabled", False)
-                or getattr(settings, "live_trade_selection_parity_with_paper", False)
-            ),
-            "entryGatesMatchPaper": __entry_gates_match_paper(settings),
-            "tradingRulesMatchPaper": __trading_rules_match_paper(settings),
-            "legacyLiveNarrowStackActive": __legacy_live_narrow_stack_active(settings),
-            "livePaperProfile": live_paper_profile,
-            "liveBestTradesOnlyEnabled": bool(
-                getattr(settings, "live_best_trades_only_enabled", True)
-            ),
             "autoTradingEnabled": settings.auto_trading_enabled,
             "paperTrading": settings.paper_trading,
             "simpleProfitMode": settings.paper_simple_profit_mode,
@@ -147,12 +75,10 @@ async def deployment_status():
             "perTradeCapitalPct": settings.per_trade_capital_pct,
             "fallbackCapitalInr": settings.fallback_capital_inr,
             "maxSizingCapitalInr": settings.max_sizing_capital_inr,
-            "bookCapitalInr": book_capital_inr(settings),
-            "capitalRiskLimits": capital_risk_limits_summary(settings),
             "aggressiveLotSizing": settings.aggressive_lot_sizing,
             "maxLotsPerTrade": settings.max_lots_per_trade,
             "emergencyStopEnabled": settings.emergency_stop_enabled,
-            "emergencyStopInr": risk_limit_inr("emergency_stop_inr", settings),
+            "emergencyStopInr": settings.emergency_stop_inr,
             "emergencyStopScaleWithPosition": settings.emergency_stop_scale_with_position,
             "scalpStopPoints": settings.scalp_stop_points,
             "explosionInitialStopPoints": settings.explosion_initial_stop_points,
@@ -173,7 +99,7 @@ async def deployment_status():
             "constituentStockBreadthOverrideEnabled": settings.constituent_stock_breadth_override_enabled,
             "indexPinPutBlockEnabled": settings.index_pin_put_block_enabled,
             "indexMomentumEnabled": settings.index_momentum_enabled,
-            "dailyLossStopInr": risk_limit_inr("daily_loss_stop_inr", settings),
+            "dailyLossStopInr": settings.daily_loss_stop_inr,
             "dailyMaxTradesChop": settings.daily_max_trades_chop,
             "primaryWindowStartIst": f"{settings.primary_window_start_hour:02d}:{settings.primary_window_start_minute:02d}",
             "sureShotModeEnabled": settings.sure_shot_mode_enabled,
@@ -378,40 +304,11 @@ async def deployment_readiness():
     except Exception:
         checks["worstDayClear"] = True
 
-    from app.engines.live_paper_parity import live_paper_profile_ok
-    from app.engines.october_frozen_profile import (
-        october_frozen_profile_ok,
-        october_frozen_profile_summary,
-    )
-
-    profile_ok, profile_issues = live_paper_profile_ok(settings)
-    checks["livePaperProfileOk"] = profile_ok
-    if settings.enable_live_trading and not profile_ok:
-        arm_live_steps.append(
-            "Re-apply deploy/env.october-frozen.overlay + capital overlay (--prepare): "
-            + ", ".join(profile_issues[:4])
-        )
-
-    frozen_summary = october_frozen_profile_summary(settings)
-    frozen_ok, frozen_issues = october_frozen_profile_ok(settings)
-    checks["frozenOctoberProfileOk"] = frozen_ok
-    checks["padEntryGuardEnabled"] = bool(frozen_summary.get("padEntryGuardEnabled"))
-    checks["symmetricBestTradeCaptureEnabled"] = bool(
-        frozen_summary.get("symmetricBestTradeCaptureEnabled")
-    )
-    if not frozen_ok:
-        arm_live_steps.append(
-            "Frozen October profile not OK — apply deploy/env.october-frozen.overlay: "
-            + ", ".join(frozen_issues[:4])
-        )
-
     return {
         "readyForPaper": paper_ready,
         "readyForLive": (
             live_ready
             and checks.get("worstDayClear", True)
-            and profile_ok
-            and frozen_ok
         ),
         "executionMode": (
             "LIVE"

@@ -146,8 +146,6 @@ class ChartAnalysis(BaseModel):
     smtDivergence: Optional[dict[str, Any]] = None
     keySignals: list[str] = []
     recentCloses: list[float] = []
-    # Extended 5m closes for RSI/MACD warmup on the live tick refresh (MACD needs ≥35 bars).
-    indicatorCloses: list[float] = []
     # Advanced indicators (squeeze / ADX / Supertrend / VWAP) — powerful capture + chop context.
     squeeze: dict[str, Any] = {}
     adx: dict[str, Any] = {}
@@ -394,6 +392,6 @@ class RiskProfile(BaseModel):
 
 
 class CapitalConfig(BaseModel):
-    allocatedInr: float = Field(..., gt=0)
+    allocatedInr: float = 500_000
     perTradeRiskInr: float = 12_000
     emergencyStopInr: float = 18_000

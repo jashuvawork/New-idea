@@ -322,13 +322,10 @@ def _gate_checks(
     expiry_chart_bypass = expiry_chart_bypass_for_candidate(candidate, snap)
     from app.engines.spot_direction import index_trough_momentum_turn
 
-    from app.engines.index_rally_side_flip import index_flip_waives_chart_align
-
     index_trough_bypass = bool(
         alert.get("ictIndexConfirmedLocalBase")
         or alert.get("indexConfirmedLocalBase")
         or index_trough_momentum_turn(candidate.side, chart)
-        or index_flip_waives_chart_align(candidate.side, snap)
     )
     blocked, chart_reason = chart_blocks_side(
         candidate.side, chart, trade_score=score, momentum_surge=daily_move >= 40,

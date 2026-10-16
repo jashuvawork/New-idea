@@ -79,10 +79,8 @@ def _reset_all_engine_globals() -> None:
     )
     from app.engines.instrument_cooldown import reset_instrument_cooldowns
     from app.engines.side_regime import reset_side_regime_for_tests
-    from app.services.trade_store import reset_trade_store_cache
 
     for fn in (
-        reset_trade_store_cache,
         reset_detector_state_for_tests,
         reset_building_ltp_monitor_for_tests,
         reset_index_tick_helpers_for_tests,

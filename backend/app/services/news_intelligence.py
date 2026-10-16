@@ -186,8 +186,7 @@ def _horizon(published: Optional[datetime], now: datetime) -> str:
 
     minute = now.hour * 60 + now.minute
     published_minute = published.hour * 60 + published.minute
-    market_open = 9 * 60 + 15
-    market_close = int(settings.power_hour_end_hour) * 60 + int(settings.power_hour_end_minute)
+    market_open, market_close = 9 * 60, 15 * 60 + 30
     same_day = published.date() == now.date()
     intraday_limit = timedelta(minutes=max(1, settings.news_intraday_max_age_minutes))
 

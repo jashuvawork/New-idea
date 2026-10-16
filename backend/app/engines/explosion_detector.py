@@ -409,29 +409,6 @@ def session_low_relative_move_pct(
     return ((float(premium) - low) / low) * 100.0
 
 
-def session_high_relative_move_pct(
-    symbol: str,
-    strike: float,
-    side: Side | str,
-    premium: float,
-) -> float:
-    """% below today's session peak premium — PUT slide / peak-turn pad metric (CE symmetric: off-low)."""
-    _roll_session()
-    if not _is_meaningful_premium(premium):
-        return 0.0
-    if side is None or not symbol:
-        return 0.0
-    side_val = side if isinstance(side, Side) else Side(str(side).upper())
-    key = _open_key(symbol, strike, side_val)
-    peak = float(_session_peak.get(key) or 0)
-    if not _is_meaningful_premium(peak):
-        return 0.0
-    live = float(premium)
-    if live >= peak:
-        return 0.0
-    return ((peak - live) / peak) * 100.0
-
-
 def get_session_low_premium(symbol: str, strike: float, side: Side | str) -> float:
     _roll_session()
     if side is None or not symbol:
@@ -1819,24 +1796,6 @@ def _volume_awakening(
     return v3 >= min_v3 or open_move >= settings.open_premium_min_move_pct
 
 
-def _settings_float(value: Any, default: float) -> float:
-    if isinstance(value, bool):
-        return float(default)
-    if isinstance(value, (int, float)):
-        return float(value)
-    return float(default)
-
-
-def _settings_int(value: Any, default: int) -> int:
-    if isinstance(value, bool):
-        return int(default)
-    if isinstance(value, int):
-        return int(value)
-    if isinstance(value, float):
-        return int(value)
-    return int(default)
-
-
 def resolve_explosion_scan_range(
     symbol: str,
     settings=None,
@@ -1986,23 +1945,6 @@ def _premium_ok_for_scan(
             return True
     # Expiry deep ITM — intrinsic premium exceeds ₹650 before the vertical prints.
     if expiry_day and str(moneyness or "").upper() == "ITM":
-        try:
-            from app.engines.sep917_legacy_profile import atm_itm_fixed_premium_band_only
-
-            if atm_itm_fixed_premium_band_only(settings):
-                floor = float(getattr(settings, "min_option_premium_inr", 18.0) or 18.0)
-                if open_window and near_atm:
-                    floor = min(
-                        floor,
-                        float(
-                            getattr(settings, "expiry_open_cheap_premium_min_inr", 10.0)
-                            or 10.0
-                        ),
-                    )
-                ceil = float(getattr(settings, "max_option_premium_inr", 350.0) or 350.0)
-                return floor <= premium <= ceil
-        except Exception:
-            pass
         itm_ceil = float(
             getattr(settings, "expiry_itm_explosion_scan_max_premium_inr", 900.0) or 900.0
         )
@@ -2322,32 +2264,6 @@ def scan_chain_explosions(
                     settings,
                 ):
                     continue
-                try:
-                    from app.engines.sep917_legacy_profile import (
-                        atm_itm_fixed_premium_band_only,
-                    )
-                    from app.engines.moneyness import _depth_steps
-
-                    if atm_itm_fixed_premium_band_only(settings) and money in (
-                        "ATM",
-                        "ITM",
-                    ):
-                        max_itm = _settings_int(
-                            getattr(settings, "moneyness_max_itm_steps", 2), 2
-                        )
-                        depth = _depth_steps(
-                            side, float(strike), float(spot), symbol, float(atm),
-                        )
-                        band_max = _settings_float(
-                            getattr(settings, "max_option_premium_inr", 350.0), 350.0
-                        )
-                        if money == "ITM" and depth > max_itm:
-                            if float(premium) > band_max:
-                                continue
-                        elif float(premium) > band_max:
-                            continue
-                except Exception:
-                    pass
 
             prior_close = prior_close_from_option_leg(opt)
             day_low, day_high = day_extremes_from_option_leg(opt)
@@ -2912,56 +2828,11 @@ def scan_snapshot_explosions(
     )
 
 
-def _explosion_event_key(event: Any) -> tuple[str, float]:
-    side = str(getattr(getattr(event, "side", None), "value", event.side) or "").upper()
-    try:
-        strike = float(getattr(event, "strike", 0) or 0)
-    except (TypeError, ValueError):
-        strike = 0.0
-    return side, strike
-
-
-def select_explosion_events_for_selector(
-    ordered_events: list[Any],
-    settings: Any,
-) -> list[Any]:
-    """Cap explosionAlerts on snap without dropping high-score ELITE legs (Oct 8–9 zero-trade RCA)."""
-    try:
-        from app.engines.session_timing import in_open_premium_window
-
-        open_window = bool(in_open_premium_window())
-    except Exception:
-        open_window = False
-    base_cap = int(getattr(settings, "explosion_alerts_selector_cap", 25) or 25)
-    open_cap = int(getattr(settings, "explosion_alerts_open_window_selector_cap", 45) or 45)
-    limit = open_cap if open_window else base_cap
-    min_force = float(
-        getattr(settings, "explosion_alerts_force_include_min_score", 90.0) or 90.0
-    )
-    chosen = list(ordered_events[:limit])
-    chosen_keys = {_explosion_event_key(e) for e in chosen}
-    for event in ordered_events[limit:]:
-        tier = str(getattr(event, "tier", "") or "").upper()
-        if tier not in ("ELITE", "EXPLODING"):
-            continue
-        score = float(getattr(event, "explosion_score", 0) or 0)
-        if score < min_force - 1e-6:
-            continue
-        key = _explosion_event_key(event)
-        if key in chosen_keys:
-            continue
-        chosen.append(event)
-        chosen_keys.add(key)
-    return chosen
-
-
 def refresh_snapshot_explosion_alerts(snap: Any, *, expiry_day: bool = False) -> None:
     """Update explosionAlerts on a cached snapshot using fresh WS LTPs."""
     events = scan_snapshot_explosions(snap, expiry_day=expiry_day)
     # Keep BUILDING+ visible even when many WATCH rows compete for the top slice.
-    from app.config import get_settings as _gs_cap
-
-    settings = _gs_cap()
+    limit = 25
     hot = [
         e for e in events
         if str(getattr(e, "tier", "") or "").upper() in ("BUILDING", "EXPLODING", "ELITE")
@@ -2971,8 +2842,7 @@ def refresh_snapshot_explosion_alerts(snap: Any, *, expiry_day: bool = False) ->
         if str(getattr(e, "tier", "") or "").upper() not in ("BUILDING", "EXPLODING", "ELITE")
     ]
     ordered = hot + cold
-    sliced = select_explosion_events_for_selector(ordered, settings)
-    alerts = [event_to_dict(e, snap) for e in sliced]
+    alerts = [event_to_dict(e, snap) for e in ordered[:limit]]
     # Stamp index-level (spot tape) confirmation onto hot alerts so the selector, must-take
     # and UI all see the same "the index is thrusting" evidence — the causal driver behind a
     # sudden strike lift. Bounded to BUILDING+ and wrapped so a tape hiccup never breaks scan.
@@ -3252,10 +3122,6 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
             session_low_relative_move_pct(e.symbol, e.strike, e.side, e.premium),
             1,
         ),
-        "offHighMovePct": round(
-            session_high_relative_move_pct(e.symbol, e.strike, e.side, e.premium),
-            1,
-        ),
         "localBaseMovePct": round(float(pad_move or 0), 1),
         "volumeAwaken": vol_awaken,
         "tradeable": tradeable,
@@ -3390,38 +3256,15 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     # Shallow OTM is history-only unless pad / cheap-base / index-confirmed capture stamped.
     if str(getattr(e, "moneyness", "") or "").upper() == "OTM":
         from app.engines.near_base_session_capture import otm_tradeable_preserved
-        from app.engines.open_rip_selector import open_rip_elite_tradeable_preserve
-        from app.engines.live_paper_parity import oct_paper_structural_pad_context
 
-        open_rip_preserve = open_rip_elite_tradeable_preserve(
-            alert_out, settings=_settings, snap=snap,
-        )
-        oct_paper_otm = oct_paper_structural_pad_context(
-            alert_out,
-            settings=_settings,
-        )
-        preserve_otm = open_rip_preserve or oct_paper_otm
-        if preserve_otm:
-            alert_out["openRipEliteStructural"] = True
-            if oct_paper_otm:
-                alert_out["octPaperOtmStructural"] = True
-            tradeable = True
-            alert_out["tradeable"] = True
-        if not preserve_otm and (
-            cheap_otm_stack_disabled(_settings)
-            or not otm_tradeable_preserved(alert_out, settings=_settings)
+        if cheap_otm_stack_disabled(_settings) or not otm_tradeable_preserved(
+            alert_out, settings=_settings
         ):
             tradeable = False
             first_lift = False
             alert_out["tradeable"] = False
             alert_out["ictFirstLift"] = False
-            alert_out.pop("openRipEliteStructural", None)
-            alert_out.pop("octPaperOtmStructural", None)
     from app.engines.live_entry_score import stamp_alert_live_entry_scores
 
     alert_out = stamp_alert_live_entry_scores(alert_out)
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    alert_out["alertStampedAt"] = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
     return alert_out

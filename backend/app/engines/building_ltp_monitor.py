@@ -512,13 +512,6 @@ def filter_candidates_building_best_pick(candidates: list[Any]) -> list[Any]:
     out: list[Any] = []
     for c in candidates:
         key = _candidate_key(c)
-        tier_u = str(getattr(c, "tier", "") or "").upper()
-        if not tier_u and isinstance(getattr(c, "alert", None), dict):
-            tier_u = str(c.alert.get("tier") or "").upper()
-        # Oct 9 — never drop ELITE explosion legs for BUILDING scoreboard pick preference.
-        if tier_u == "ELITE":
-            out.append(c)
-            continue
         is_buildingish = _is_buildingish_candidate(c)
         if only_best and is_buildingish and preferred and key != preferred:
             continue
@@ -768,9 +761,9 @@ def building_ltp_monitor_due(
         return False
 
     mono = time.monotonic() if now_mono is None else float(now_mono)
-    from app.engines.session_timing import effective_building_ltp_monitor_min_ms
-
-    min_ms = effective_building_ltp_monitor_min_ms()
+    min_ms = float(
+        getattr(settings, "building_ltp_monitor_min_ms", 75.0) or 75.0
+    )
     if _last_building_cycle_mono > 0 and (mono - _last_building_cycle_mono) * 1000 < min_ms:
         return False
 

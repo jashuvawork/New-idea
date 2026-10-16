@@ -257,8 +257,6 @@ def live_entry_score_blocks_entry(
     settings = get_settings()
     if not bool(getattr(settings, "live_entry_score_gate_enabled", True)):
         return False, "ok", {}
-    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
-
     meta = refresh_candidate_live_entry_score(
         candidate, snap, premium_chart=premium_chart,
     )
@@ -273,55 +271,16 @@ def live_entry_score_blocks_entry(
     meta.update(chase_meta)
     if chase_blocked:
         return True, chase_reason, meta
-    if oct_paper_skip_live_only_session_gates(settings):
-        meta["octPaperLiveEntryScoreGateSkipped"] = True
-        return False, "ok", meta
     tier = str(getattr(candidate, "tier", "") or _alert_dict(candidate).get("tier") or "")
     live = float(getattr(candidate, "liveEntryScore", 0) or meta.get("liveEntryScore") or 0)
     min_live = live_entry_score_min_for_tier(tier, settings=settings)
     meta["liveEntryMin"] = min_live
     if live < min_live:
-        from app.engines.live_paper_parity import (
-            oct_paper_skip_live_only_session_gates,
-            structural_pad_entry_lane_active,
+        return (
+            True,
+            f"live_entry_score_{live:.0f}_below_{min_live:.0f}",
+            meta,
         )
-
-        alert = _alert_dict(candidate)
-        tier_u = tier.upper()
-        expl_score = float(
-            alert.get("explosionScore")
-            or getattr(getattr(candidate, "explosion_event", None), "explosion_score", 0)
-            or 0
-        )
-        min_expl = float(
-            getattr(settings, "aggressive_min_explosion_score", 45.0) or 45.0
-        )
-        rr = str(
-            alert.get("firstLiftReadinessReason")
-            or alert.get("ictBaseReadinessReason")
-            or ""
-        )
-        pad_lane = structural_pad_entry_lane_active(
-            alert, settings=settings, readiness_reason=rr,
-        )
-        oct_paper_floor_skip = (
-            tier_u in ("ELITE", "EXPLODING")
-            and expl_score >= min_expl - 1e-6
-            and (
-                oct_paper_skip_live_only_session_gates(settings)
-                or pad_lane
-            )
-        )
-        if oct_paper_floor_skip:
-            meta["octPaperLiveEntryScoreFloorSkipped"] = True
-            if pad_lane:
-                meta["structuralPadLiveEntryScoreFloorSkipped"] = True
-        else:
-            return (
-                True,
-                f"live_entry_score_{live:.0f}_below_{min_live:.0f}",
-                meta,
-            )
     from app.engines.premium_spike_dump_guard import post_spike_premium_dump_blocked
 
     dump_blocked, dump_reason, dump_meta = post_spike_premium_dump_blocked(

@@ -1,12 +1,8 @@
 """Persistent trade storage — daily JSON archives + append-only trade log for paper and live."""
 
-import copy
 import json
 import logging
 import os
-import re
-import time
-import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -19,24 +15,6 @@ IST = ZoneInfo("Asia/Kolkata")
 
 _store_dir: Optional[Path] = None
 _log_path: Optional[Path] = None
-_day_json_re = re.compile(r"^\d{4}-\d{2}-\d{2}\.json$")
-_trade_archive_re = re.compile(r"^trades-(\d{4}-\d{2}-\d{2})\.zip$")
-
-
-def _is_session_day_file(path: Path) -> bool:
-    return bool(_day_json_re.match(path.name))
-
-
-def get_trade_archive_dir() -> Path:
-    path = get_store_dir() / "trade_archives"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def trade_archive_path(date: str) -> Path:
-    if len(date) != 10 or date[4] != "-" or date[7] != "-":
-        raise ValueError("Date must be YYYY-MM-DD")
-    return get_trade_archive_dir() / f"trades-{date}.zip"
 
 
 def get_store_dir() -> Path:
@@ -76,73 +54,22 @@ def _day_file(date: str) -> Path:
     return get_store_dir() / f"{date}.json"
 
 
-# Session gates read today's record dozens of times per trader pass on the event loop, so
-# disk reads must not happen per call. Single-process write-through cache, revalidated
-# against the file's (mtime_ns, size) at most every _CACHE_REVALIDATE_SECONDS.
-_CACHE_REVALIDATE_SECONDS = 30.0
-_day_cache: dict[str, tuple[Optional[tuple[int, int]], float, dict[str, Any]]] = {}
-_session_reset_cache: dict[str, Any] = {}
-
-
-def _file_sig(path: Path) -> Optional[tuple[int, int]]:
-    try:
-        st = path.stat()
-    except OSError:
-        return None
-    return (st.st_mtime_ns, st.st_size)
-
-
-def reset_trade_store_cache() -> None:
-    _day_cache.clear()
-    _session_reset_cache.clear()
-
-
-def _empty_day(date: str) -> dict[str, Any]:
-    return {"date": date, "trades": [], "events": [], "summary": {}}
-
-
-def _read_day_from_disk(date: str) -> tuple[Optional[tuple[int, int]], dict[str, Any]]:
+def _load_day(date: str) -> dict[str, Any]:
     path = _day_file(date)
-    sig = _file_sig(path)
-    if sig is None:
-        return None, _empty_day(date)
+    if not path.exists():
+        return {"date": date, "trades": [], "events": [], "summary": {}}
     try:
-        return sig, json.loads(path.read_text())
+        return json.loads(path.read_text())
     except Exception as e:
         logger.warning("Failed to load trades for %s: %s", date, e)
-        return sig, _empty_day(date)
-
-
-def _load_day_shared(date: str) -> dict[str, Any]:
-    """Cached day record shared between callers — treat as read-only."""
-    key = f"{get_store_dir()}|{date}"
-    now = time.monotonic()
-    cached = _day_cache.get(key)
-    if cached is not None:
-        sig, checked_at, data = cached
-        if now - checked_at < _CACHE_REVALIDATE_SECONDS:
-            return data
-        if _file_sig(_day_file(date)) == sig:
-            _day_cache[key] = (sig, now, data)
-            return data
-    sig, data = _read_day_from_disk(date)
-    if len(_day_cache) > 16:
-        _day_cache.clear()
-    _day_cache[key] = (sig, now, data)
-    return data
-
-
-def _load_day(date: str) -> dict[str, Any]:
-    return copy.deepcopy(_load_day_shared(date))
+        return {"date": date, "trades": [], "events": [], "summary": {}}
 
 
 def _save_day(date: str, data: dict[str, Any]) -> None:
     path = _day_file(date)
     tmp = path.with_suffix(f"{path.suffix}.tmp")
-    text = json.dumps(data, indent=2, default=str)
-    tmp.write_text(text)
+    tmp.write_text(json.dumps(data, indent=2, default=str))
     os.replace(tmp, path)
-    _day_cache[f"{get_store_dir()}|{date}"] = (_file_sig(path), time.monotonic(), json.loads(text))
 
 
 def _enum_val(value: Any) -> Any:
@@ -692,10 +619,7 @@ def get_recent_log_lines(limit: int = 100) -> list[dict[str, Any]]:
 def get_history(days: int = 30) -> list[dict[str, Any]]:
     """Return daily summaries for last N days."""
     results = []
-    files = sorted(
-        (p for p in get_store_dir().glob("*.json") if _is_session_day_file(p)),
-        reverse=True,
-    )
+    files = sorted(get_store_dir().glob("*.json"), reverse=True)
     for path in files[:days]:
         try:
             data = json.loads(path.read_text())
@@ -711,8 +635,8 @@ def get_history(days: int = 30) -> list[dict[str, Any]]:
 
 
 def get_day_detail(date: str) -> dict[str, Any]:
-    """Full trade + event log for a specific day (cached, shared — do not mutate)."""
-    return _load_day_shared(date)
+    """Full trade + event log for a specific day."""
+    return _load_day(date)
 
 
 def get_all_closed_trades(limit: int = 200) -> list[dict[str, Any]]:
@@ -725,7 +649,7 @@ def get_all_closed_trades(limit: int = 200) -> list[dict[str, Any]]:
 def get_all_closed_trades_chronological(limit: int = 500) -> list[dict[str, Any]]:
     """All closed trades across days, oldest first (for milestone batches)."""
     closed: list[dict[str, Any]] = []
-    for path in sorted(p for p in get_store_dir().glob("*.json") if _is_session_day_file(p)):
+    for path in sorted(get_store_dir().glob("*.json")):
         try:
             data = json.loads(path.read_text())
             for t in data.get("trades", []):
@@ -782,7 +706,6 @@ def purge_all_trade_data() -> dict[str, Any]:
         except OSError as e:
             logger.warning("Failed to remove %s: %s", session_meta, e)
 
-    reset_trade_store_cache()
     _append_log("PURGE_ALL", {"removedFiles": len(removed), "storeDir": str(store)})
     logger.warning("Purged all trade data — %d paths touched", len(removed))
     return {
@@ -790,8 +713,6 @@ def purge_all_trade_data() -> dict[str, Any]:
         "removedCount": len(removed),
         "removedFiles": removed,
         "logSizeBytes": log_path.stat().st_size if log_path.exists() else 0,
-        "tradeArchivesPreserved": str(get_trade_archive_dir()),
-        "note": "Daily trades-YYYY-MM-DD.zip under trade_archives/ are not deleted by purge-logs.",
     }
 
 
@@ -809,31 +730,12 @@ def set_session_reset_at(ts: Optional[datetime] = None) -> str:
     ts = ts or _now()
     meta = {"lastResetAt": ts.isoformat(), "sessionDate": _today()}
     _session_meta_path().write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    _session_reset_cache.clear()
     return meta["lastResetAt"]
 
 
 def get_session_reset_at() -> Optional[datetime]:
-    """Last manual/session reset time, or None if never reset today (cached, see _day_cache)."""
+    """Last manual/session reset time, or None if never reset today."""
     path = _session_meta_path()
-    key = (str(path), _today())
-    now = time.monotonic()
-    cached = _session_reset_cache.get("entry")
-    if cached is not None and cached[0] == key:
-        _, sig, checked_at, value, log_sig = cached
-        if now - checked_at < _CACHE_REVALIDATE_SECONDS:
-            return value
-        if _file_sig(path) == sig and _file_sig(get_log_path()) == log_sig:
-            _session_reset_cache["entry"] = (key, sig, now, value, log_sig)
-            return value
-    sig = _file_sig(path)
-    log_sig = _file_sig(get_log_path())
-    value = _read_session_reset_at(path)
-    _session_reset_cache["entry"] = (key, sig, now, value, log_sig)
-    return value
-
-
-def _read_session_reset_at(path: Path) -> Optional[datetime]:
     if path.exists():
         try:
             meta = json.loads(path.read_text(encoding="utf-8"))
@@ -1022,7 +924,7 @@ def list_milestone_batches(limit: int = 20) -> list[dict[str, Any]]:
 def load_open_trades() -> list[dict[str, Any]]:
     """Restore open trades from all day files (supports multi-day swing holds)."""
     open_by_id: dict[str, dict[str, Any]] = {}
-    for path in sorted(p for p in get_store_dir().glob("*.json") if _is_session_day_file(p)):
+    for path in sorted(get_store_dir().glob("*.json")):
         try:
             data = json.loads(path.read_text())
             for t in data.get("trades", []):
@@ -1038,160 +940,10 @@ def load_open_trades() -> list[dict[str, Any]]:
 
 def count_today_trades() -> dict[str, int]:
     """Quick counts for readiness dashboard."""
-    data = _load_day_shared(_today())
+    data = _load_day(_today())
     trades = data.get("trades", [])
     return {
         "open": len([t for t in trades if t.get("status") == "OPEN"]),
         "closed": len([t for t in trades if t.get("status") == "CLOSED"]),
         "total": len(trades),
     }
-
-
-def _log_lines_for_session(date: str) -> list[str]:
-    log_path = get_log_path()
-    if not log_path.exists():
-        return []
-    lines: list[str] = []
-    try:
-        with open(log_path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                ts = str(row.get("ts") or "")
-                if ts.startswith(date):
-                    lines.append(line)
-                    continue
-                trade = row.get("trade") if isinstance(row.get("trade"), dict) else {}
-                session = str(trade.get("sessionDate") or "")
-                if session == date:
-                    lines.append(line)
-    except OSError as exc:
-        logger.warning("Failed to read trade log for %s: %s", date, exc)
-    return lines
-
-
-def _trade_archive_manifest(date: str, day: dict[str, Any], log_lines: list[str]) -> dict[str, Any]:
-    trades = list(day.get("trades") or [])
-    closed = [t for t in trades if t.get("status") == "CLOSED"]
-    paper = [t for t in closed if str(t.get("executionMode") or "PAPER").upper() != "LIVE"]
-    live = [t for t in closed if str(t.get("executionMode") or "").upper() == "LIVE"]
-    net = round(sum(float(t.get("pnlInr") or 0) for t in closed), 2)
-    return {
-        "date": date,
-        "schemaVersion": 1,
-        "generatedAt": _now().isoformat(),
-        "tradeCount": len(trades),
-        "closedCount": len(closed),
-        "paperClosedCount": len(paper),
-        "liveClosedCount": len(live),
-        "netPnlInr": net,
-        "summary": day.get("summary") or {},
-        "logLineCount": len(log_lines),
-        "storeDir": str(get_store_dir()),
-    }
-
-
-def finalize_daily_trades_archive(date: str) -> dict[str, Any]:
-    """
-    Bundle the session day file + append-only log excerpt into trades-YYYY-MM-DD.zip.
-
-    Runs at radar finalize (16:00 IST) so paper/live fills survive purge-logs and disk rotation.
-    """
-    from app.config import get_settings
-
-    settings = get_settings()
-    if not bool(getattr(settings, "trade_daily_archive_enabled", True)):
-        return {"date": date, "skipped": True, "reason": "trade_daily_archive_disabled"}
-
-    day = get_day_detail(date)
-    log_lines = _log_lines_for_session(date)
-    manifest = _trade_archive_manifest(date, day, log_lines)
-    closed_only = [t for t in day.get("trades", []) if t.get("status") == "CLOSED"]
-
-    out_path = trade_archive_path(date)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out_path.with_suffix(".zip.part")
-    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("manifest.json", json.dumps(manifest, indent=2))
-        archive.writestr(f"{date}.json", json.dumps(day, indent=2, default=str))
-        archive.writestr(
-            "closed_trades.json",
-            json.dumps(closed_only, indent=2, default=str),
-        )
-        if log_lines:
-            archive.writestr("trades_log.jsonl", "\n".join(log_lines) + "\n")
-        archive.writestr(
-            "README.txt",
-            "NexusQuant daily trade archive — paper + live closed/open records and log excerpt.\n",
-        )
-    os.replace(tmp, out_path)
-
-    retention = int(getattr(settings, "trade_archive_retention_days", 90) or 90)
-    if retention > 0:
-        _prune_trade_archives(retention)
-
-    logger.info(
-        "Trade archive %s — closed=%d net=₹%.0f logLines=%d",
-        out_path.name,
-        manifest["closedCount"],
-        manifest["netPnlInr"],
-        len(log_lines),
-    )
-    return {
-        "date": date,
-        "path": str(out_path),
-        "fileName": out_path.name,
-        "sizeBytes": out_path.stat().st_size,
-        **manifest,
-    }
-
-
-def _prune_trade_archives(retention_days: int) -> None:
-    cutoff = _now().date()
-    for path in sorted(get_trade_archive_dir().glob("trades-*.zip")):
-        match = _trade_archive_re.match(path.name)
-        if not match:
-            continue
-        try:
-            day = datetime.strptime(match.group(1), "%Y-%m-%d").date()
-        except ValueError:
-            continue
-        if (cutoff - day).days > retention_days:
-            try:
-                path.unlink()
-            except OSError as exc:
-                logger.warning("Failed to prune trade archive %s: %s", path, exc)
-
-
-def list_trade_archives(limit: int = 30) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for path in sorted(get_trade_archive_dir().glob("trades-*.zip"), reverse=True):
-        match = _trade_archive_re.match(path.name)
-        if not match:
-            continue
-        row: dict[str, Any] = {
-            "date": match.group(1),
-            "fileName": path.name,
-            "sizeBytes": path.stat().st_size,
-            "downloadUrl": f"/api/auto-trader/trade-archives/{match.group(1)}",
-        }
-        try:
-            with zipfile.ZipFile(path, "r") as archive:
-                if "manifest.json" in archive.namelist():
-                    manifest = json.loads(archive.read("manifest.json"))
-                    row.update({
-                        "closedCount": manifest.get("closedCount"),
-                        "netPnlInr": manifest.get("netPnlInr"),
-                        "generatedAt": manifest.get("generatedAt"),
-                    })
-        except (OSError, KeyError, ValueError, zipfile.BadZipFile):
-            row["corrupt"] = True
-        rows.append(row)
-        if len(rows) >= limit:
-            break
-    return rows

@@ -115,54 +115,6 @@ def test_process_restart_and_session_reset_preserve_open_trade(isolated_store):
     assert persisted[0]["status"] == "OPEN"
 
 
-@pytest.mark.parametrize(
-    ("side", "strike"),
-    [(Side.CALL, 22700.0), (Side.PUT, 22650.0)],
-)
-def test_restart_restores_closed_trade_peak_for_reentry_gates(isolated_store, side, strike):
-    from app.engines import auto_trader
-    from app.engines.session_mode_feedback import peak_fade_same_side_reentry_blocked
-
-    now = datetime.now(IST)
-    trade = PaperTrade(
-        id=f"restart-closed-{side.value}",
-        symbol="NIFTY",
-        side=side,
-        strike=strike,
-        entryPremium=154.35,
-        currentPremium=154.35,
-        lots=4,
-        openedAt=now,
-        strategyType=StrategyType.EXPLOSIVE,
-        entryContext={"selectionMode": "explosion"},
-    )
-    trade_store.record_trade_opened(trade, trade.entryContext)
-    trade.currentPremium = 146.5
-    trade.pnlPoints = -7.85
-    trade.pnlInr = -2041.0
-    trade.bestPnlPoints = 36.62
-    trade.maxLtp = 190.97
-    trade.maxLtpAt = now
-    trade.status = "CLOSED"
-    trade.exitReason = "explosion_stage_trail"
-    trade.closedAt = now
-    assert trade_store.record_trade_closed(trade, trade.entryContext) is True
-
-    auto_trader._auto_trader_state = None
-    auto_trader._state_loaded = False
-    state = auto_trader.get_state()
-
-    restored = next(t for t in state.closedPaperTrades if t.id == trade.id)
-    assert restored.pnlPoints == pytest.approx(-7.85)
-    assert restored.bestPnlPoints == pytest.approx(36.62)
-    assert restored.maxLtp == pytest.approx(190.97)
-    assert restored.maxLtpAt is not None
-
-    blocked, meta = peak_fade_same_side_reentry_blocked(state, symbol="NIFTY", side=side)
-    assert blocked is True
-    assert meta["priorBestPoints"] == pytest.approx(36.62)
-
-
 def test_trade_close_is_persisted_exactly_once(isolated_store):
     trade = PaperTrade(
         id="exactly-once-close",

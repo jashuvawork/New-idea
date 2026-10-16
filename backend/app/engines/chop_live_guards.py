@@ -145,9 +145,7 @@ def chop_live_session_lift_allowed(
     settings = get_settings()
     if not getattr(settings, "chop_live_disable_session_lift", True):
         return True
-    from app.engines.live_paper_parity import entry_gates_match_paper
-
-    if not settings.enable_live_trading or entry_gates_match_paper(settings):
+    if not settings.enable_live_trading:
         return True
     if not chop_live_guard_day_active(state, snap, snapshots):
         return True
@@ -162,43 +160,6 @@ def _known_broker_instrument_keys(state: AutoTraderState) -> set[str]:
         if raw:
             keys.add(raw)
     return keys
-
-
-def _candidate_structural_pad_lane(
-    candidate: Any,
-    *,
-    settings: Any = None,
-) -> bool:
-    """ELITE pad / mid-rip — skip chop-live hard blocks (not extended chase)."""
-    settings = settings or get_settings()
-    if not bool(getattr(settings, "structural_pad_chop_live_waiver_enabled", True)):
-        return False
-    alert = getattr(candidate, "alert", None)
-    if not isinstance(alert, dict):
-        alert = {}
-    event = getattr(candidate, "explosion_event", None)
-    evidence: dict = dict(alert)
-    if event is not None:
-        evidence.setdefault("side", getattr(event, "side", "") or evidence.get("side"))
-        evidence.setdefault("tier", getattr(event, "tier", "") or evidence.get("tier"))
-        evidence.setdefault(
-            "explosionScore",
-            getattr(event, "explosion_score", 0) or evidence.get("explosionScore"),
-        )
-        evidence.setdefault(
-            "localBaseMovePct",
-            getattr(event, "local_base_move_pct", 0) or evidence.get("localBaseMovePct"),
-        )
-    from app.engines.live_paper_parity import structural_pad_entry_lane_active
-
-    rr = str(
-        evidence.get("firstLiftReadinessReason")
-        or evidence.get("ictBaseReadinessReason")
-        or ""
-    )
-    return structural_pad_entry_lane_active(
-        evidence, settings=settings, readiness_reason=rr,
-    )
 
 
 def _immature_local_base_hard_block(
@@ -295,11 +256,6 @@ def armed_base_shallow_launch_blocked(
     """Hard block shallow armed-base launches on chop or midday windows (CE/PE symmetric)."""
     settings = get_settings()
     meta: dict[str, Any] = {}
-    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
-
-    if oct_paper_skip_live_only_session_gates(settings):
-        meta["octPaperArmedBaseChopSkipped"] = True
-        return False, "", meta
     if not getattr(settings, "chop_live_block_armed_base_launch", True):
         return False, "", meta
     if str(getattr(candidate, "mode", "") or "") != "explosion":
@@ -402,12 +358,6 @@ def chop_live_entry_blocked(
     """
     settings = get_settings()
     meta: dict[str, Any] = {"chopLiveGuard": True}
-    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
-
-    if oct_paper_skip_live_only_session_gates(settings):
-        meta["chopLiveGuard"] = False
-        meta["octPaperChopWireSkipped"] = True
-        return False, "ok", meta
     if not getattr(settings, "chop_live_guards_enabled", True):
         return False, "ok", meta
     if str(getattr(candidate, "mode", "") or "") != "explosion":
@@ -415,31 +365,11 @@ def chop_live_entry_blocked(
     if not chop_live_guard_day_active(state, snap, snapshots):
         return False, "ok", meta
 
-    if bool(getattr(settings, "chop_live_waive_near_base_sep917_shape", True)):
-        from app.engines.chop_worst_flip_capture import chop_worst_flip_chop_live_waive_ok
-
-        near_ok, near_reason = chop_worst_flip_chop_live_waive_ok(
-            candidate,
-            snap,
-            state,
-            snapshots=snapshots,
-            settings=settings,
-        )
-        if near_ok:
-            meta["chopLiveNearBaseWaive"] = near_reason
-            return False, "ok", meta
-
-    if _candidate_structural_pad_lane(candidate, settings=settings):
-        meta["chopLiveStructuralPadWaive"] = True
-        return False, "ok", meta
-
     if getattr(settings, "chop_live_hard_block_worst_day", True) and snapshots:
         from app.engines.worst_day_guard import identify_worst_day
 
         verdict = identify_worst_day(state, snapshots)
-        from app.engines.live_paper_parity import legacy_live_narrow_stack_active
-
-        if verdict.is_worst and legacy_live_narrow_stack_active(settings):
+        if verdict.is_worst and settings.enable_live_trading:
             meta["worstDayHardBlock"] = True
             meta["worstDayReasons"] = verdict.reasons
             return True, "chop_live_worst_day_hard_block", meta
@@ -487,10 +417,6 @@ def chop_second_same_side_leg_blocked(
     """Block stacking a second explosion leg on the same side during chop/worst days."""
     settings = get_settings()
     meta: dict[str, Any] = {}
-    from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
-
-    if oct_paper_skip_live_only_session_gates(settings):
-        return False, "ok", meta
     if not getattr(settings, "chop_live_second_leg_block_enabled", True):
         return False, "ok", meta
     if str(getattr(candidate, "mode", "") or "") != "explosion":
@@ -551,10 +477,6 @@ def chop_live_early_fail_exit_reason(
     LIVE_HOLD_TO_STRUCTURAL_SL would otherwise defer early exits.
     """
     settings = get_settings()
-    from app.engines.live_paper_parity import trading_rules_match_paper
-
-    if trading_rules_match_paper(settings):
-        return None
     if not getattr(settings, "chop_live_early_fail_exit_enabled", True):
         return None
     ctx = getattr(trade, "entryContext", None) or {}
@@ -609,9 +531,7 @@ async def adopt_untracked_broker_legs(
     adopted: list[dict[str, Any]] = []
     if not getattr(settings, "live_broker_reconciliation_enabled", True):
         return adopted
-    from app.engines.live_paper_parity import entry_gates_match_paper
-
-    if not settings.enable_live_trading or entry_gates_match_paper(settings):
+    if not settings.enable_live_trading:
         return adopted
     if client is None:
         return adopted
@@ -662,15 +582,6 @@ async def adopt_untracked_broker_legs(
 
         from app.models.schemas import PaperTrade, StrategyType
 
-        entry_ctx: dict[str, Any] = {
-            "instrumentKey": instrument_key,
-            "executionMode": "LIVE",
-            "brokerAdopted": True,
-            "brokerQuantity": qty,
-            "lotSize": lot_size,
-            "chopLiveGuard": chop_flag,
-            "tradingSymbol": trading_symbol,
-        }
         trade = PaperTrade(
             id=str(uuid.uuid4())[:8],
             symbol=symbol,
@@ -682,12 +593,16 @@ async def adopt_untracked_broker_legs(
             openedAt=datetime.now(IST),
             strategyType=StrategyType.EXPLOSIVE,
             sessionDate=datetime.now(IST).strftime("%Y-%m-%d"),
-            entryContext=entry_ctx,
+            entryContext={
+                "instrumentKey": instrument_key,
+                "executionMode": "LIVE",
+                "brokerAdopted": True,
+                "brokerQuantity": qty,
+                "lotSize": lot_size,
+                "chopLiveGuard": chop_flag,
+                "tradingSymbol": trading_symbol,
+            },
         )
-        if snap is not None:
-            from app.engines.adaptive_exits import ensure_open_trade_exit_plan
-
-            ensure_open_trade_exit_plan(trade, snap)
         state.openPaperTrades.append(trade)
         tracked_keys.add(instrument_key)
         _adopted_instrument_keys_session.add(instrument_key)

@@ -453,10 +453,10 @@ def _failed_launch_reentry_exit_reasons(settings: Any) -> set[str]:
     raw = getattr(
         settings,
         "explosion_failed_launch_reentry_exit_reasons_csv",
-        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss,explosion_never_green_hard_stop",
+        "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss",
     )
     if not isinstance(raw, str) or not raw.strip():
-        raw = "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss,explosion_never_green_hard_stop"
+        raw = "explosion_failed_launch,explosion_never_green_stop,adaptive_stop_loss"
     return {part.strip() for part in raw.split(",") if part.strip()}
 
 
@@ -546,7 +546,6 @@ def failed_launch_reentry_blocked(
     symbol: str,
     side: Any,
     strike: float,
-    alert: dict[str, Any] | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Block same/nearby-strike re-entry after failed launch or never-green stop.
 
@@ -575,18 +574,6 @@ def failed_launch_reentry_blocked(
     )
     if prior is None or getattr(prior, "closedAt", None) is None:
         return False, meta
-    prior_strike = float(getattr(prior, "strike", 0) or 0)
-    strike_f = float(strike or 0)
-    if (
-        bool(getattr(settings, "structural_pad_failed_launch_reentry_waiver_enabled", True))
-        and isinstance(alert, dict)
-        and abs(prior_strike - strike_f) > 0.01
-    ):
-        from app.engines.live_paper_parity import structural_pad_entry_lane_active
-
-        if structural_pad_entry_lane_active(alert, settings=settings):
-            meta["structuralPadFailedLaunchReentryWaived"] = True
-            return False, meta
     reason = str(getattr(prior, "exitReason", "") or "")
     prior_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
     best = float(getattr(prior, "bestPnlPoints", 0) or 0)
@@ -650,91 +637,6 @@ def _prior_session_explosion_closes(
     return closes
 
 
-def same_strike_post_win_v_rip_reentry_waive(
-    state: AutoTraderState | None,
-    *,
-    symbol: str,
-    side: Any,
-    strike: float,
-    alert: Optional[dict[str, Any]] = None,
-    confidence: float = 0.0,
-    settings: Any = None,
-) -> tuple[bool, dict[str, Any]]:
-    """Waive post-win same-strike re-entry gates for a fresh V-rip / armed-base launch.
-
-    Oct 5: NIFTY 22550 CE morning win (+₹28k) then ~13:45 V-rip 65→125 blocked by ML /
-    shallow V-rip / CE-mirror put-leg priority despite ELITE 100 on radar.
-    """
-    from app.config import get_settings
-
-    settings = settings or get_settings()
-    meta: dict[str, Any] = {"waive": False}
-    if state is None:
-        return False, meta
-    if not bool(
-        getattr(settings, "same_strike_post_win_v_rip_reentry_waive_enabled", True)
-    ):
-        return False, meta
-
-    prior = _latest_same_strike_explosion_close(
-        state, symbol=symbol, side=side, strike=strike,
-    )
-    if prior is None:
-        return False, meta
-    prior_pnl = float(
-        getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0
-    )
-    min_win = float(
-        getattr(settings, "same_strike_post_win_v_rip_min_prior_win_inr", 5000.0)
-        or 5000.0
-    )
-    if prior_pnl + 1e-6 < min_win:
-        return False, meta
-
-    alert_d = alert if isinstance(alert, dict) else {}
-    tier = str(alert_d.get("tier") or "").upper()
-    score = float(
-        alert_d.get("explosionScore")
-        or alert_d.get("score")
-        or confidence
-        or 0
-    )
-    min_score = float(
-        getattr(settings, "same_strike_post_win_v_rip_min_tier_score", 90.0) or 90.0
-    )
-    tier_ok = tier in ("ELITE", "EXPLODING") and (
-        tier == "ELITE" or score + 1e-6 >= min_score
-    )
-    if tier == "ELITE":
-        tier_ok = score + 1e-6 >= min_score or score <= 0
-    if not tier_ok:
-        return False, meta
-
-    if not _first_strike_launch_waive_alert(alert_d):
-        return False, meta
-
-    local = float(
-        alert_d.get("localBaseMovePct")
-        or alert_d.get("ictBaseRelativeMovePct")
-        or 0
-    )
-    v_lo = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
-    v_hi = float(getattr(settings, "ict_v_rip_max_move_pct", 25.0) or 25.0)
-    if local > 0 and not (v_lo <= local <= v_hi + 1e-6):
-        return False, meta
-
-    meta.update(
-        {
-            "waive": True,
-            "reason": "same_strike_post_win_v_rip_reentry_waive",
-            "priorTradeId": getattr(prior, "id", None),
-            "priorPnlInr": round(prior_pnl, 2),
-            "localBaseMovePct": round(local, 2),
-        }
-    )
-    return True, meta
-
-
 def reentry_ml_win_prob_blocked(
     state: AutoTraderState,
     *,
@@ -743,7 +645,6 @@ def reentry_ml_win_prob_blocked(
     strike: float,
     snap: Any,
     confidence: float = 70.0,
-    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Block session / same-strike re-entries when ML win probability is too low.
 
@@ -763,30 +664,6 @@ def reentry_ml_win_prob_blocked(
         strike=strike,
     )
     if not prior_closes and same_strike_prior is None:
-        return False, meta
-
-    waived, waive_meta = same_strike_post_win_v_rip_reentry_waive(
-        state,
-        symbol=symbol,
-        side=side,
-        strike=strike,
-        alert=alert,
-        confidence=confidence,
-        settings=settings,
-    )
-    if waived:
-        meta.update(waive_meta)
-        meta["applied"] = False
-        return False, meta
-
-    from app.engines.live_paper_parity import oct_paper_structural_pad_context
-
-    if (
-        bool(getattr(settings, "oct_paper_reentry_ml_waiver_enabled", True))
-        and isinstance(alert, dict)
-        and oct_paper_structural_pad_context(alert, settings=settings)
-    ):
-        meta.update({"octPaperReentryMlWaived": True})
         return False, meta
 
     session_min = float(
@@ -1077,6 +954,38 @@ def session_peak_late_reentry_blocked(
     )
 
 
+def win_reentry_velocity_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    velocity_3s: float,
+) -> tuple[bool, str]:
+    """After a winning close, the same CE/PE strike needs live velocity before reentry."""
+    settings = get_settings()
+    if not bool(getattr(settings, "win_reentry_requires_velocity_enabled", True)):
+        return False, ""
+    prior = _latest_same_strike_explosion_close(
+        state, symbol=symbol, side=side, strike=strike,
+    )
+    if prior is None or getattr(prior, "closedAt", None) is None:
+        return False, ""
+    pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
+    if pnl <= 0:
+        return False, ""
+    min_v = float(
+        getattr(settings, "explosion_post_peak_reentry_min_velocity_3s", 1.5) or 1.5
+    )
+    try:
+        v3 = float(velocity_3s or 0)
+    except (TypeError, ValueError):
+        v3 = 0.0
+    if v3 + 1e-9 >= min_v:
+        return False, ""
+    return True, f"win_reentry_velocity_{v3:.2f}<{min_v:.2f}"
+
+
 def exhausted_ftv_reentry_blocked(
     state: AutoTraderState,
     *,
@@ -1333,28 +1242,6 @@ def session_same_side_loss_reentry_blocked(
         return False, meta
     prior = _latest_same_side_loss_close(state, side=side)
     if prior is None or getattr(prior, "closedAt", None) is None:
-        return False, meta
-
-    alert_row = None
-    if candidate is not None:
-        raw_alert = getattr(candidate, "alert", None)
-        if isinstance(raw_alert, dict):
-            alert_row = raw_alert
-    strike = 0.0
-    if candidate is not None:
-        try:
-            strike = float(getattr(candidate, "strike", 0) or 0)
-        except (TypeError, ValueError):
-            strike = 0.0
-    from app.engines.live_paper_parity import oct_paper_same_side_reentry_after_loss_waived
-
-    if oct_paper_same_side_reentry_after_loss_waived(
-        prior_loss_trade=prior,
-        strike=strike,
-        alert=alert_row,
-        settings=settings,
-    ):
-        meta.update({"octPaperSameSideReentryWaived": True})
         return False, meta
 
     now = datetime.now(_IST)

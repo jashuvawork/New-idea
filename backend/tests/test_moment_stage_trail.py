@@ -226,23 +226,6 @@ def test_evaluate_exit_books_stage_trail_pullback(mock_ms, mock_s, _hc, _mp):
 @patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.moment_stage_trail.get_settings")
-def test_evaluate_exit_defers_stage_trail_while_hot(mock_ms, mock_s, _hc, _mp):
-    """Stage pullback with hot 3s velocity — hold toward projected max, not stage trail."""
-    s = _settings()
-    mock_s.return_value = s
-    mock_ms.return_value = s
-    trade = _trade(entry=200.0, best=400.0, current=540.0)  # +340, below 350 floor
-    reason, _pnl = evaluate_explosion_exit(
-        trade, 540.0, "ELITE", 10, params=_params(), live_velocity_3s=3.0,
-    )
-    assert reason != "explosion_stage_trail"
-    assert reason != "explosion_target_hit"
-
-
-@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
-@patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
-@patch("app.engines.explosion_profit.get_settings")
-@patch("app.engines.moment_stage_trail.get_settings")
 def test_evaluate_exit_holds_while_above_floor(mock_ms, mock_s, _hc, _mp):
     s = _settings()
     mock_s.return_value = s
@@ -377,35 +360,6 @@ def test_ftv_pct_floor_arms_on_absolute_points_for_max_profit(mock_ms, mock_s):
     floor = ftv_runner_pct_floor(trade, 31.5, settings=s)
     assert floor is not None
     assert floor == pytest.approx(31.5 * 0.75, rel=0.01)
-
-
-@patch("app.engines.moment_stage_trail.get_settings")
-def test_deep_itm_small_pct_peak_does_not_arm_pct_keep(mock_ms):
-    """Oct7 SENSEX 72600 CE: +20pt but ~5% must not arm 75% scratch exit."""
-    from app.engines.moment_stage_trail import ftv_runner_pct_floor
-
-    s = _settings(ftv_runner_pct_trail_max_profit_min_gain_pct=8.0)
-    mock_ms.return_value = s
-    trade = PaperTrade(
-        id="sensex-72600",
-        symbol="SENSEX",
-        side=Side.CALL,
-        strike=72600.0,
-        entryPremium=418.82,
-        currentPremium=420.0,
-        lots=21,
-        openedAt=datetime.now(IST) - timedelta(minutes=10),
-        strategyType=StrategyType.EXPLOSIVE,
-        bestPnlPoints=20.48,
-        entryContext={
-            "maxProfitCapture": True,
-            "vBaseFtvRunner": True,
-            "momentStageLadder": True,
-            "projectedMaxTp": 1737.56,
-            "stageSize": 75.0,
-        },
-    )
-    assert ftv_runner_pct_floor(trade, 20.48, settings=s) is None
 
 
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
@@ -611,24 +565,24 @@ def test_sensex_put_392_holds_through_early_trail_dip(mock_ms, mock_s, _hc, _mp)
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.moment_stage_trail.get_settings")
 def test_pre_stage_deep_fade_still_books(mock_ms, mock_s, _hc, _mp):
-    """Deep fade through %-keep floor books peak keep when velocity has cooled."""
+    """Deep fade through provisional floor still exits via stage trail."""
     s = _settings()
     mock_s.return_value = s
     mock_ms.return_value = s
     trade = _trade(
         entry=392.05,
         best=43.22,
-        current=393.05,  # ~+1pt — through provisional %-keep floor
+        current=393.05,  # ~+1pt — through hot provisional floor
         projected=800.0,
         stage=75.0,
     )
-    trade.entryContext["liveVelocity3s"] = 0.2
+    trade.entryContext["liveVelocity3s"] = 4.4
     trade.bestPnlPoints = 43.22
     trade.pnlPoints = 1.0
     reason, pnl = evaluate_explosion_exit(
-        trade, 393.05, "EXPLODING", 10, params=_params(), live_velocity_3s=0.2,
+        trade, 393.05, "EXPLODING", 10, params=_params(), live_velocity_3s=4.4,
     )
-    assert reason in ("explosion_peak_keep_trail", "explosion_peak_velocity_reversal_keep")
+    assert reason == "explosion_peak_keep_trail"
     assert pnl > 0
 
 

@@ -28,34 +28,6 @@ class FtvAuthorization:
         return self.mode is not None
 
 
-def selector_rejection_reason(ranking: Mapping[str, Any]) -> str:
-    """Best funnel/selector label when causal grade is REJECT (not a score tag)."""
-    penalties = list(ranking.get("penalties") or [])
-    for entry in reversed(penalties):
-        code = str(entry.get("code") or "").strip()
-        if code:
-            return code
-    for tag in reversed(list(ranking.get("reasons") or [])):
-        text = str(tag or "")
-        if any(
-            text.startswith(prefix)
-            for prefix in (
-                "negative_",
-                "extended_",
-                "failed_",
-                "exhausted_",
-                "mid_rip",
-                "pad_lane",
-                "first_lift",
-            )
-        ):
-            return text
-    reasons = list(ranking.get("reasons") or [])
-    if reasons:
-        return str(reasons[-1])
-    return "selector_rejected"
-
-
 def _allocation_rank_blocks_ftv(
     *,
     require_allocation_rank_one: bool,
@@ -480,9 +452,6 @@ def ftv_authorization_policy(
     if str(evidence.get("mode") or "").lower() != "explosion":
         return blocked("ftv_elite_top_only_requires_explosion")
 
-    first_lift_lane = bool(
-        evidence.get("firstLift") or evidence.get("ictFirstLift")
-    )
     actual_ftv = bool(
         (
             evidence.get("flatThenVertical")
@@ -493,16 +462,6 @@ def ftv_authorization_policy(
         or evidence.get("vRipReady")
         or evidence.get("buildingRipReady")
         or _pad_lane_pre_lift(evidence)
-        or (
-            first_lift_lane
-            and (
-                evidence.get("flatThenVertical")
-                or evidence.get("armedBaseLaunch")
-                or evidence.get("eliteBaseReady")
-                or evidence.get("vRipReady")
-                or _pad_lane_pre_lift(evidence)
-            )
-        )
     )
     if not actual_ftv:
         return blocked("ftv_elite_top_only_requires_ftv")
@@ -1891,40 +1850,21 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
 
     rejected = False
     if timing == "FAILED_LAUNCH" or timing_action == "block" and v3 < 0:
-        from app.engines.live_paper_parity import oct_paper_first_lift_small_lift_context
-
-        failed_launch_block = True
-        from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
-
-        if oct_paper_first_lift_small_lift_context(evidence, settings=settings):
-            if v3 >= 0 or micro_pullback or _pad_lane_cold_velocity_ok(evidence, v3, v9):
-                failed_launch_block = False
-        if failed_launch_block and oct_paper_funnel_readiness_waived(
-            evidence, settings=settings,
-        ):
-            failed_launch_block = False
-        if failed_launch_block:
-            rejected = True
-            penalties.append({"code": "failed_launch", "points": 45.0})
-            score -= 45.0
+        rejected = True
+        penalties.append({"code": "failed_launch", "points": 45.0})
+        score -= 45.0
     if v3 < 0 and not micro_pullback and not _pad_lane_cold_velocity_ok(
         evidence, v3, v9
     ):
-        from app.engines.live_paper_parity import oct_paper_elite_rip_context
-
-        if not oct_paper_elite_rip_context(evidence, settings=settings):
-            rejected = True
+        rejected = True
     if exhausted:
         rejected = True
         penalties.append({"code": "exhausted_post_peak_reentry", "points": 60.0})
         score -= 60.0
     if bool(evidence.get("midRipCoil")):
-        from app.engines.live_paper_parity import oct_paper_funnel_readiness_waived
-
-        if not oct_paper_funnel_readiness_waived(evidence, settings=settings):
-            rejected = True
-            penalties.append({"code": "mid_rip_armed_coil", "points": 50.0})
-            score -= 50.0
+        rejected = True
+        penalties.append({"code": "mid_rip_armed_coil", "points": 50.0})
+        score -= 50.0
 
     elite_preauthorized = bool(
         elite_base_ready
@@ -2166,27 +2106,6 @@ def rank_entry_candidate(
             entry_hour_ist = live_snapshot.timestamp.astimezone(ZoneInfo("Asia/Kolkata")).hour
         except Exception:
             entry_hour_ist = None
-    off_high_move = alert.get("offHighMovePct") or pretrade.get("offHighMovePct")
-    if off_high_move is None:
-        sym = str(getattr(candidate, "symbol", "") or alert.get("symbol") or "")
-        if sym:
-            try:
-                from app.engines.explosion_detector import session_high_relative_move_pct
-
-                off_high_move = session_high_relative_move_pct(
-                    sym,
-                    float(getattr(candidate, "strike", 0) or alert.get("strike") or 0),
-                    getattr(candidate, "side", None) or alert.get("side"),
-                    float(
-                        getattr(event, "premium", 0)
-                        if event
-                        else alert.get("premium") or 0
-                    ),
-                )
-            except Exception:
-                off_high_move = 0
-        else:
-            off_high_move = 0
     evidence = {
         "mode": getattr(candidate, "mode", "") or ("explosion" if event else ""),
         "side": (
@@ -2255,7 +2174,6 @@ def rank_entry_candidate(
             alert.get("offLowMovePct")
             or pretrade.get("offLowMovePct")
         ),
-        "offHighMovePct": off_high_move,
         "firstLift": alert.get("ictFirstLift"),
         "eliteBaseReady": alert.get("ictEliteBaseReady"),
         "vRipReady": bool(

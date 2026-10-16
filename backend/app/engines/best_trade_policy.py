@@ -42,8 +42,6 @@ _NEW_BASE_MOMENT_TOKENS = frozenset({
     "ict_flat_then_vertical",
     "early_radar_pad",
     "ict_armed",
-    "v_rip_session_low",
-    "v_rip_session_low_ready",
 })
 
 
@@ -198,15 +196,6 @@ def symmetric_structural_base_evidence(
     max_local = effective_near_base_max_local_pct(settings)
     if local > max_local + 1e-6:
         return False
-    from app.engines.elite_score_engine import _v_rip_moment_evidence
-
-    rr = str(
-        evidence.get("firstLiftReadinessReason")
-        or evidence.get("ictBaseReadinessReason")
-        or ""
-    )
-    if _v_rip_moment_evidence(evidence, readiness_reason=rr):
-        return True
     return bool(
         evidence.get("ictBaseArmed")
         or evidence.get("armedBaseLaunch")
@@ -222,8 +211,6 @@ def symmetric_structural_base_evidence(
         or evidence.get("fastBullishLocalBase")
         or evidence.get("eliteBaseReady")
         or evidence.get("activeBreakout")
-        or evidence.get("vRipReady")
-        or evidence.get("ictVRipReady")
     )
 
 
@@ -728,10 +715,6 @@ def _call_atm_itm_launch_ok(
             or evidence.get("displacement")
         )
     ):
-        return True
-    from app.engines.elite_score_engine import _v_rip_moment_evidence
-
-    if _v_rip_moment_evidence(evidence, readiness_reason=readiness_reason):
         return True
     from app.engines.pe_win_ce_mirror import _building_rip_launch_ok
 
@@ -1254,10 +1237,6 @@ def expiry_cheap_otm_entry_blocked(
     settings = settings or get_settings()
     if not bool(getattr(settings, "best_trade_block_expiry_cheap_otm_enabled", True)):
         return False, ""
-    from app.engines.live_paper_parity import oct_paper_replica_active
-
-    if oct_paper_replica_active(settings):
-        return False, ""
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         return False, ""
     if snap is None or not is_symbol_expiry_day(snap):
@@ -1334,24 +1313,6 @@ def best_trade_chop_deep_chase_blocked(
         )
         if ok:
             return False, ""
-
-    if bool(
-        getattr(settings, "live_paper_parity_near_base_waives_chop_deep_chase", True)
-    ):
-        from app.engines.live_paper_parity import oct_paper_skip_live_only_session_gates
-
-        if oct_paper_skip_live_only_session_gates(settings):
-            snap = getattr(candidate, "snap", None)
-            alert = _alert_for_candidate(candidate)
-            ok_shape, _ = symmetric_best_trade_at_base_capture(
-                alert,
-                alert,
-                settings=settings,
-            )
-            if ok_shape and snap is not None:
-                money = _classify_moneyness(candidate, snap)
-                if money in ("ATM", "ITM"):
-                    return False, ""
 
     mode_u = str(day_mode or (elite_assessment or {}).get("dayMode") or "").upper()
     chop_day = any(

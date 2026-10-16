@@ -19,28 +19,6 @@ When changing **session gates, directional lock, breadth blocks, bypasses, or si
 
 Reference: `backend/app/engines/index_rally_side_flip.py` (`_call_rally_bypass` / `_put_slide_bypass`).
 
-## Frozen October (symmetric CE + PE)
-
-For the rest of October, **trading rules** live in one file: [`deploy/env.october-frozen.overlay`](deploy/env.october-frozen.overlay). **Capital** is separate: [`deploy/env.paper-150k.overlay`](deploy/env.paper-150k.overlay) (paper) or [`deploy/env.live-capital.overlay`](deploy/env.live-capital.overlay) (live arm, **any day budget** — risk limits are % of the book). New budget without re-arming: `sudo bash deploy/set-day-capital.sh <INR>` or the **Set Day Capital EC2** workflow.
-
-- Do **not** stack reactive gate PRs after bad sessions — edit the frozen overlay + **one PR** only when the stabilization bar is met.
-- Any side-specific gate change requires **CE + PE** paired tests and both bypass paths wired (see table above).
-- Deploy sign-off: `/api/deployment/status` → `frozenOctoberProfile.profileOk` and `livePaperProfile.profileOk`.
-- EC2: `sudo bash deploy/go-live-10k-monday.sh --prepare` (applies frozen rules + ₹1.5L paper capital by default).
-
-### Live arm checklist (Oct 1 rules — fail closed)
-
-1. `main` deployed — `/api/deployment/status` `commit` matches merged `main`.
-2. `sudo bash deploy/verify-oct-live-ready.sh` (or `EXPECT_LIVE=false` before arm).
-3. Upstox OAuth valid (`/api/upstox/login-url` if needed).
-4. `sudo LIVE_OVERLAY=deploy/env.live-capital.overlay LIVE_CAPITAL_INR=100000 bash deploy/go-live-10k-monday.sh --prepare`
-5. `sudo LIVE_OVERLAY=deploy/env.live-capital.overlay LIVE_CAPITAL_INR=<day budget> bash deploy/go-live-10k-monday.sh --arm-live` (includes session `reset`).
-6. `sudo EXPECT_LIVE=true LIVE_CAPITAL_INR=<day budget> bash deploy/verify-oct-live-ready.sh` — `/api/deployment/readiness` `readyForLive: true`.
-
-After live loss + return to paper: `go-live --paper` **and** `POST /api/auto-trader/reset` so daily loss stop does not block paper entries.
-
-**Intraday + post-session gate checklists** (entry, selection, CE/PE flip/switch, holding, exit, loss audit): [`deploy/october-live-session-checklists.md`](deploy/october-live-session-checklists.md).
-
 ## Stabilization playbook (owner mindset)
 
 **Goal:** Stop daily firefighting. Tune on **evidence**, deploy **once**, protect production uptime. Rule changes are expensive — default to **no change** unless the bar below is met.
@@ -156,5 +134,5 @@ Scheduled market monitors live in `.cursor/automations/` — enable those only v
 ### Radar / EOD storage (analysis-only from Aug 26+)
 - Intraday telemetry lives under `{TRADE_STORE_DIR}/radar_archives/telemetry/` (`*.premium.jsonl`, `*.funnel.jsonl`).
 - At **16:00 IST finalize**, the daily ZIP (`radar-YYYY-MM-DD.zip`) keeps only what EOD replay needs: **premium tape**, **funnel events**, **scorecard**, and radar entries. Alerts tape and pipeline history are **not** stored by default.
-- After finalize, intraday telemetry JSONL is **purged** (data remains in the ZIP). **`RADAR_ARCHIVE_RETENTION_DAYS=0`** (default) keeps **every** finalized `radar-*.zip`; set a positive value to prune old ZIPs on disk. Intraday JSONL rotation uses **`RADAR_TELEMETRY_RETENTION_DAYS`** (default 7). Optional off-box copy: **`RADAR_BACKUP_DIR`** / **`RADAR_BACKUP_S3_BUCKET`** at finalize.
+- After finalize, intraday telemetry JSONL is **purged** (data remains in the ZIP). Retention is **7 days** of ZIPs.
 - EOD replay reads `premium_tape.jsonl` from telemetry during the session, or from the ZIP after finalize (`/api/ai/eod-local-base-replay/{DATE}`).

@@ -13,9 +13,7 @@ def _strict_bool(value, default: bool = False) -> bool:
 def live_hold_to_structural_sl(settings=None) -> bool:
     """Live mode: skip INR force-stops / scratch exits — ride to structural SL only."""
     s = settings or get_settings()
-    from app.engines.live_paper_parity import legacy_live_narrow_stack_active
-
-    if not legacy_live_narrow_stack_active(s):
+    if not _strict_bool(getattr(s, "enable_live_trading", False)):
         return False
     if not _strict_bool(getattr(s, "auto_trading_enabled", True), True):
         return False
@@ -31,15 +29,12 @@ def effective_emergency_stop_inr(
     INR emergency cap — never wider than the point-stop budget.
     Prevents 60-lot trades from bleeding ₹20K+ when SL is ~2.5pt.
     """
-    from app.engines.capital_risk_limits import risk_limit_inr
-
     settings = get_settings()
     if not settings.emergency_stop_enabled:
         return float("inf")
-    emergency = risk_limit_inr("emergency_stop_inr", settings)
     if lots <= 0 or lot_multiplier <= 0 or stop_points <= 0:
-        return emergency
+        return settings.emergency_stop_inr
     point_budget = lots * lot_multiplier * stop_points
     if settings.emergency_stop_scale_with_position:
-        return min(emergency, point_budget)
-    return emergency
+        return min(settings.emergency_stop_inr, point_budget)
+    return settings.emergency_stop_inr
