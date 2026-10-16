@@ -1628,7 +1628,11 @@ class Settings(BaseSettings):
     # through the floor sells (Oct 16 NIFTY 23150 CALL gave +19.9pt back to +11.6).
     unified_profit_ladder_enabled: bool = True
     unified_profit_ladder_min_best_points: float = 4.0
-    unified_profit_ladder_min_hold_seconds: float = 60.0
+    # Book a green fade only after the trade has had time to work, and only
+    # after the high itself is a few minutes old. Oct 16 NIFTY 23150 CALL
+    # peaked at 11:31 and was sold at 11:32.
+    unified_profit_ladder_min_hold_seconds: float = 180.0
+    unified_profit_ladder_min_seconds_after_peak: float = 180.0
     unified_profit_ladder_breakeven_arm_pct: float = 8.0
     unified_profit_ladder_breakeven_lock_pct: float = 2.0
     unified_profit_ladder_keep_arm_pct: float = 15.0
@@ -3090,7 +3094,7 @@ class Settings(BaseSettings):
     # Do not tighten afternoon trail arm onto stage-ladder trades (6pt arm clips rips).
     afternoon_capture_skip_exit_tighten_on_stage_ladder: bool = True
     # Stage-ladder / peak-keep exits need a minimum hold — avoid 15s scratch on noise.
-    explosion_stage_trail_min_hold_seconds: float = 90.0
+    explosion_stage_trail_min_hold_seconds: float = 180.0
 
     # All-day explosive capture — 9:20–15:30 session rips (e.g. NIFTY 23850 PE 14:00 +1360%)
     all_day_explosion_capture_enabled: bool = True

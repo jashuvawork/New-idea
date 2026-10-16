@@ -10,7 +10,10 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.config import Settings
-from app.engines.explosion_profit import evaluate_explosion_exit
+from app.engines.explosion_profit import (
+    evaluate_explosion_exit,
+    unified_profit_ladder_exit_reason,
+)
 from app.engines.moment_stage_trail import profit_ladder_floor
 from app.models.schemas import PaperTrade, Side, StrategyType
 
@@ -81,6 +84,8 @@ def _oct12_runner(side: Side, **kw) -> PaperTrade:
 def test_enabled_by_default_ce_pe(side):
     s = Settings()
     assert s.unified_profit_ladder_enabled is True
+    assert s.unified_profit_ladder_min_hold_seconds == 180.0
+    assert s.unified_profit_ladder_min_seconds_after_peak == 180.0
     floor, layer = profit_ladder_floor(_oct12_runner(side), 10.2, settings=s)
     assert layer == "peak_keep"
     assert floor == pytest.approx(7.65)
@@ -117,6 +122,24 @@ def test_min_hold_blocks_early_peak_keep_ce_pe(side):
             trade, best=10.2, pnl_pts=7.0, hold_seconds=30, live_velocity_3s=-0.5,
         )
     assert reason is None
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_fresh_peak_holds_three_minutes_ce_pe(side):
+    """A high that printed under 3 minutes ago is still a hold, CALL and PUT."""
+    s = _settings()
+    trade = _oct12_runner(side, seconds=17 * 60)
+    trade.maxLtpAt = datetime.now(IST) - timedelta(seconds=40)
+    with _use(s):
+        early = unified_profit_ladder_exit_reason(
+            trade, best=10.2, pnl_pts=7.0, hold_seconds=17 * 60, live_velocity_3s=-0.5,
+        )
+        trade.maxLtpAt = datetime.now(IST) - timedelta(seconds=200)
+        aged = unified_profit_ladder_exit_reason(
+            trade, best=10.2, pnl_pts=7.0, hold_seconds=17 * 60, live_velocity_3s=-0.5,
+        )
+    assert early is None
+    assert aged == "explosion_profit_ladder_peak_keep"
 
 
 @pytest.mark.parametrize("side", SIDES)
