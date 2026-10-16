@@ -15,6 +15,51 @@ def exit_order_tag(trade_id: str) -> str:
     return f"nqx_{str(trade_id)[:12]}"
 
 
+_REJECTED_ORDER_STATUSES = {"rejected", "cancelled", "canceled"}
+_COMPLETE_ORDER_STATUSES = {"complete", "completed", "filled"}
+
+
+async def live_order_fill(client: UpstoxClient, order_id: str) -> dict[str, Any]:
+    """Broker status and average price for one order id.
+
+    Live exits are market sells. The snapshot that triggered the exit is not the
+    fill. The booked exit is this average once the order is complete.
+    """
+    wanted = str(order_id or "")
+    if not wanted:
+        return {"status": "", "averagePrice": 0.0, "filledQuantity": 0.0}
+    for order in await client.get_order_book():
+        if not isinstance(order, dict):
+            continue
+        if str(order.get("order_id") or "") != wanted:
+            continue
+        status = str(order.get("status") or "").lower()
+        try:
+            average = float(order.get("average_price") or 0)
+        except (TypeError, ValueError):
+            average = 0.0
+        try:
+            filled = float(order.get("filled_quantity") or 0)
+        except (TypeError, ValueError):
+            filled = 0.0
+        return {
+            "status": status,
+            "averagePrice": average if average > 0 else 0.0,
+            "filledQuantity": filled,
+        }
+    return {"status": "", "averagePrice": 0.0, "filledQuantity": 0.0}
+
+
+def live_order_fill_complete(fill: dict[str, Any]) -> bool:
+    status = str(fill.get("status") or "").lower()
+    average = float(fill.get("averagePrice") or 0)
+    return average > 0 and status in _COMPLETE_ORDER_STATUSES
+
+
+def live_order_fill_rejected(fill: dict[str, Any]) -> bool:
+    return str(fill.get("status") or "").lower() in _REJECTED_ORDER_STATUSES
+
+
 async def find_existing_exit_order(
     client: UpstoxClient,
     trade: PaperTrade,
