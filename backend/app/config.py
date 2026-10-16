@@ -1622,6 +1622,22 @@ class Settings(BaseSettings):
     ftv_runner_pct_trail_arm_min_best_points: float = 20.0
     ftv_runner_pct_trail_keep_ratio: float = 0.75
     ftv_runner_pct_trail_min_best_points: float = 6.0
+    # Unified profit ladder — one ratcheting floor in % of entry premium that folds
+    # breakeven lock, 75% peak-keep and N×/k× capture together. Legacy exit layers
+    # still run after it; whichever floor is higher books first. On so a fade
+    # through the floor sells (Oct 16 NIFTY 23150 CALL gave +19.9pt back to +11.6).
+    unified_profit_ladder_enabled: bool = True
+    unified_profit_ladder_min_best_points: float = 4.0
+    unified_profit_ladder_min_hold_seconds: float = 60.0
+    unified_profit_ladder_breakeven_arm_pct: float = 8.0
+    unified_profit_ladder_breakeven_lock_pct: float = 2.0
+    unified_profit_ladder_keep_arm_pct: float = 15.0
+    unified_profit_ladder_keep_ratio: float = 0.75
+    unified_profit_ladder_multiple_arm_ratio: float = 2.0
+    unified_profit_ladder_multiple_min_giveback_points: float = 3.0
+    unified_profit_ladder_multiple_min_giveback_pct_of_peak: float = 5.0
+    unified_profit_ladder_fast_fade_velocity_3s: float = 2.0
+    unified_profit_ladder_hot_defer_velocity_3s: float = 2.0
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.
