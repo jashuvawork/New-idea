@@ -1,6 +1,6 @@
 """Live-only exit/entry efficiency — velocity units, slow-bleed keep, near-strike block."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -57,7 +57,7 @@ def test_slow_bleed_keep_without_fast_velocity(mock_settings):
         strike=23800.0,
         entryPremium=150.8,
         lots=18,
-        openedAt=datetime.now(tz=IST),
+        openedAt=datetime.now(tz=IST) - timedelta(minutes=10),
         strategyType=StrategyType.EXPLOSIVE,
         entryContext={
             "maxProfitCapture": True,
@@ -82,7 +82,7 @@ def test_slow_bleed_requires_min_giveback(mock_settings):
         strike=23800.0,
         entryPremium=150.8,
         lots=18,
-        openedAt=datetime.now(tz=IST),
+        openedAt=datetime.now(tz=IST) - timedelta(minutes=10),
         strategyType=StrategyType.EXPLOSIVE,
     )
     reason = peak_velocity_reversal_keep_reason(
