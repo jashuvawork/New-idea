@@ -173,7 +173,7 @@ def test_pre_stage_suppressed_for_modest_peak(mock_s):
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.moment_stage_trail.get_settings")
 def test_sep03_modest_peak_exits_on_fade(mock_ms, mock_s, _hc, _mp):
-    """Sep03 NIFTY: peak +16.4pt, fade to +4pt books via 75% peak-keep."""
+    """Sep03 NIFTY: peak +16.4pt, fade to +4pt books via the 75% profit ladder."""
     s = _settings()
     mock_s.return_value = s
     mock_ms.return_value = s
@@ -189,7 +189,7 @@ def test_sep03_modest_peak_exits_on_fade(mock_ms, mock_s, _hc, _mp):
     reason, pnl = evaluate_explosion_exit(
         trade, 83.88, "ELITE", 4200, params=params, live_velocity_3s=0.0,
     )
-    assert reason == "explosion_peak_keep_trail"
+    assert reason == "explosion_profit_ladder_peak_keep"
     assert pnl > 3.0
 
     # Still above 75% of peak — hold
