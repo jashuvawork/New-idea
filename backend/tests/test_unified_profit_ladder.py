@@ -1,4 +1,8 @@
-"""Unified profit ladder: breakeven → 75% peak-keep → N×/k× capture in one ratcheting floor."""
+"""Unified profit ladder: 75% peak-keep and N×/k× in one ratcheting floor.
+
+The 8% breakeven lock is off by default. Turning
+``unified_profit_ladder_breakeven_enabled`` back on restores the entry+2% tier.
+"""
 
 from __future__ import annotations
 
@@ -84,6 +88,7 @@ def _oct12_runner(side: Side, **kw) -> PaperTrade:
 def test_enabled_by_default_ce_pe(side):
     s = Settings()
     assert s.unified_profit_ladder_enabled is True
+    assert s.unified_profit_ladder_breakeven_enabled is False
     assert s.unified_profit_ladder_min_hold_seconds == 180.0
     assert s.unified_profit_ladder_min_seconds_after_peak == 180.0
     floor, layer = profit_ladder_floor(_oct12_runner(side), 10.2, settings=s)
@@ -154,8 +159,31 @@ def test_oct7_deep_itm_small_pct_does_not_arm_ce_pe(side):
 
 
 @pytest.mark.parametrize("side", SIDES)
-def test_breakeven_tier_locks_two_pct_ce_pe(side):
+def test_breakeven_lock_off_by_default_ce_pe(side):
+    """A +10% peak does not lock entry+2%. Peak-keep and N× still arm above it."""
+    s = Settings()
+    trade = _trade(side, 100.0, 10.0)
+    assert profit_ladder_floor(trade, 10.0, settings=s) is None
+    with _use(s):
+        reason, _ = evaluate_explosion_exit(trade, 101.5, "ELITE", 65, live_velocity_3s=-0.5)
+    assert reason is None or not str(reason).startswith("explosion_profit_ladder")
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_oct16_sub_fifteen_pct_peaks_stay_open_ce_pe(side):
+    """Oct 16 23050 CALL +13% and 14:28 23150 CALL +12.3% do not arm the ladder."""
     s = _settings()
+    deep = _trade(side, 127.5, 16.6, strike=23050.0)
+    deep.maxLtp = 144.1
+    late = _trade(side, 54.83, 6.77, strike=23150.0)
+    late.maxLtp = 61.60
+    assert profit_ladder_floor(deep, 16.6, settings=s) is None
+    assert profit_ladder_floor(late, 6.77, settings=s) is None
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_breakeven_tier_locks_two_pct_when_enabled_ce_pe(side):
+    s = _settings(unified_profit_ladder_breakeven_enabled=True)
     trade = _trade(side, 100.0, 10.0)
     floor, layer = profit_ladder_floor(trade, 10.0, settings=s)
     assert (floor, layer) == (pytest.approx(2.0), "breakeven")

@@ -26,6 +26,8 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["DAILY_LOSS_STOP_INR"] == "20000"
     assert env["FALLBACK_CAPITAL_INR"] == "200000"
     assert env["MAX_SIZING_CAPITAL_INR"] == "200000"
+    assert env["UNIFIED_PROFIT_LADDER_ENABLED"] == "true"
+    assert env["UNIFIED_PROFIT_LADDER_BREAKEVEN_ENABLED"] == "false"
     assert env["PER_TRADE_CAPITAL_PCT"] == "0.90"
     assert env["ORDINARY_ENTRY_MAX_CAPITAL_PCT"] == "0.35"
     assert env["FULL_SLEEVE_REQUIRES_ARMED_LAUNCH"] == "true"
