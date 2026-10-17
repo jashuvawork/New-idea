@@ -1622,10 +1622,10 @@ class Settings(BaseSettings):
     ftv_runner_pct_trail_arm_min_best_points: float = 20.0
     ftv_runner_pct_trail_keep_ratio: float = 0.75
     ftv_runner_pct_trail_min_best_points: float = 6.0
-    # Unified profit ladder — one ratcheting floor in % of entry premium that folds
-    # breakeven lock, 75% peak-keep and N×/k× capture together. Legacy exit layers
-    # still run after it; whichever floor is higher books first. On so a fade
-    # through the floor sells (Oct 16 NIFTY 23150 CALL gave +19.9pt back to +11.6).
+    # Unified profit ladder — one ratcheting floor that keeps 75% of a ≥15%
+    # peak and N×/k× capture. The 8% breakeven lock is off so a +12% peak can
+    # still run (Oct 16 14:28 NIFTY 23150 CALL). Legacy exit layers still run
+    # after it; whichever floor is higher books first.
     unified_profit_ladder_enabled: bool = True
     unified_profit_ladder_min_best_points: float = 4.0
     # Book a green fade only after the trade has had time to work, and only
@@ -1633,6 +1633,9 @@ class Settings(BaseSettings):
     # peaked at 11:31 and was sold at 11:32.
     unified_profit_ladder_min_hold_seconds: float = 180.0
     unified_profit_ladder_min_seconds_after_peak: float = 180.0
+    # Off: a peak of 8–15% no longer locks entry+2%. N× (2×) and k× (75% of a
+    # ≥3× peak, same "multiple" layer) stay on the tiers below.
+    unified_profit_ladder_breakeven_enabled: bool = False
     unified_profit_ladder_breakeven_arm_pct: float = 8.0
     unified_profit_ladder_breakeven_lock_pct: float = 2.0
     unified_profit_ladder_keep_arm_pct: float = 15.0

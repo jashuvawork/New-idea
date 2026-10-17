@@ -661,12 +661,13 @@ def profit_ladder_floor(
     """Unified ratcheting profit floor (P&L points) and the tier that owns it.
 
     Tiers by peak gain off entry premium:
-      * breakeven  — peak ≥ 8%: lock entry + 2%.
       * peak_keep  — peak ≥ 15%: keep 75% of peak gain.
       * multiple   — max LTP ≥ N× entry: floor at N× entry or 75% of peak gain,
         whichever is higher, but always at least max(3pt, 5% of peak LTP) under the
         peak so a tick under N× does not cut a fresh print. k× ratchets via the
         75% keep (k ≥ 3 always sits above the N× floor).
+      * breakeven  — off unless ``unified_profit_ladder_breakeven_enabled``. When
+        on, a peak ≥ 8% locks entry + 2%.
     """
     s = settings or get_settings()
     if getattr(s, "unified_profit_ladder_enabled", False) is not True:
@@ -693,7 +694,10 @@ def profit_ladder_floor(
         floor_pts, layer = max(multiple_floor, best * keep, be_floor), "multiple"
     elif gain_pct >= _cfg_float(s, "unified_profit_ladder_keep_arm_pct", 15.0):
         floor_pts, layer = max(best * keep, be_floor), "peak_keep"
-    elif gain_pct >= _cfg_float(s, "unified_profit_ladder_breakeven_arm_pct", 8.0):
+    elif (
+        getattr(s, "unified_profit_ladder_breakeven_enabled", False) is True
+        and gain_pct >= _cfg_float(s, "unified_profit_ladder_breakeven_arm_pct", 8.0)
+    ):
         floor_pts, layer = be_floor, "breakeven"
     else:
         return None
