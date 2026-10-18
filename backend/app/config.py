@@ -3766,6 +3766,9 @@ class Settings(BaseSettings):
     # slow/OOM restart loop. 10s granularity still replays FTV/V base lifts fine, and the LIVE
     # trigger never uses the tape. Set 0 only for short debug windows.
     radar_premium_tape_sample_seconds: int = 10
+    # Per-append fsync on radar telemetry JSONL. Off: on a throttled EBS volume it stalled
+    # the event loop past the 20s watchdog (Oct 13 midday restart loop).
+    radar_telemetry_fsync_enabled: bool = False
     # Cap how much of the (append-only, time-ordered) premium tape the startup restore reads.
     # It only needs the last ~35 min, so tail-read at most this many bytes instead of parsing
     # the whole intraday file — bounds startup time/memory regardless of tape size.
