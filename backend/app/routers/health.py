@@ -29,6 +29,16 @@ async def health():
     return {"status": "ok", "loopWatchdog": watchdog_status()}
 
 
+@router.get("/api/deployment/loop-stalls")
+async def loop_stalls(limit: int = 10):
+    """Event-loop stalls (blocked-thread stacks) recorded by the watchdog, newest first."""
+    import asyncio
+
+    from app.loop_watchdog import recent_stalls
+
+    return {"stalls": await asyncio.to_thread(recent_stalls, min(max(limit, 1), 50))}
+
+
 @router.get("/api/deployment/status")
 async def deployment_status():
     from app.loop_watchdog import watchdog_status
