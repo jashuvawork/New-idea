@@ -814,7 +814,7 @@ async def _open_from_candidate(
     if snapshots:
         live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
         if live_blocked and settings.enable_live_trading:
-            if bool(getattr(settings, "live_disable_session_lift", True)):
+            if bool(getattr(settings, "live_disable_session_lift", False)):
                 return False, "live_no_session_lift"
 
             from app.engines.chop_live_guards import chop_live_session_lift_allowed
@@ -4590,7 +4590,7 @@ async def process(
 
             ref_snap = next(iter(snapshots.values()))
             lift_ok = chop_live_session_lift_allowed(state, ref_snap, snapshots)
-            if not lift_ok or bool(getattr(settings, "live_disable_session_lift", True)):
+            if not lift_ok or bool(getattr(settings, "live_disable_session_lift", False)):
                 session_lift = False
         if policy == "PAUSED" and not session_lift:
             skipped.append({

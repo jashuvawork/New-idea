@@ -143,7 +143,7 @@ def chop_live_session_lift_allowed(
 ) -> bool:
     """Session lift must not bypass live worst/chop blocks when disabled."""
     settings = get_settings()
-    if not getattr(settings, "chop_live_disable_session_lift", True):
+    if not getattr(settings, "chop_live_disable_session_lift", False):
         return True
     if not settings.enable_live_trading:
         return True

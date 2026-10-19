@@ -80,6 +80,19 @@ def _candidate(score=240.0, pad=8.0):
 
 
 @patch("app.engines.live_best_trades.get_settings")
+def test_gate_off_lets_the_paper_book_through(mock_settings):
+    mock_settings.return_value = _settings(live_best_trades_only_enabled=False)
+    blocked, reason, _ = live_best_trade_entry_blocked(
+        _candidate(),
+        _snap(),
+        AutoTraderState(),
+        ranking={"grade": "A", "evidence": {"tier": "EXPLODING"}},
+    )
+    assert blocked is False
+    assert reason == "ok"
+
+
+@patch("app.engines.live_best_trades.get_settings")
 def test_blocks_sub_s_grade(mock_settings):
     mock_settings.return_value = _settings()
     blocked, reason, _ = live_best_trade_entry_blocked(

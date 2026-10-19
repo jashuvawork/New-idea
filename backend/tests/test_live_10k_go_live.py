@@ -1,12 +1,15 @@
-"""₹10k live overlay and milestone bypass for small-cap go-live."""
+"""Live arm uses the paper book. The ₹10k overlay is gone."""
 
 import asyncio
+import os
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
+from app.config import Settings
 from app.engines.explosion_profit import evaluate_explosion_exit
 from app.models.schemas import AutoTraderState, PaperTrade, Side, StrategyType
 from app.routers.health import deployment_readiness
@@ -16,31 +19,86 @@ IST = ZoneInfo("Asia/Kolkata")
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _overlay_values() -> dict[str, str]:
-    values: dict[str, str] = {}
-    for line in (ROOT / "deploy/env.live-10k.overlay").read_text().splitlines():
+def test_live_10k_profile_is_removed():
+    assert not (ROOT / "deploy/env.live-10k.overlay").exists()
+    assert not (ROOT / "deploy/go-live-10k-monday.sh").exists()
+    assert not (ROOT / ".github/workflows/arm-live-10k.yml").exists()
+    blob = "\n".join(
+        path.read_text()
+        for path in (ROOT / ".github/workflows").glob("*.yml")
+    )
+    assert "go-live-10k-monday.sh" not in blob
+    assert "env.live-10k.overlay" not in blob
+    assert "ARM-LIVE-10K" not in blob
+    settings = Settings()
+    assert settings.live_best_trades_only_enabled is False
+    assert settings.live_disable_session_lift is False
+    assert settings.chop_live_disable_session_lift is False
+    assert settings.live_early_fail_exit_enabled is False
+    assert settings.chop_live_early_fail_exit_enabled is False
+    assert settings.fallback_capital_inr == 200_000
+    assert settings.daily_loss_stop_inr == 20_000
+
+
+def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
+    env_file = tmp_path / "env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "FALLBACK_CAPITAL_INR=10000",
+                "MAX_SIZING_CAPITAL_INR=10000",
+                "DAILY_LOSS_STOP_INR=1000",
+                "EMERGENCY_STOP_INR=1000",
+                "TOP_MOMENTS_MIN_GRADE=S",
+                "LIVE_BEST_TRADES_ONLY_ENABLED=true",
+                "LIVE_EARLY_FAIL_EXIT_ENABLED=true",
+                "LIVE_DISABLE_SESSION_LIFT=true",
+                "CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED=true",
+                "CHOP_LIVE_DISABLE_SESSION_LIFT=true",
+                "CHOP_LIVE_HARD_BLOCK_WORST_DAY=true",
+                "LOSS_STREAK_PAUSE_COUNT=1",
+                "SESSION_LARGE_LOSS_PAUSE_INR=400",
+                "DAILY_PROFIT_TARGET_INR=1800",
+                "FTV_ALLOCATION_MAX_POSITIONS=1",
+                "ENABLE_LIVE_TRADING=false",
+                "PAPER_TRADING=true",
+                "",
+            ]
+        )
+    )
+    subprocess.run(
+        ["bash", str(ROOT / "deploy/set-execution-mode.sh"), "--live"],
+        check=True,
+        env={
+            **os.environ,
+            "ENV_FILE": str(env_file),
+            "REPO_DIR": str(ROOT),
+            "SKIP_RESTART": "1",
+        },
+        cwd=ROOT,
+    )
+    text = env_file.read_text()
+    values = {}
+    for line in text.splitlines():
         if "=" in line and not line.lstrip().startswith("#"):
             key, value = line.split("=", 1)
             values[key] = value
-    return values
-
-
-def test_live_10k_overlay_scales_capital_and_risk():
-    env = _overlay_values()
-    assert env["FALLBACK_CAPITAL_INR"] == "10000"
-    assert env["MAX_SIZING_CAPITAL_INR"] == "10000"
-    assert env["USE_UPSTOX_CAPITAL_FOR_SIZING"] == "true"
-    assert env["LIVE_MILESTONE_REQUIRED"] == "false"
-    assert env["DAILY_LOSS_STOP_INR"] == "1000"
-    assert env["EMERGENCY_STOP_ENABLED"] == "false"
-    assert env["EMERGENCY_STOP_INR"] == "1000"
-    assert env["LIVE_HOLD_TO_STRUCTURAL_SL"] == "true"
-    assert env["MAX_RISK_PER_TRADE_INR"] == "0"
-    assert env["EXPLOSION_PER_TRADE_MAX_LOSS_INR"] == "0"
-    assert env["EXPLOSION_EXCEPTIONAL_PER_TRADE_MAX_LOSS_INR"] == "0"
-    assert env["INDEX_CONFIRMED_FTV_PER_TRADE_MAX_LOSS_INR"] == "0"
-    assert env["SESSION_LARGE_LOSS_PAUSE_INR"] == "400"
-    assert env["ENABLE_LIVE_TRADING"] == "false"
+    assert values["FALLBACK_CAPITAL_INR"] == "200000"
+    assert values["MAX_SIZING_CAPITAL_INR"] == "200000"
+    assert values["DAILY_LOSS_STOP_INR"] == "20000"
+    assert values["EMERGENCY_STOP_INR"] == "20000"
+    assert values["TOP_MOMENTS_MIN_GRADE"] == "A"
+    assert values["LIVE_BEST_TRADES_ONLY_ENABLED"] == "false"
+    assert values["LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
+    assert values["LIVE_DISABLE_SESSION_LIFT"] == "false"
+    assert values["CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
+    assert values["CHOP_LIVE_DISABLE_SESSION_LIFT"] == "false"
+    assert values["CHOP_LIVE_HARD_BLOCK_WORST_DAY"] == "false"
+    assert values["DAILY_PROFIT_TARGET_INR"] == "44000"
+    assert values["FTV_ALLOCATION_MAX_POSITIONS"] == "3"
+    assert values["ENABLE_LIVE_TRADING"] == "true"
+    assert values["PAPER_TRADING"] == "false"
+    assert "10000" not in text
 
 
 def test_readiness_skips_milestone_when_not_required():
@@ -159,7 +217,7 @@ def test_live_hold_skips_inr_force_stop_and_rides_to_adaptive_sl():
 
 
 def test_live_structural_hold_bypasses_entry_per_trade_risk_cap():
-    """₹10k live: full sleeve + structural SL must not die on pre-entry INR clip."""
+    """Live structural hold must not die on a pre-entry INR clip."""
     from unittest.mock import MagicMock, patch
 
     from app.engines.risk_engine import RiskEngine

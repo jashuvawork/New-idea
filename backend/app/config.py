@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     shadow_trade_all_signals: bool = True
     # Live: skip INR force-stops / scratch exits — let open trades hit structural SL.
     live_hold_to_structural_sl: bool = True
-    # Live / paper-live parity: flatten all open legs at power_hour_end (15:45 IST, broker last print).
+    # Live and paper: flatten all open legs at power_hour_end (15:45 IST, broker last print).
     live_session_close_force_exit_enabled: bool = True
     # Open-trade MTM: reject WS/REST spike glitches vs entry, heatmap, and tick median.
     open_trade_ltp_sanity_enabled: bool = True
@@ -98,8 +98,9 @@ class Settings(BaseSettings):
     chop_second_tier_stop_breach_ratio: float = 0.85
     chop_second_tier_min_hold_before_loss_seconds: int = 120
     live_broker_reconciliation_enabled: bool = True
-    # Live worst/chop: session lift must NOT bypass worst-day live blocks.
-    chop_live_disable_session_lift: bool = True
+    # Session lift is the same on live and paper. The ₹10k live profile
+    # used to turn this off so a top signal could not lift a chop label.
+    chop_live_disable_session_lift: bool = False
     # Off. Oct 19 the selector had already picked the puts, then this wire
     # refused every one because the day was still labeled worst. The other chop
     # guards (immature base, faded rip, extended chase) stay.
@@ -137,8 +138,9 @@ class Settings(BaseSettings):
     # Trap-stamped chop+elite exits: modest MFE then bleed (Sep08 +1.45pt → adaptive SL).
     chop_live_trap_early_fail_max_best_points: float = 2.0
     chop_live_trap_early_fail_max_hold_seconds: int = 600
-    # Live best-trades-only — strict real-money quality bar (₹10k book).
-    live_best_trades_only_enabled: bool = True
+    # Off. Live uses the paper / Oct 1 entry gates. The grade-S / score-200
+    # bar was the ₹10k live profile and does not run on the paper book.
+    live_best_trades_only_enabled: bool = False
     live_best_trades_min_grade: str = "S"
     live_best_trades_min_explosion_score: float = 200.0
     live_best_trades_tiers_csv: str = "ELITE,EXPLODING"
@@ -148,7 +150,9 @@ class Settings(BaseSettings):
     live_max_open_positions: int = 1
     live_max_same_side_positions: int = 1
     live_pause_after_session_losses: int = 1
-    live_disable_session_lift: bool = True
+    # Off with the ₹10k profile. A top-signal session lift that paper allows
+    # is allowed on live too.
+    live_disable_session_lift: bool = False
     live_early_fail_exit_enabled: bool = False
     live_early_fail_min_hold_seconds: int = 45
     live_early_fail_max_hold_seconds: int = 240

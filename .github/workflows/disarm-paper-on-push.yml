@@ -43,20 +43,7 @@ jobs:
               "git fetch origin main",
               "git checkout main",
               "git pull --ff-only origin main || git reset --hard origin/main",
-              "if grep -q 'MODE=paper' deploy/go-live-10k-monday.sh 2>/dev/null; then",
-              "  sudo bash deploy/go-live-10k-monday.sh --paper",
-              "else",
-              "  curl -sf -X POST http://127.0.0.1:8000/api/execution/stop || true",
-              "  ENV=/opt/nexusquant/env",
-              "  touch $ENV",
-              "  for kv in ENABLE_LIVE_TRADING=false PAPER_TRADING=true PAPER_SLIPPAGE_ENABLED=true PAPER_SIMULATE_BROKER_ORDERS=true SHADOW_TRADE_ALL_SIGNALS=true; do",
-              "    k=${kv%%=*}; v=${kv#*=}",
-              "    if grep -q \"^${k}=\" $ENV; then sed -i \"s|^${k}=.*|${k}=${v}|\" $ENV; else echo ${k}=${v} >> $ENV; fi",
-              "  done",
-              "  docker compose -f docker-compose.prod.yml up -d --force-recreate --no-deps backend",
-              "  sleep 6",
-              "  curl -sf -X POST http://127.0.0.1:8000/api/execution/resume || true",
-              "fi",
+              "sudo bash deploy/set-execution-mode.sh --paper",
               "curl -sf http://127.0.0.1:8000/api/deployment/status | python3 -m json.tool | head -40"
             ]' \
             --query Command.CommandId \
