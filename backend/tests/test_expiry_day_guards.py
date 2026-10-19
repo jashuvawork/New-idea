@@ -71,7 +71,7 @@ def test_morning_vs_evening_windows():
 
     with patch("app.engines.expiry_day_guards.datetime") as mock_dt:
         mock_dt.now.return_value = datetime(2026, 6, 30, 15, 15, tzinfo=IST)
-        assert in_expiry_evening_block() is True
+        assert in_expiry_evening_block() is False
 
     with patch("app.engines.expiry_day_guards.get_settings") as mock_settings:
         s = mock_settings.return_value
@@ -95,7 +95,7 @@ def test_evening_block_summary_only_when_expiry_today():
         with patch("app.engines.expiry_day_guards._minutes_now", return_value=15 * 60 + 15):
             summary = expiry_guard_summary(state, non_expiry)
     assert summary["expirySession"] is False
-    assert summary["pastEveningBlockTime"] is True
+    assert summary["pastEveningBlockTime"] is False
     assert summary["eveningBlock"] is False
     assert summary["eveningBlockActive"] is False
 
@@ -104,9 +104,9 @@ def test_evening_block_summary_only_when_expiry_today():
         with patch("app.engines.expiry_day_guards._minutes_now", return_value=15 * 60 + 15):
             summary = expiry_guard_summary(state, expiry_today)
     assert summary["expirySession"] is True
-    assert summary["pastEveningBlockTime"] is True
-    assert summary["eveningBlock"] is True
-    assert summary["eveningBlockActive"] is True
+    assert summary["pastEveningBlockTime"] is False
+    assert summary["eveningBlock"] is False
+    assert summary["eveningBlockActive"] is False
 
 
 def test_predict_worst_expiry_day():

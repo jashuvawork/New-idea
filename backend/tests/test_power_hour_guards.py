@@ -1,4 +1,4 @@
-"""Power hour — top trades only after 15:00 IST."""
+"""Power hour clock. Top-only after 15:00 is off; 15:45 is still the last print."""
 
 from datetime import datetime
 from unittest.mock import patch
@@ -24,7 +24,20 @@ def _snap() -> SymbolSnapshot:
 
 @patch("app.engines.power_hour_guards.get_market_phase", return_value="LIVE_MARKET")
 @patch("app.engines.power_hour_guards._minutes_now", return_value=15 * 60 + 10)
-def test_power_hour_window_active(_mins, _phase):
+def test_power_hour_top_only_off_leaves_window_open(_mins, _phase):
+    assert in_power_hour_window() is False
+
+
+@patch("app.engines.power_hour_guards.get_settings")
+@patch("app.engines.power_hour_guards.get_market_phase", return_value="LIVE_MARKET")
+@patch("app.engines.power_hour_guards._minutes_now", return_value=15 * 60 + 10)
+def test_power_hour_window_active_when_top_only_forced(_mins, _phase, mock_settings):
+    s = mock_settings.return_value
+    s.power_hour_top_only_enabled = True
+    s.power_hour_start_hour = 15
+    s.power_hour_start_minute = 0
+    s.power_hour_end_hour = 15
+    s.power_hour_end_minute = 45
     assert in_power_hour_window() is True
 
 

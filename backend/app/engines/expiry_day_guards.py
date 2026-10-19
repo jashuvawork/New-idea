@@ -472,7 +472,7 @@ def check_expiry_explosion_open_block(
 
 
 def in_expiry_evening_block() -> bool:
-    """Optional hard stop for expiry entries — default off through market close."""
+    """Expiry entries after 15:00. Off unless expiry_evening_block_enabled is set."""
     settings = get_settings()
     if not settings.expiry_day_guards_enabled:
         return False
