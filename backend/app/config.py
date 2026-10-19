@@ -3531,7 +3531,10 @@ class Settings(BaseSettings):
     worst_day_elite_bypass_require_chart_align: bool = True
     worst_day_elite_bypass_block_cold_base: bool = True
     worst_day_full_pause_loss_inr: float = -20_000.0
-    worst_day_blocks_live: bool = True
+    # Off: a worst-day label must not refuse every live order. Oct 19 NIFTY
+    # expiry scored chop and this switch blocked the open put vertical.
+    # The expiry halt, the 3-trade cap, and the ₹20,000 loss stop still apply.
+    worst_day_blocks_live: bool = False
     worst_day_call_block_enabled: bool = True
     worst_day_call_block_symbols_csv: str = "SENSEX"
     worst_day_put_block_rally_enabled: bool = True
