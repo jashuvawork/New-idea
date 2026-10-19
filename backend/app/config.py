@@ -100,8 +100,10 @@ class Settings(BaseSettings):
     live_broker_reconciliation_enabled: bool = True
     # Live worst/chop: session lift must NOT bypass worst-day live blocks.
     chop_live_disable_session_lift: bool = True
-    # Hard block all live explosion entries on identified worst/chop days (₹10k live).
-    chop_live_hard_block_worst_day: bool = True
+    # Off. Oct 19 the selector had already picked the puts, then this wire
+    # refused every one because the day was still labeled worst. The other chop
+    # guards (immature base, faded rip, extended chase) stay.
+    chop_live_hard_block_worst_day: bool = False
     # Block faded-vertical-rip and extended session chase at live order wire.
     chop_live_block_faded_rip: bool = True
     chop_live_block_extended_chase: bool = True
@@ -488,8 +490,10 @@ class Settings(BaseSettings):
     sep917_live_checklist_enforcement_enabled: bool = False
     # Persist radar archive + premium tape on WS overlay (9:15+), not only on entry scan.
     radar_record_on_ws_overlay_enabled: bool = True
-    # Block deep ITM chop/trap chase (Sep15 23500 PE @ ₹242 scratch).
-    best_trade_block_chop_deep_chase_enabled: bool = True
+    # Off. Oct 19 deep ITM selections (23050+ PE, SENSEX calls) died here
+    # after the selector had already chosen them. Cheap near-base preference
+    # stays a rank signal, not an order refuse.
+    best_trade_block_chop_deep_chase_enabled: bool = False
     best_trade_deep_chase_min_premium_inr: float = 120.0
     best_trade_deep_chase_max_local_pct: float = 18.0
     best_trade_cheap_entry_max_premium_inr: float = 85.0

@@ -36,8 +36,8 @@ def test_near_base_ftv_allows_cold_base_max_lots():
     assert timing_allows_best_trade_full_size(timing, assessment, settings=s)
 
 
-def test_deep_itm_chop_trap_blocked():
-    s = settings_mock()
+def test_deep_itm_chop_trap_blocked_when_switch_forced_on():
+    s = settings_mock(best_trade_block_chop_deep_chase_enabled=True)
     cand = MagicMock(mode="explosion", premium=242.42, alert={}, tier="ELITE")
     assessment = {
         "eliteScore": 72.0,
@@ -56,8 +56,28 @@ def test_deep_itm_chop_trap_blocked():
     assert reason == "best_trade_block_chop_deep_itm_chase"
 
 
-def test_cheap_near_base_not_deep_chase_blocked():
+def test_deep_itm_chop_chase_off_by_default():
     s = settings_mock()
+    cand = MagicMock(mode="explosion", premium=242.42, alert={}, tier="ELITE")
+    assessment = {
+        "eliteScore": 72.0,
+        "localBasePct": 16.4,
+        "setup": "EXPLOSIVE",
+        "dayMode": "EXPIRY WORST",
+    }
+    blocked, reason = best_trade_chop_deep_chase_blocked(
+        cand,
+        {"fakeExplosionTrap": True},
+        assessment,
+        day_mode="EXPIRY WORST",
+        settings=s,
+    )
+    assert blocked is False
+    assert reason == ""
+
+
+def test_cheap_near_base_not_deep_chase_blocked():
+    s = settings_mock(best_trade_block_chop_deep_chase_enabled=True)
     cand = MagicMock(mode="explosion", premium=52.0)
     assessment = {
         "eliteScore": 92.0,

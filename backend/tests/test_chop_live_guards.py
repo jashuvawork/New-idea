@@ -128,6 +128,24 @@ def test_session_lift_disallowed_on_chop_live_day(mock_settings):
 
 @patch("app.engines.chop_live_guards.get_settings")
 @patch("app.engines.worst_day_guard.identify_worst_day")
+def test_worst_day_label_does_not_hard_block_when_switch_off(mock_worst, mock_settings):
+    from app.engines.worst_day_guard import WorstDayVerdict
+
+    mock_settings.return_value = _settings(chop_live_hard_block_worst_day=False)
+    mock_worst.return_value = WorstDayVerdict(True, 80.0, ["chop_regime"])
+
+    _blocked, reason, meta = chop_live_entry_blocked(
+        _candidate(base_move=20.0, daily_move=35.0),
+        _snap(),
+        _state(),
+        snapshots={"NIFTY": _snap()},
+    )
+    assert reason != "chop_live_worst_day_hard_block"
+    assert meta.get("worstDayHardBlock") is not True
+
+
+@patch("app.engines.chop_live_guards.get_settings")
+@patch("app.engines.worst_day_guard.identify_worst_day")
 def test_hard_block_worst_day_live(mock_worst, mock_settings):
     from app.engines.worst_day_guard import WorstDayVerdict
 
