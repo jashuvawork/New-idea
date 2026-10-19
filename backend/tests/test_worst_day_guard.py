@@ -47,6 +47,45 @@ class _Cand:
         self.snap = _snap(symbol)
 
 
+def test_live_block_off_by_default_keeps_expiry_halt():
+    from app.config import Settings
+
+    settings = Settings()
+    assert settings.worst_day_blocks_live is False
+    assert settings.expiry_worst_day_halt_entries is True
+    assert settings.worst_day_pause_enabled is True
+
+
+@patch("app.engines.worst_day_guard.get_settings")
+@patch("app.engines.worst_day_guard.identify_worst_day")
+def test_worst_day_label_does_not_block_live_when_switch_off(mock_identify, mock_settings):
+    from app.config import Settings
+    from app.engines.worst_day_guard import WorstDayVerdict, worst_day_blocks_live
+
+    mock_settings.return_value = Settings(enable_live_trading=True, worst_day_blocks_live=False)
+    mock_identify.return_value = WorstDayVerdict(
+        True, 65.0, ["chop_regime", "bearish_sideways", "declining_session"],
+    )
+    blocked, reason, _ = worst_day_blocks_live(AutoTraderState(), {"NIFTY": _snap()})
+    assert blocked is False
+    assert reason == "ok"
+
+
+@patch("app.engines.worst_day_guard.get_settings")
+@patch("app.engines.worst_day_guard.identify_worst_day")
+def test_worst_day_blocks_live_when_switch_forced_on(mock_identify, mock_settings):
+    from app.config import Settings
+    from app.engines.worst_day_guard import WorstDayVerdict, worst_day_blocks_live
+
+    mock_settings.return_value = Settings(enable_live_trading=True, worst_day_blocks_live=True)
+    mock_identify.return_value = WorstDayVerdict(
+        True, 65.0, ["chop_regime", "bearish_sideways", "declining_session"],
+    )
+    blocked, reason, _ = worst_day_blocks_live(AutoTraderState(), {"NIFTY": _snap()})
+    assert blocked is True
+    assert reason == "worst_day_blocks_live_trading"
+
+
 @patch("app.engines.expiry_day_guards.predict_worst_expiry_day", return_value=(False, 30.0, []))
 @patch("app.engines.expiry_day_guards.is_expiry_session", return_value=True)
 @patch("app.engines.chop_day_guards.is_chop_session", return_value=True)
