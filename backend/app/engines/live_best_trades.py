@@ -71,7 +71,7 @@ def live_best_trade_entry_blocked(
     """
     settings = get_settings()
     meta: dict[str, Any] = {"liveBestTradeGate": True}
-    if not getattr(settings, "live_best_trades_only_enabled", True):
+    if not getattr(settings, "live_best_trades_only_enabled", False):
         return False, "ok", meta
     if not settings.enable_live_trading:
         return False, "ok", meta

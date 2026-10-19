@@ -31,6 +31,16 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["WORST_DAY_BLOCKS_LIVE"] == "false"
     assert env["CHOP_LIVE_HARD_BLOCK_WORST_DAY"] == "false"
     assert env["BEST_TRADE_BLOCK_CHOP_DEEP_CHASE_ENABLED"] == "false"
+    assert env["LIVE_BEST_TRADES_ONLY_ENABLED"] == "false"
+    assert env["LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
+    assert env["LIVE_DISABLE_SESSION_LIFT"] == "false"
+    assert env["CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
+    assert env["CHOP_LIVE_DISABLE_SESSION_LIFT"] == "false"
+    assert env["TOP_MOMENTS_MIN_GRADE"] == "A"
+    assert env["FTV_ALLOCATION_MAX_POSITIONS"] == "3"
+    assert env["FTV_ALLOCATION_MAX_SAME_SIDE"] == "2"
+    assert env["EMERGENCY_STOP_INR"] == "20000"
+    assert env["DAILY_PROFIT_TARGET_INR"] == "44000"
     assert env["EXPIRY_EVENING_BLOCK_ENABLED"] == "false"
     assert env["POWER_HOUR_TOP_ONLY_ENABLED"] == "false"
     assert env["WORST_DAY_PAUSE_ENABLED"] == "true"
@@ -80,6 +90,17 @@ def test_deploy_paths_sync_every_bounded_loss_setting():
         "WORST_DAY_BLOCKS_LIVE",
         "CHOP_LIVE_HARD_BLOCK_WORST_DAY",
         "BEST_TRADE_BLOCK_CHOP_DEEP_CHASE_ENABLED",
+        "LIVE_BEST_TRADES_ONLY_ENABLED",
+        "LIVE_EARLY_FAIL_EXIT_ENABLED",
+        "LIVE_DISABLE_SESSION_LIFT",
+        "CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED",
+        "CHOP_LIVE_DISABLE_SESSION_LIFT",
+        "TOP_MOMENTS_MIN_GRADE",
+        "FTV_ALLOCATION_MAX_POSITIONS",
+        "FTV_ALLOCATION_MAX_SAME_SIDE",
+        "EMERGENCY_STOP_ENABLED",
+        "EMERGENCY_STOP_INR",
+        "DAILY_PROFIT_TARGET_INR",
         "EXPIRY_EVENING_BLOCK_ENABLED",
         "POWER_HOUR_TOP_ONLY_ENABLED",
         "DAILY_LOSS_STOP_INR",

@@ -1,12 +1,10 @@
 name: Arm Live EC2
 
+# Arms live on the production book (paper / Oct 1 gates, ₹2,00,000).
+# Does not apply a separate ₹10k profile.
+
 on:
   workflow_dispatch:
-    inputs:
-      capital_inr:
-        description: Live capital ceiling (INR)
-        required: false
-        default: "10000"
 
 env:
   AWS_REGION: ap-south-1
@@ -28,11 +26,10 @@ jobs:
         id: arm
         run: |
           set -euo pipefail
-          CAP="${{ inputs.capital_inr }}"
           CMD_ID=$(aws ssm send-command \
             --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --comment "Arm live execution capital=${CAP}" \
+            --comment "Arm live on the production book" \
             --parameters "commands=[
               \"set -euo pipefail\",
               \"REPO=/opt/nexusquant/New-idea\",
@@ -42,9 +39,8 @@ jobs:
               \"git pull --ff-only origin main || git reset --hard origin/main\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/execution/stop || true\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/auto-trader/purge-logs || true\",
-              \"sudo bash deploy/go-live-10k-monday.sh --arm-live\",
-              \"curl -sf http://127.0.0.1:8000/api/deployment/status | python3 -m json.tool | head -40\",
-              \"curl -sf -X POST http://127.0.0.1:8000/api/execution/resume || true\"
+              \"sudo bash deploy/set-execution-mode.sh --live\",
+              \"curl -sf http://127.0.0.1:8000/api/deployment/status | python3 -m json.tool | head -40\"
             ]" \
             --query Command.CommandId \
             --output text)
