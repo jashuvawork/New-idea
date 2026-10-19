@@ -2284,12 +2284,15 @@ class Settings(BaseSettings):
     expiry_daily_loss_stop_bypass_enabled: bool = True
     expiry_daily_loss_stop_bypass_same_day_only: bool = True
     expiry_daily_loss_recovery_rank_bonus: float = 35.0
-    # Hard stop for generic expiry entries after 15:00 — top FTV/V/ELITE/explosives bypass.
-    expiry_evening_block_enabled: bool = True
+    # Clock stop after 15:00 is off. Oct 19 NIFTY 22850 CE ran ₹40 → ₹115 at
+    # 15:20 inside this gate. Entries use the same rules through the 15:45 last
+    # print. The hour/minute stay so the gate can be turned back on.
+    expiry_evening_block_enabled: bool = False
     expiry_evening_block_hour: int = 15
     expiry_evening_block_minute: int = 0
-    # Power hour on all sessions — only top trades after 15:00 until the 15:45 last print.
-    power_hour_top_only_enabled: bool = True
+    # Same clock, all sessions: top-only after 15:00 is off. 15:45 is still the
+    # last print and the flatten time.
+    power_hour_top_only_enabled: bool = False
     power_hour_start_hour: int = 15
     power_hour_start_minute: int = 0
     power_hour_end_hour: int = 15

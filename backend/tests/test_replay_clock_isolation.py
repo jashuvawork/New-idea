@@ -38,6 +38,11 @@ def test_replay_clock_does_not_leak_to_other_threads():
         finally:
             _restore_replay_clock(saved)
 
+    from app.config import get_settings
+
+    settings = get_settings()
+    previous = settings.power_hour_top_only_enabled
+    settings.power_hour_top_only_enabled = True
     try:
         t_replay = threading.Thread(target=replay_thread)
         t_live = threading.Thread(target=live_thread)
@@ -46,6 +51,7 @@ def test_replay_clock_does_not_leak_to_other_threads():
         t_replay.join()
         t_live.join()
     finally:
+        settings.power_hour_top_only_enabled = previous
         power_hour.get_market_phase = original_phase
 
     assert replay_seen == [True]

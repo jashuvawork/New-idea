@@ -427,6 +427,11 @@ def test_replay_clock_drives_power_hour_window():
 
     original_phase = power_hour.get_market_phase
     try:
+        from app.config import get_settings
+
+        settings = get_settings()
+        previous = settings.power_hour_top_only_enabled
+        settings.power_hour_top_only_enabled = True
         power_hour.get_market_phase = lambda: "LIVE_MARKET"
         _ReplayDateTime.current = datetime(2026, 8, 28, 15, 10, 0, tzinfo=IST)
         saved = _install_replay_clock(_ReplayDateTime)
@@ -435,6 +440,7 @@ def test_replay_clock_drives_power_hour_window():
         assert power_hour.in_power_hour_window() is False
         _restore_replay_clock(saved)
     finally:
+        settings.power_hour_top_only_enabled = previous
         power_hour.get_market_phase = original_phase
 
 

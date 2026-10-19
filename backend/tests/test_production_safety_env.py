@@ -29,6 +29,8 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["UNIFIED_PROFIT_LADDER_ENABLED"] == "true"
     assert env["UNIFIED_PROFIT_LADDER_BREAKEVEN_ENABLED"] == "false"
     assert env["WORST_DAY_BLOCKS_LIVE"] == "false"
+    assert env["EXPIRY_EVENING_BLOCK_ENABLED"] == "false"
+    assert env["POWER_HOUR_TOP_ONLY_ENABLED"] == "false"
     assert env["WORST_DAY_PAUSE_ENABLED"] == "true"
     assert env["EXPIRY_WORST_DAY_HALT_ENTRIES"] == "true"
     assert env["PER_TRADE_CAPITAL_PCT"] == "0.90"
@@ -74,6 +76,8 @@ def test_deploy_paths_sync_every_bounded_loss_setting():
         "TOP_FTV_A_EXCEPTIONAL_MIN_VELOCITY_9S",
         "TOP_FTV_A_EXCEPTIONAL_MAX_MOVE_PCT",
         "WORST_DAY_BLOCKS_LIVE",
+        "EXPIRY_EVENING_BLOCK_ENABLED",
+        "POWER_HOUR_TOP_ONLY_ENABLED",
         "DAILY_LOSS_STOP_INR",
         "PER_TRADE_CAPITAL_PCT",
         "ORDINARY_ENTRY_MAX_CAPITAL_PCT",
