@@ -661,11 +661,11 @@ def profit_ladder_floor(
     """Unified ratcheting profit floor (P&L points) and the tier that owns it.
 
     Tiers by peak gain off entry premium:
-      * peak_keep  — peak ≥ 15%: keep 75% of peak gain.
-      * multiple   — max LTP ≥ N× entry: floor at N× entry or 75% of peak gain,
-        whichever is higher, but always at least max(3pt, 5% of peak LTP) under the
-        peak so a tick under N× does not cut a fresh print. k× ratchets via the
-        75% keep (k ≥ 3 always sits above the N× floor).
+      * peak_keep  — peak ≥ 15% and still under 2×: keep 75% of peak gain.
+      * multiple   — max LTP has crossed an integer multiple N (N ≥ 2): lock
+        N× entry and keep 75% of the points above that multiple.
+        ₹35 → ₹380 crossed 10× at ₹350; 75% of the ₹30 above it exits at ₹372.5.
+        An exact multiple (nothing above N×) sits on N×, so the next downtick sells.
       * breakeven  — off unless ``unified_profit_ladder_breakeven_enabled``. When
         on, a peak ≥ 8% locks entry + 2%.
     """
@@ -684,14 +684,14 @@ def profit_ladder_floor(
     arm_ratio = max(1.01, _cfg_float(s, "unified_profit_ladder_multiple_arm_ratio", 2.0))
 
     if peak_ltp + 1e-6 >= arm_ratio * entry:
-        min_gb = max(
-            _cfg_float(s, "unified_profit_ladder_multiple_min_giveback_points", 3.0),
-            peak_ltp
-            * _cfg_float(s, "unified_profit_ladder_multiple_min_giveback_pct_of_peak", 5.0)
-            / 100.0,
-        )
-        multiple_floor = min(entry * (arm_ratio - 1.0), peak_ltp - min_gb - entry)
-        floor_pts, layer = max(multiple_floor, best * keep, be_floor), "multiple"
+        # Highest integer multiple the peak has crossed. Lock that print and
+        # keep `keep` of only the points above it. ₹35 → ₹380 crossed 10× at
+        # ₹350; 75% of the ₹30 above it is ₹22.5, so the exit trigger is ₹372.5.
+        crossed = max(2, int(peak_ltp // entry))
+        anchor = crossed * entry
+        excess = max(0.0, peak_ltp - anchor)
+        floor_premium = anchor + excess * keep
+        floor_pts, layer = floor_premium - entry, "multiple"
     elif gain_pct >= _cfg_float(s, "unified_profit_ladder_keep_arm_pct", 15.0):
         floor_pts, layer = max(best * keep, be_floor), "peak_keep"
     elif (
