@@ -1,6 +1,8 @@
-"""Unified profit ladder: 75% peak-keep and N×/k× in one ratcheting floor.
+"""Unified profit ladder: 75% peak-keep and N× in one ratcheting floor.
 
-The 8% breakeven lock is off by default. Turning
+Once price crosses an integer multiple, that multiple is locked and 75% is
+kept only of the points above it (₹35 → ₹380 exits at ₹372.5). The 8%
+breakeven lock is off by default. Turning
 ``unified_profit_ladder_breakeven_enabled`` back on restores the entry+2% tier.
 """
 
@@ -217,18 +219,28 @@ def _nx(side: Side) -> PaperTrade:
     return trade
 
 
+def _multiple_floor_pts(entry: float, peak_ltp: float, keep: float = 0.75) -> float:
+    """Lock the crossed integer multiple and keep `keep` of the points above it."""
+    crossed = max(2, int(peak_ltp // entry))
+    anchor = crossed * entry
+    excess = max(0.0, peak_ltp - anchor)
+    return round(anchor + excess * keep - entry, 2)
+
+
 @pytest.mark.parametrize("side", SIDES)
-def test_nx_floor_sits_under_peak_by_min_giveback_ce_pe(side):
+def test_nx_floor_keeps_75pct_above_crossed_multiple_ce_pe(side):
+    """Oct 1 ₹109.65 → ₹223.65 crossed 2× at ₹219.30. Keep 75% of the ₹4.35 above it."""
     s = _settings()
     floor, layer = profit_ladder_floor(_nx(side), 114.0, settings=s)
     assert layer == "multiple"
-    assert floor == pytest.approx(223.65 * 0.95 - 109.65, abs=0.02)
+    assert floor == pytest.approx(_multiple_floor_pts(109.65, 223.65), abs=0.02)
 
 
 @pytest.mark.parametrize("side", SIDES)
 def test_nx_books_on_floor_break_without_legacy_rollover_ce_pe(side):
     s = _settings()
     trade = _nx(side)
+    floor_pts = _multiple_floor_pts(109.65, 223.65)
     with _use(s):
         from app.engines.explosion_profit import unified_profit_ladder_exit_reason
 
@@ -237,8 +249,9 @@ def test_nx_books_on_floor_break_without_legacy_rollover_ce_pe(side):
                 trade, best=114.0, pnl_pts=ltp - 109.65, hold_seconds=0, live_velocity_3s=v3,
             )
 
-        hold = _at(220.0, -3.0)
-        reason = _at(212.0, -0.5)
+        # A 1pt dip is under the fast-fade giveback, so this is the multiple floor.
+        hold = _at(109.65 + floor_pts + 0.10, -3.0)
+        reason = _at(109.65 + floor_pts - 0.06, -3.0)
     assert hold is None
     assert reason == "explosion_profit_ladder_multiple"
 
@@ -264,15 +277,36 @@ def test_hot_velocity_defers_without_lowering_floor_ce_pe(side):
 
 
 @pytest.mark.parametrize("side", SIDES)
-def test_mega_runner_keeps_75pct_of_k_multiple_ce_pe(side):
+def test_exact_multiple_floor_sits_on_nx_ce_pe(side):
+    """A print that lands on 7× and no higher sells from that multiple."""
     s = _settings()
     trade = _trade(side, 50.0, 300.0)
+    trade.maxLtp = 350.0
     floor, layer = profit_ladder_floor(trade, 300.0, settings=s)
-    assert (floor, layer) == (pytest.approx(225.0), "multiple")
+    assert (floor, layer) == (pytest.approx(300.0), "multiple")
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_ten_x_keeps_75pct_of_points_above_the_multiple_ce_pe(side):
+    """₹35 → ₹380 crossed 10× at ₹350. 380−350=30, 75% of 30 is 22.5, exit ₹372.5.
+
+    A 7.5pt giveback is under the fast-fade minimum, so the slow fade books the
+    multiple floor on both CALL and PUT.
+    """
+    s = _settings()
+    trade = _trade(side, 35.0, 345.0, seconds=600)
+    trade.maxLtp = 380.0
+    floor, layer = profit_ladder_floor(trade, 345.0, settings=s)
+    assert layer == "multiple"
+    assert floor == pytest.approx(337.5)
+    assert 35.0 + floor == pytest.approx(372.5)
     with _use(s):
-        hold, _ = evaluate_explosion_exit(trade, 280.0, "ELITE", 65, live_velocity_3s=-0.5)
-        reason, _ = evaluate_explosion_exit(trade, 274.0, "ELITE", 65, live_velocity_3s=-0.5)
-    assert hold is None or not str(hold).startswith("explosion_profit_ladder")
+        # Fast fade needs a much deeper giveback, so ₹372.6 is still a hold.
+        hold = unified_profit_ladder_exit_reason(
+            trade, best=345.0, pnl_pts=372.6 - 35.0, hold_seconds=600, live_velocity_3s=-3.0,
+        )
+        reason, _ = evaluate_explosion_exit(trade, 372.5, "ELITE", 65, live_velocity_3s=-3.0)
+    assert hold is None
     assert reason == "explosion_profit_ladder_multiple"
 
 
