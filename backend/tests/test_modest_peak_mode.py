@@ -173,7 +173,13 @@ def test_pre_stage_suppressed_for_modest_peak(mock_s):
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.moment_stage_trail.get_settings")
 def test_sep03_modest_peak_exits_on_fade(mock_ms, mock_s, _hc, _mp):
-    """Sep03 NIFTY: peak +16.4pt, fade to +4pt books via the 75% profit ladder."""
+    """Sep03 NIFTY: +16.4 peak, 75% floor is +12.3.
+
+    A fade already at +4.23 is through that floor, so the ladder holds it.
+    A downtick still within 2 points of +12.3 still books peak-keep.
+    """
+    from app.engines.explosion_profit import unified_profit_ladder_exit_reason
+
     s = _settings()
     mock_s.return_value = s
     mock_ms.return_value = s
@@ -186,11 +192,21 @@ def test_sep03_modest_peak_exits_on_fade(mock_ms, mock_s, _hc, _mp):
         micro_target_points=100.0,
         adaptive_stop=True,
     )
-    reason, pnl = evaluate_explosion_exit(
+    hole = unified_profit_ladder_exit_reason(
+        trade, best=16.4, pnl_pts=4.23, hold_seconds=70 * 60, live_velocity_3s=0.0,
+    )
+    assert hole is None
+    reason, _ = evaluate_explosion_exit(
         trade, 83.88, "ELITE", 4200, params=params, live_velocity_3s=0.0,
     )
-    assert reason == "explosion_profit_ladder_peak_keep"
-    assert pnl > 3.0
+    assert reason != "explosion_profit_ladder_peak_keep"
+    assert reason != "explosion_peak_keep_trail"
+
+    trade_near = _sep03_trade(pnl_pts=12.0, current_premium=91.65)
+    reason_near, _ = evaluate_explosion_exit(
+        trade_near, 91.65, "ELITE", 4200, params=params, live_velocity_3s=-0.4,
+    )
+    assert reason_near == "explosion_profit_ladder_peak_keep"
 
     # Still above 75% of peak — hold
     trade_hold = _sep03_trade(pnl_pts=13.0, current_premium=92.65)
