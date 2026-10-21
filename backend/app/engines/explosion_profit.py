@@ -2610,6 +2610,24 @@ def evaluate_explosion_exit(
     if halve_lock:
         return halve_lock, pnl_inr
 
+    from app.engines.tp_rung_ladder import trade_uses_tp_rung_ladder, tp_rung_exit_reason
+
+    tp_rung_owned = trade_uses_tp_rung_ladder(trade, settings=settings)
+    tp_rung_armed = tp_rung_owned and best + 1e-6 >= _cfg_float(
+        settings, "tp_rung_ladder_min_best_to_arm_exits", 28.0
+    )
+    if tp_rung_armed:
+        rung_exit = tp_rung_exit_reason(
+            trade,
+            best=best,
+            pnl_pts=pnl_pts,
+            hold_seconds=hold,
+            live_velocity_3s=v3,
+            settings=settings,
+        )
+        if rung_exit:
+            return rung_exit, pnl_inr
+
     ladder_exit = unified_profit_ladder_exit_reason(
         trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
     )
@@ -2816,7 +2834,8 @@ def evaluate_explosion_exit(
         trade, hold, settings, falling_under=falling_under_pct
     )
     if (
-        pct_keep_floor is not None
+        not tp_rung_armed
+        and pct_keep_floor is not None
         and best >= min_pct_best
         and pct_ready
         and (falling_under_pct or hold >= stage_min_hold)
