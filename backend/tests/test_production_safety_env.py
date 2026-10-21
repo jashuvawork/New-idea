@@ -24,8 +24,8 @@ def test_production_template_uses_bounded_loss_policy():
     # 10%/day budget — aligned with emergency_stop_inr and the worst-day pause (both ₹20k)
     # so a full-capital ELITE base runner rides its natural SL instead of a stale ₹6k halt.
     assert env["DAILY_LOSS_STOP_INR"] == "20000"
-    assert env["FALLBACK_CAPITAL_INR"] == "200000"
-    assert env["MAX_SIZING_CAPITAL_INR"] == "200000"
+    assert env["FALLBACK_CAPITAL_INR"] == "275000"
+    assert env["MAX_SIZING_CAPITAL_INR"] == "275000"
     assert env["UNIFIED_PROFIT_LADDER_ENABLED"] == "true"
     assert env["UNIFIED_PROFIT_LADDER_BREAKEVEN_ENABLED"] == "false"
     assert env["WORST_DAY_BLOCKS_LIVE"] == "false"
@@ -103,6 +103,8 @@ def test_deploy_paths_sync_every_bounded_loss_setting():
         "DAILY_PROFIT_TARGET_INR",
         "EXPIRY_EVENING_BLOCK_ENABLED",
         "POWER_HOUR_TOP_ONLY_ENABLED",
+        "FALLBACK_CAPITAL_INR",
+        "MAX_SIZING_CAPITAL_INR",
         "DAILY_LOSS_STOP_INR",
         "PER_TRADE_CAPITAL_PCT",
         "ORDINARY_ENTRY_MAX_CAPITAL_PCT",
