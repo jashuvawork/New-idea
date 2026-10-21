@@ -1,7 +1,9 @@
 """Runner profit guard — a run that printed real green never rides back to the stop.
 
 Oct 21 SENSEX 73400 PE: entry 340.33, peak 388.00 (+47.67pt, +14.0%), then a fast
-bleed through every 75% line to the −40pt adaptive stop (−₹21k on 26 lots).
+bleed through every 75% line to the −40pt adaptive stop (−₹21k on 26 lots). The TP
+rung ladder now owns runners past +28pt; the 73300 PE (+21pt peak) replays to the
+stop without this guard.
 """
 
 from datetime import datetime, timedelta
@@ -105,14 +107,24 @@ def test_unarmed_below_tier1_and_cheap_premium_noise(side):
 
 
 @pytest.mark.parametrize("side", SIDES)
-def test_oct21_73400_fade_books_green_before_adaptive_stop(side):
-    """Real Settings, full exit stack: the held fade sells green before the 75% fall clock."""
+def test_oct21_73300_fade_books_green_before_adaptive_stop(side):
+    """Real Settings, full exit stack: 73300 PE (+21pt peak) sits below the TP rung
+    ladder's +28pt arm, so the guard is the only layer between it and the −40pt stop.
+    """
     s = Settings()
-    pnl = _tier2_floor(s) - 1.0
-    trade = _runner(side, pnl=pnl, below_for=s.runner_profit_guard_confirm_seconds + 5)
+    entry, best = 308.57, 21.08
+    assert best < s.tp_rung_ladder_min_best_to_arm_exits
+    floor = best * s.runner_profit_guard_tier1_keep_ratio
+    pnl = floor - 1.0
+    trade = _runner(
+        side, entry=entry, best=best, pnl=pnl,
+        below_for=s.runner_profit_guard_confirm_seconds + 5,
+    )
     with patch("app.engines.explosion_profit.get_settings", return_value=s), patch(
         "app.engines.moment_stage_trail.get_settings", return_value=s
-    ), patch("app.engines.explosion_profit._hold_seconds", return_value=900), patch(
+    ), patch("app.engines.tp_rung_ladder.get_settings", return_value=s), patch(
+        "app.engines.explosion_profit._hold_seconds", return_value=900
+    ), patch(
         "app.engines.explosion_profit._seconds_since_peak",
         return_value=s.unified_profit_ladder_fall_min_seconds_after_peak - 10,
     ):
@@ -121,7 +133,7 @@ def test_oct21_73400_fade_books_green_before_adaptive_stop(side):
         )
     assert reason == "explosion_runner_profit_guard"
     assert pnl_inr == pytest.approx(pnl * 26 * 20)
-    assert pnl_inr > 5_000
+    assert pnl_inr > 0
 
 
 @pytest.mark.parametrize("side", SIDES)
