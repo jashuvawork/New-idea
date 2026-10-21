@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from app.engines.performance_milestone import _current_batch_trades, compute_milestone_stats
 from app.engines.session_timing import (
     entries_allowed_now,
+    explosion_entries_allowed_now,
     in_open_caution_window,
     min_explosion_score_now,
 )
@@ -31,6 +32,17 @@ def test_entries_blocked_at_915():
             mock_dt.now.return_value = datetime(2026, 6, 30, 9, 15, 0, tzinfo=IST)
             ok, reason = entries_allowed_now()
     assert not ok
+    assert "09:20" in reason
+
+
+def test_no_explosion_order_before_920():
+    with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
+        with patch("app.engines.session_timing.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 10, 21, 9, 16, 37, tzinfo=IST)
+            early_ok, _ = explosion_entries_allowed_now()
+            ok, reason = entries_allowed_now()
+    assert early_ok is False
+    assert ok is False
     assert "09:20" in reason
 
 
