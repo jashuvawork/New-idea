@@ -210,7 +210,7 @@ def test_hold_above_stage_floor_toward_max(mock_s):
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.moment_stage_trail.get_settings")
 def test_evaluate_exit_books_stage_trail_pullback(mock_ms, mock_s, _hc, _mp):
-    """Hit +400 then pull back to +340 → explosion_stage_trail."""
+    """Hit +400 then pull back to +340 — stage trail no longer sells."""
     s = _settings()
     mock_s.return_value = s
     mock_ms.return_value = s
@@ -218,8 +218,42 @@ def test_evaluate_exit_books_stage_trail_pullback(mock_ms, mock_s, _hc, _mp):
     reason, pnl = evaluate_explosion_exit(
         trade, 540.0, "ELITE", 10, params=_params(), live_velocity_3s=0.4,
     )
-    assert reason == "explosion_stage_trail"
+    assert reason != "explosion_stage_trail"
     assert pnl > 0
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_confidence.trade_is_high_conviction", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_oct21_sensex_74200_stage_trail_does_not_sell(mock_ms, mock_s, _hc, _mp):
+    """10:45 SENSEX 74200 PE: +26.8 peak, +18.4 twelve seconds later, hold 241s."""
+    s = _settings()
+    s.elite_runner_stage_trail_min_hold_seconds = 240.0
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    entry = 294.57
+    best = 26.78
+    now = datetime.now(IST)
+    trade = _trade(entry=entry, best=best, current=312.93, projected=800.0, stage=75.0)
+    trade.openedAt = now - timedelta(seconds=241)
+    trade.maxLtp = 321.35
+    trade.maxLtpAt = now - timedelta(seconds=12)
+    trade.bestPnlPoints = best
+    trade.entryContext["vBaseFtvRunner"] = True
+    trade.entryContext["exitPlan"]["trailArmPoints"] = 17.52
+    params = ExplosionExitParams(
+        stop_points=40.0,
+        target_points=47.07,
+        trail_arm_points=17.52,
+        trail_keep_ratio=0.67,
+        micro_target_points=4.0,
+        adaptive_stop=True,
+    )
+    reason, _pnl = evaluate_explosion_exit(
+        trade, 312.93, "ELITE", 20, params=params, live_velocity_3s=0.2,
+    )
+    assert reason != "explosion_stage_trail"
 
 
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
@@ -675,7 +709,7 @@ def test_near_stage_otm_sibling_exits_on_pullback(mock_ms, mock_s, _hc, _mp):
         reason, pnl = evaluate_explosion_exit(
             trade, entry + 24.6, "EXPLODING", 65, params=params, live_velocity_3s=0.0,
         )
-    assert reason in ("explosion_peak_keep_trail", "explosion_stage_trail")
+    assert reason == "explosion_peak_keep_trail"
     assert pnl > 0
 
 
