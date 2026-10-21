@@ -1635,6 +1635,20 @@ class Settings(BaseSettings):
     # After a mega peak, book a near-scratch when most of the move is gone (Sep2 +31→+1pt).
     stage_runner_mega_scratch_max_points: float = 2.0
     stage_runner_mega_scratch_min_giveback_frac: float = 0.70
+    # TP rung ladder — single exit owner for mega projected stage-ladder legs.
+    tp_rung_ladder_exit_enabled: bool = True
+    tp_rung_ladder_min_projected_tp: float = 400.0
+    tp_rung_ladder_min_best_to_arm_exits: float = 28.0
+    tp_rung_ladder_min_rung_points: float = 4.0
+    tp_rung_ladder_max_rungs: int = 24
+    tp_rung_ladder_confirm_slip_points: float = 0.25
+    tp_rung_ladder_floor_slip_points: float = 1.0
+    tp_rung_ladder_floor_touch_points: float = 2.0
+    tp_rung_ladder_approach_buffer_points: float = 4.0
+    tp_rung_ladder_fade_min_giveback_points: float = 2.0
+    tp_rung_ladder_min_hold_seconds: float = 45.0
+    tp_rung_ladder_hot_defer_velocity_3s: float = 2.5
+    tp_rung_ladder_red_min_best_points: float = 20.0
     # FTV runner %-of-peak-gain trailing floor. V/FTV moments run in big % from the local
     # base (e.g. Rs68 -> Rs140 = +106%). The absolute stage ladder is tuned for mega point
     # moves and under-protects modest-but-real % moves (a +40% peak can give back to +4%).
@@ -1682,6 +1696,25 @@ class Settings(BaseSettings):
     # the 12s dip that sold SENSEX 74200 before that put ran to ~855.
     unified_profit_ladder_fall_min_hold_seconds: float = 60.0
     unified_profit_ladder_fall_min_seconds_after_peak: float = 45.0
+    # Runner profit guard — a tiered keep-of-peak floor with no after-peak wait
+    # and no touch band. The 75% layers above still book first on a slow fade;
+    # this catches the bleed through them (Oct 21 SENSEX 73400 PE: +47.7pt →
+    # −40pt stop; 73300 PE replays to the stop on the same tape).
+    # Floor = best × keep for the highest tier reached. Only a print that stays
+    # under the floor for confirm_seconds sells — there is no instant sale.
+    runner_profit_guard_enabled: bool = True
+    # Cheap premiums: a +6% wiggle on ₹60 is noise, not a run to protect.
+    runner_profit_guard_min_best_points: float = 4.0
+    # One-print shakeouts right after a high recover (Oct 21 NIFTY 22700 PE).
+    runner_profit_guard_confirm_seconds: float = 30.0
+    runner_profit_guard_tier1_gain_pct: float = 5.0
+    runner_profit_guard_tier1_keep_ratio: float = 0.20
+    runner_profit_guard_tier2_gain_pct: float = 12.0
+    runner_profit_guard_tier2_keep_ratio: float = 0.35
+    runner_profit_guard_tier3_gain_pct: float = 25.0
+    runner_profit_guard_tier3_keep_ratio: float = 0.55
+    runner_profit_guard_tier4_gain_pct: float = 50.0
+    runner_profit_guard_tier4_keep_ratio: float = 0.70
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.

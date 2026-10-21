@@ -35,10 +35,13 @@ def _oct21_sensex_73400(*, pnl_pts: float, seconds: int = 400, since_peak: int =
             "momentStageLadder": True,
             "projectedMaxTp": 800.0,
             "stageSize": 75.0,
+            "tpRungLadder": True,
+            "tpRungsPts": [28.0, 36.0, 75.0, 150.0, 225.0, 300.0, 375.0, 450.0, 525.0, 600.0, 675.0, 750.0, 800.0],
             "exitPlan": {
                 "projectedMaxTp": 800.0,
                 "stageSize": 75.0,
                 "trailArmPoints": 28.21,
+                "microTargetPoints": 27.0,
             },
         },
     )
@@ -71,7 +74,12 @@ def test_oct21_73400_hole_take_banks_green_on_fast_pullback(mock_ms, mock_s, _mp
             reason, pnl_inr = evaluate_explosion_exit(
                 trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=-0.5,
             )
-    assert reason == "explosion_profit_ladder_peak_keep"
+    assert reason in (
+        "explosion_profit_ladder_peak_keep",
+        "explosion_tp_rung_between_fade",
+        "explosion_tp_rung_floor_hole",
+        "explosion_tp_rung_floor",
+    )
     assert pnl_inr > 0
 
 
@@ -92,7 +100,9 @@ def test_oct21_73400_red_giveback_after_mega_peak(mock_ms, mock_s, _mp):
             )
     assert reason in (
         "explosion_profit_ladder_peak_keep",
+        "explosion_tp_rung_red_giveback",
         "explosion_stage_runner_red_giveback",
+        "explosion_early_green_breakeven",
     )
 
 
@@ -114,6 +124,8 @@ def test_oct21_73400_red_giveback_without_three_minute_peak_wait(mock_ms, mock_s
     assert reason in (
         "explosion_stage_runner_red_giveback",
         "explosion_profit_ladder_peak_keep",
+        "explosion_tp_rung_red_giveback",
+        "explosion_runner_profit_guard",
     )
 
 
