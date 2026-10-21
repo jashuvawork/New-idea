@@ -1090,22 +1090,57 @@ def _green_profit_hold_ready(
     return since_peak + 1e-6 >= min_after_peak
 
 
+def _falling_under_profit_floor(pnl_pts: float, floor_pts: float, live_v3: float) -> bool:
+    """True when price is at or under the 75% line and the tick is falling."""
+    return live_v3 < 0 and pnl_pts <= floor_pts + 1e-6
+
+
+def _profit_floor_exit_ready(
+    trade: PaperTrade,
+    hold_seconds: float,
+    settings: Any,
+    *,
+    falling_under: bool,
+) -> bool:
+    """A fall through the 75% line can sell before the full three-minute wait.
+
+    The short clock still skips a dip a few seconds after the high. A flat or
+    rising print keeps the normal hold.
+    """
+    if not falling_under:
+        return _green_profit_hold_ready(trade, hold_seconds, settings)
+    min_hold = _cfg_float(settings, "unified_profit_ladder_fall_min_hold_seconds", 60.0)
+    if hold_seconds < min_hold:
+        return False
+    min_after = _cfg_float(
+        settings, "unified_profit_ladder_fall_min_seconds_after_peak", 45.0
+    )
+    if min_after <= 0:
+        return True
+    since_peak = _seconds_since_peak(trade)
+    if since_peak is None:
+        return True
+    return since_peak + 1e-6 >= min_after
+
+
 def _profit_floor_touch_sell(
     pnl_pts: float,
     floor_pts: float,
     live_v3: float,
     settings: Any,
 ) -> bool:
-    """True when a green print is on the profit floor and not rising.
+    """True when price should leave the 75% line.
 
-    The floor is the line to sell. A price already well through it is a hold
-    until it trades back up to the line and turns down, or the loss stop hits.
-    Oct 21 NIFTY 22700 PE: 75% of the +21.5 peak was ~156, and the ladder sold
-    150.38 the moment the three-minute wait ended.
+    A falling tick at or under the line sells, including a print already well
+    through it. Oct 21 SENSEX 73400 PE peaked at 388 and the hole-hold rode
+    that fall into the loss stop. A flat or rising print sells only while it
+    is still within ``unified_profit_ladder_floor_touch_points`` of the line.
     """
-    touch = max(0.0, _cfg_float(settings, "unified_profit_ladder_floor_touch_points", 2.0))
     if pnl_pts > floor_pts + 1e-6:
         return False
+    if live_v3 < 0:
+        return True
+    touch = max(0.0, _cfg_float(settings, "unified_profit_ladder_floor_touch_points", 2.0))
     if pnl_pts < floor_pts - touch - 1e-6:
         return False
     return live_v3 <= 0
@@ -2200,9 +2235,9 @@ def unified_profit_ladder_exit_reason(
 ) -> Optional[str]:
     """Book when P&L is on the unified ladder floor, or on an N× fast fade.
 
-    Same rule for CALL and PUT. Peak-keep and breakeven sell only inside
-    ``unified_profit_ladder_floor_touch_points`` of the floor, and only when
-    the tick is not rising. A print already through that band is a hold.
+    Same rule for CALL and PUT. A falling tick at or under the 75% line sells,
+    even if the print is already through that line. A flat or rising print
+    sells only inside ``unified_profit_ladder_floor_touch_points`` of the line.
     The multiple lock still sells on a floor break. A hot tick (v3 ≥ +2)
     defers one evaluation but never lowers the floor.
     """
@@ -2214,9 +2249,13 @@ def unified_profit_ladder_exit_reason(
         return None
     floor_pts, layer = ladder
     pnl_pts = float(pnl_pts or 0)
-    if pnl_pts <= 0:
-        return None
     live_v3, _ = _live_premium_heat(trade, live_velocity_3s=live_velocity_3s)
+    falling_under = _falling_under_profit_floor(pnl_pts, floor_pts, live_v3)
+    # A small peak that is simply red stays with the loss stop. A mega peak
+    # that has already fallen through its 75% line does not.
+    mega_best = _cfg_float(settings, "stage_runner_mega_red_giveback_min_best_points", 28.0)
+    if pnl_pts <= 0 and not (falling_under and float(best or 0) + 1e-6 >= mega_best):
+        return None
     if live_v3 >= _cfg_float(settings, "unified_profit_ladder_hot_defer_velocity_3s", 2.0):
         return None
 
@@ -2236,7 +2275,9 @@ def unified_profit_ladder_exit_reason(
             return "explosion_profit_ladder_multiple"
         return None
 
-    if not _green_profit_hold_ready(trade, hold_seconds, settings):
+    if not _profit_floor_exit_ready(
+        trade, hold_seconds, settings, falling_under=falling_under
+    ):
         return None
     if not _profit_floor_touch_sell(pnl_pts, floor_pts, live_v3, settings):
         return None
@@ -2681,17 +2722,23 @@ def evaluate_explosion_exit(
             stage_min_hold,
             _cfg_float(settings, "elite_runner_stage_trail_min_hold_seconds", 240.0),
         )
+    falling_under_pct = (
+        pct_keep_floor is not None
+        and _falling_under_profit_floor(pnl_pts, pct_keep_floor, v3)
+    )
+    pct_ready = _profit_floor_exit_ready(
+        trade, hold, settings, falling_under=falling_under_pct
+    )
     if (
         pct_keep_floor is not None
         and best >= min_pct_best
-        and hold >= stage_min_hold
-        and _green_profit_hold_ready(trade, hold, settings)
+        and pct_ready
+        and (falling_under_pct or hold >= stage_min_hold)
         and _profit_floor_touch_sell(pnl_pts, pct_keep_floor, v3, settings)
     ):
         # Aug28 24100 PE: peaked +31pt — stage_armed waits for +45pt, so this
-        # 75% line must be able to sell before stage 1. It sells only while
-        # price is still on that line. A print already through it holds, the
-        # same way the unified ladder holds the Oct 21 22700 hole.
+        # 75% line must be able to sell before stage 1. A falling tick at or
+        # under the line sells. A flat hole is left for a return to the line.
         return "explosion_peak_keep_trail", pnl_inr
 
     stage_armed = stage_floor is not None and (
@@ -2711,8 +2758,8 @@ def evaluate_explosion_exit(
             stage_armed = False
     # Stage-trail sale is off. Oct 21 SENSEX 74200 PE was explosion_stage_trail
     # at +18.4pt, 12s after a +26.8 peak, and that put later reached ~855.
-    # The 75% peak-keep above books a fade once the high is 3 minutes old and
-    # price is still on that line. A print already through the line holds.
+    # The 75% peak-keep above sells a falling tick at or under that line.
+    # A flat print already through the line holds.
     # While a stage floor is armed, the micro trail stays off so the leg holds.
 
     # When stage ladder owns the trail, skip micro step / keep-ratio locks —

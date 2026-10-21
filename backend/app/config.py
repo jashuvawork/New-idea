@@ -1674,10 +1674,14 @@ class Settings(BaseSettings):
     unified_profit_ladder_multiple_min_giveback_pct_of_peak: float = 5.0
     unified_profit_ladder_fast_fade_velocity_3s: float = 2.0
     unified_profit_ladder_hot_defer_velocity_3s: float = 2.0
-    # Sell the 75% line only while price is still on it. A print already through
-    # that line is a hold until it comes back and turns down. Oct 21 NIFTY 22700
-    # PE peaked at 161.50 (floor ~156) and was sold at 150.38.
+    # A flat or rising print more than this far under the 75% line is a hold.
+    # A falling print at or under the line is a sale. Oct 21 SENSEX 73400 PE
+    # peaked at 388 (+₹24,788) and the old hole-hold rode it to the −₹21,029 stop.
     unified_profit_ladder_floor_touch_points: float = 2.0
+    # A fall through the 75% line does not wait out the full 3 minutes. 45s skips
+    # the 12s dip that sold SENSEX 74200 before that put ran to ~855.
+    unified_profit_ladder_fall_min_hold_seconds: float = 60.0
+    unified_profit_ladder_fall_min_seconds_after_peak: float = 45.0
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.
