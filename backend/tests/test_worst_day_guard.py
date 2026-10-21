@@ -73,7 +73,7 @@ def test_worst_day_label_does_not_block_live_when_switch_off(mock_identify, mock
 
 @patch("app.engines.worst_day_guard.get_settings")
 @patch("app.engines.worst_day_guard.identify_worst_day")
-def test_worst_day_blocks_live_when_switch_forced_on(mock_identify, mock_settings):
+def test_worst_day_live_switch_stays_off_like_october_1_paper(mock_identify, mock_settings):
     from app.config import Settings
     from app.engines.worst_day_guard import WorstDayVerdict, worst_day_blocks_live
 
@@ -82,8 +82,8 @@ def test_worst_day_blocks_live_when_switch_forced_on(mock_identify, mock_setting
         True, 65.0, ["chop_regime", "bearish_sideways", "declining_session"],
     )
     blocked, reason, _ = worst_day_blocks_live(AutoTraderState(), {"NIFTY": _snap()})
-    assert blocked is True
-    assert reason == "worst_day_blocks_live_trading"
+    assert blocked is False
+    assert reason == "ok"
 
 
 @patch("app.engines.expiry_day_guards.predict_worst_expiry_day", return_value=(False, 30.0, []))

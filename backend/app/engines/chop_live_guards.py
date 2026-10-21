@@ -141,15 +141,13 @@ def chop_live_session_lift_allowed(
     snap: SymbolSnapshot,
     snapshots: dict[str, SymbolSnapshot] | None = None,
 ) -> bool:
-    """Session lift must not bypass live worst/chop blocks when disabled."""
-    settings = get_settings()
-    if not getattr(settings, "chop_live_disable_session_lift", False):
-        return True
-    if not settings.enable_live_trading:
-        return True
-    if not chop_live_guard_day_active(state, snap, snapshots):
-        return True
-    return False
+    """Session lift stays on for live and paper.
+
+    October 1 paper never turned the lift off. Live keeps that path, including
+    when ``CHOP_LIVE_DISABLE_SESSION_LIFT`` is set.
+    """
+    del state, snap, snapshots
+    return True
 
 
 def _known_broker_instrument_keys(state: AutoTraderState) -> set[str]:
@@ -365,15 +363,9 @@ def chop_live_entry_blocked(
     if not chop_live_guard_day_active(state, snap, snapshots):
         return False, "ok", meta
 
-    if getattr(settings, "chop_live_hard_block_worst_day", True) and snapshots:
-        from app.engines.worst_day_guard import identify_worst_day
-
-        verdict = identify_worst_day(state, snapshots)
-        if verdict.is_worst and settings.enable_live_trading:
-            meta["worstDayHardBlock"] = True
-            meta["worstDayReasons"] = verdict.reasons
-            return True, "chop_live_worst_day_hard_block", meta
-
+    # October 1 paper never applied chop_live_worst_day_hard_block (it required
+    # live trading). Live skips that blanket too. The chop guards below still run
+    # on paper and live the same way.
     if getattr(settings, "chop_live_block_immature_local_base", True):
         blocked, reason = _immature_local_base_hard_block(candidate, snap)
         if blocked:

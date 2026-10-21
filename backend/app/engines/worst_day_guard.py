@@ -1015,13 +1015,13 @@ def worst_day_blocks_live(
     state: AutoTraderState,
     snapshots: dict[str, SymbolSnapshot],
 ) -> tuple[bool, str, dict[str, Any]]:
-    settings = get_settings()
+    """A worst-day label does not refuse the order.
+
+    October 1 paper skipped this stop: it only ran when live trading was on.
+    Live now takes that same paper path. ``WORST_DAY_BLOCKS_LIVE`` is ignored.
+    """
     verdict = identify_worst_day(state, snapshots)
     meta = {"worstDay": verdict.to_dict()}
-    if not settings.worst_day_blocks_live or not settings.enable_live_trading:
-        return False, "ok", meta
-    if verdict.is_worst:
-        return True, "worst_day_blocks_live_trading", meta
     return False, "ok", meta
 
 
