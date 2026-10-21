@@ -1,0 +1,111 @@
+"""Mega stage-ladder pullback exits — Oct 21 SENSEX 73400 PE giveback hole."""
+
+from datetime import datetime, timedelta
+from unittest.mock import patch
+
+import pytest
+from zoneinfo import ZoneInfo
+
+from app.engines.explosion_profit import evaluate_explosion_exit
+from app.engines.moment_stage_trail import profit_ladder_floor
+
+from tests.test_moment_stage_trail import _settings
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _oct21_sensex_73400(*, pnl_pts: float, seconds: int = 400, since_peak: int = 200):
+    from app.models.schemas import PaperTrade, Side, StrategyType
+
+    entry = 340.33
+    return PaperTrade(
+        id="03ed488f",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=73400.0,
+        entryPremium=entry,
+        currentPremium=entry + pnl_pts,
+        lots=26,
+        openedAt=datetime.now(IST) - timedelta(seconds=seconds),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=47.67,
+        maxLtp=entry + 47.67,
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+            "exitPlan": {
+                "projectedMaxTp": 800.0,
+                "stageSize": 75.0,
+                "trailArmPoints": 28.21,
+            },
+        },
+    )
+
+
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_mega_runner_unified_ladder_arms_at_14pct_gain(mock_ms, mock_s):
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    trade = _oct21_sensex_73400(pnl_pts=47.0)
+    floor, layer = profit_ladder_floor(trade, 47.67, settings=s)
+    assert layer == "peak_keep"
+    assert floor == pytest.approx(47.67 * 0.75, rel=0.01)
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_oct21_73400_hole_take_banks_green_on_fast_pullback(mock_ms, mock_s, _mp):
+    import app.engines.explosion_profit as ep
+
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    trade = _oct21_sensex_73400(pnl_pts=10.7)
+    with patch.object(ep, "_hold_seconds", return_value=400):
+        with patch.object(ep, "_seconds_since_peak", return_value=200):
+            reason, pnl_inr = evaluate_explosion_exit(
+                trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=-0.5,
+            )
+    assert reason == "explosion_stage_runner_hole_take"
+    assert pnl_inr > 0
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_oct21_73400_red_giveback_after_mega_peak(mock_ms, mock_s, _mp):
+    import app.engines.explosion_profit as ep
+
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    trade = _oct21_sensex_73400(pnl_pts=-16.3)
+    with patch.object(ep, "_hold_seconds", return_value=400):
+        with patch.object(ep, "_seconds_since_peak", return_value=200):
+            reason, _ = evaluate_explosion_exit(
+                trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=-0.5,
+            )
+    assert reason == "explosion_stage_runner_red_giveback"
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_oct21_73400_holds_at_peak(mock_ms, mock_s, _mp):
+    import app.engines.explosion_profit as ep
+
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    trade = _oct21_sensex_73400(pnl_pts=47.67)
+    with patch.object(ep, "_hold_seconds", return_value=400):
+        with patch.object(ep, "_seconds_since_peak", return_value=30):
+            reason, _ = evaluate_explosion_exit(
+                trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=1.0,
+            )
+    assert reason is None

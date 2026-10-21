@@ -1621,6 +1621,20 @@ class Settings(BaseSettings):
     # Below this best-pts, defer 75% keep on mega projected runners (Oct21 +21pt);
     # Sep2 +31pt at 11.7% still arms once best ≥ this.
     stage_runner_defer_pct_keep_min_best_points: float = 28.0
+    # Mega projected runners (800+): arm unified 75% peak-keep at this gain % — Oct 21
+    # SENSEX 73400 PE peaked +47.7pt (+14.0%) but missed the default 15% ladder arm.
+    stage_runner_unified_ladder_arm_gain_pct: float = 14.0
+    # After best ≥ min best, a pullback that holes through the 75% FTV line still books
+    # remaining green (Oct 21 73400: +47pt → +10pt hole, not −₹9k giveback).
+    stage_runner_mega_hole_exit_enabled: bool = True
+    stage_runner_mega_hole_exit_min_best_points: float = 28.0
+    stage_runner_mega_hole_exit_min_remain_points: float = 6.0
+    # Once a mega peak matured, do not ride a 75% hole into red — scratch near BE.
+    stage_runner_mega_red_giveback_enabled: bool = True
+    stage_runner_mega_red_giveback_min_best_points: float = 28.0
+    # After a mega peak, book a near-scratch when most of the move is gone (Sep2 +31→+1pt).
+    stage_runner_mega_scratch_max_points: float = 2.0
+    stage_runner_mega_scratch_min_giveback_frac: float = 0.70
     # FTV runner %-of-peak-gain trailing floor. V/FTV moments run in big % from the local
     # base (e.g. Rs68 -> Rs140 = +106%). The absolute stage ladder is tuned for mega point
     # moves and under-protects modest-but-real % moves (a +40% peak can give back to +4%).
