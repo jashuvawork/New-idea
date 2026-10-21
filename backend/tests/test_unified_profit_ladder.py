@@ -93,6 +93,7 @@ def test_enabled_by_default_ce_pe(side):
     assert s.unified_profit_ladder_breakeven_enabled is False
     assert s.unified_profit_ladder_min_hold_seconds == 180.0
     assert s.unified_profit_ladder_min_seconds_after_peak == 180.0
+    assert s.unified_profit_ladder_floor_touch_points == 2.0
     floor, layer = profit_ladder_floor(_oct12_runner(side), 10.2, settings=s)
     assert layer == "peak_keep"
     assert floor == pytest.approx(7.65)
@@ -351,3 +352,56 @@ def test_oct16_23150_shape_books_seventy_five_pct_ce_pe(side):
     assert hold is None or not str(hold).startswith("explosion_profit_ladder")
     assert reason == "explosion_profit_ladder_peak_keep"
     assert pnl_inr == pytest.approx(14.92 * 65 * 19, rel=0.01)
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_oct21_22700_hole_holds_until_price_returns_ce_pe(side):
+    """Oct 21 NIFTY 22700 PE: floor ~156, sold 150.38. That hole is a hold.
+
+    A downtick still within 2 points of the 75% line sells. A rising tick
+    on the line holds. The same hole must not be sold by the FTV peak-keep
+    trail on the next check.
+    """
+    s = _settings()
+    entry = 140.02
+    best = 21.48
+    floor = round(best * 0.75, 2)
+    trade = _trade(
+        side,
+        entry,
+        best,
+        strike=22700.0,
+        seconds=549,
+        symbol="NIFTY",
+        ctx={
+            "maxProfitCapture": True,
+            "vBaseFtvRunner": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 703.8,
+            "stageSize": 75.0,
+            "explosionTier": "ELITE",
+            "rankGrade": "A",
+        },
+    )
+    trade.maxLtp = 161.50
+    trade.maxLtpAt = datetime.now(IST) - timedelta(seconds=180)
+    trade.lots = 19
+    near_pts = floor - 0.13
+    with _use(s):
+        hole = unified_profit_ladder_exit_reason(
+            trade, best=best, pnl_pts=10.36, hold_seconds=549, live_velocity_3s=-0.4,
+        )
+        near = unified_profit_ladder_exit_reason(
+            trade, best=best, pnl_pts=near_pts, hold_seconds=549, live_velocity_3s=-0.4,
+        )
+        rising = unified_profit_ladder_exit_reason(
+            trade, best=best, pnl_pts=near_pts, hold_seconds=549, live_velocity_3s=0.4,
+        )
+        reason, _ = evaluate_explosion_exit(
+            trade, entry + 10.36, "ELITE", 65, live_velocity_3s=-0.4,
+        )
+    assert floor == pytest.approx(16.11)
+    assert hole is None
+    assert near == "explosion_profit_ladder_peak_keep"
+    assert rising is None
+    assert reason is None

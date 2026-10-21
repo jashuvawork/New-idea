@@ -354,8 +354,15 @@ def test_peak_keep_75_exits_before_stage_one(mock_ms, mock_s, _hc, _mp):
     reason, pnl = evaluate_explosion_exit(
         trade, 61.85, "EXPLODING", 65, params=params, live_velocity_3s=0.0,
     )
-    assert reason == "explosion_peak_keep_trail"
+    # +13.9 is already through the 75% line (~+23.2). Hold the hole.
+    assert reason != "explosion_peak_keep_trail"
+    assert reason != "explosion_profit_ladder_peak_keep"
     assert pnl > 0
+
+    reason_line, _ = evaluate_explosion_exit(
+        trade, entry + 22.5, "EXPLODING", 65, params=params, live_velocity_3s=-0.4,
+    )
+    assert reason_line == "explosion_peak_keep_trail"
 
     reason_hold, _ = evaluate_explosion_exit(
         trade, entry + best * 0.76, "EXPLODING", 65, params=params, live_velocity_3s=0.0,
@@ -599,7 +606,7 @@ def test_sensex_put_392_holds_through_early_trail_dip(mock_ms, mock_s, _hc, _mp)
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.moment_stage_trail.get_settings")
 def test_pre_stage_deep_fade_still_books(mock_ms, mock_s, _hc, _mp):
-    """Deep fade through provisional floor still exits via stage trail."""
+    """A fade already through the 75% line holds. A print on the line still books."""
     s = _settings()
     mock_s.return_value = s
     mock_ms.return_value = s
@@ -616,7 +623,9 @@ def test_pre_stage_deep_fade_still_books(mock_ms, mock_s, _hc, _mp):
     reason, pnl = evaluate_explosion_exit(
         trade, 393.05, "EXPLODING", 10, params=_params(), live_velocity_3s=4.4,
     )
-    assert reason == "explosion_peak_keep_trail"
+    # +1pt is through the 75% line (~+32). Peak-keep holds that hole.
+    assert reason != "explosion_peak_keep_trail"
+    assert reason != "explosion_profit_ladder_peak_keep"
     assert pnl > 0
 
 
