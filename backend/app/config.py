@@ -1635,6 +1635,20 @@ class Settings(BaseSettings):
     # After a mega peak, book a near-scratch when most of the move is gone (Sep2 +31→+1pt).
     stage_runner_mega_scratch_max_points: float = 2.0
     stage_runner_mega_scratch_min_giveback_frac: float = 0.70
+    # TP rung ladder — single exit owner for mega projected stage-ladder legs.
+    tp_rung_ladder_exit_enabled: bool = True
+    tp_rung_ladder_min_projected_tp: float = 400.0
+    tp_rung_ladder_min_best_to_arm_exits: float = 28.0
+    tp_rung_ladder_min_rung_points: float = 4.0
+    tp_rung_ladder_max_rungs: int = 24
+    tp_rung_ladder_confirm_slip_points: float = 0.25
+    tp_rung_ladder_floor_slip_points: float = 1.0
+    tp_rung_ladder_floor_touch_points: float = 2.0
+    tp_rung_ladder_approach_buffer_points: float = 4.0
+    tp_rung_ladder_fade_min_giveback_points: float = 2.0
+    tp_rung_ladder_min_hold_seconds: float = 45.0
+    tp_rung_ladder_hot_defer_velocity_3s: float = 2.5
+    tp_rung_ladder_red_min_best_points: float = 20.0
     # FTV runner %-of-peak-gain trailing floor. V/FTV moments run in big % from the local
     # base (e.g. Rs68 -> Rs140 = +106%). The absolute stage ladder is tuned for mega point
     # moves and under-protects modest-but-real % moves (a +40% peak can give back to +4%).
