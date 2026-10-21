@@ -421,8 +421,7 @@ def test_mega_projected_runner_defers_peak_keep_trail_before_stage_one(mock_ms, 
     reason, _ = evaluate_explosion_exit(
         trade, 150.38, "ELITE", 65, live_velocity_3s=-0.5,
     )
-    assert reason != "explosion_peak_keep_trail"
-    assert reason is None or not str(reason).startswith("explosion_profit_ladder")
+    assert reason == "explosion_profit_ladder_peak_keep"
 
 
 @patch("app.engines.explosion_profit.get_settings")

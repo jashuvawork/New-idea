@@ -71,7 +71,7 @@ def test_oct21_73400_hole_take_banks_green_on_fast_pullback(mock_ms, mock_s, _mp
             reason, pnl_inr = evaluate_explosion_exit(
                 trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=-0.5,
             )
-    assert reason == "explosion_stage_runner_hole_take"
+    assert reason == "explosion_profit_ladder_peak_keep"
     assert pnl_inr > 0
 
 
@@ -90,7 +90,7 @@ def test_oct21_73400_red_giveback_after_mega_peak(mock_ms, mock_s, _mp):
             reason, _ = evaluate_explosion_exit(
                 trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=-0.5,
             )
-    assert reason == "explosion_stage_runner_red_giveback"
+    assert reason == "explosion_profit_ladder_peak_keep"
 
 
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
@@ -109,3 +109,30 @@ def test_oct21_73400_holds_at_peak(mock_ms, mock_s, _mp):
                 trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=1.0,
             )
     assert reason is None
+
+
+def test_oct21_73400_falling_through_75_line_sells_before_three_minutes():
+    """After the high, a falling print under the 75% line sells. A 12s dip holds."""
+    from app.config import Settings
+    from app.engines.explosion_profit import unified_profit_ladder_exit_reason
+
+    s = Settings()
+    entry = 340.33
+    best = 47.67
+    floor = round(best * 0.75, 2)
+    under = floor - 8.0
+
+    def _at(age: int, pnl: float, v3: float):
+        trade = _oct21_sensex_73400(pnl_pts=pnl, seconds=400)
+        trade.maxLtpAt = datetime.now(IST) - timedelta(seconds=age)
+        with patch("app.config.get_settings", lambda: s), patch(
+            "app.engines.explosion_profit.get_settings", lambda: s
+        ), patch("app.engines.moment_stage_trail.get_settings", lambda: s):
+            return unified_profit_ladder_exit_reason(
+                trade, best=best, pnl_pts=pnl, hold_seconds=400, live_velocity_3s=v3,
+            )
+
+    assert _at(12, under, -1.0) is None
+    assert _at(50, under, -1.0) == "explosion_profit_ladder_peak_keep"
+    assert _at(50, under, 0.4) is None
+    assert _at(50, -8.0, -1.0) == "explosion_profit_ladder_peak_keep"
