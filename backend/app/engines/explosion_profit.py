@@ -2243,6 +2243,67 @@ def unified_profit_ladder_exit_reason(
     return f"explosion_profit_ladder_{layer}"
 
 
+def runner_profit_guard_floor(
+    trade: PaperTrade,
+    *,
+    settings: Any = None,
+    pnl_pts: float = 0.0,
+) -> Optional[float]:
+    """Locked profit points for a trade that has run, or None before tier 1.
+
+    Uses this contract's own observed peak, never a sibling's cycle gain.
+    Side-agnostic: CALL and PUT premiums both lock on their own rise.
+    """
+    s = settings or get_settings()
+    if not bool(getattr(s, "runner_profit_guard_enabled", True)):
+        return None
+    entry = float(trade.entryPremium or 0)
+    if entry <= 0:
+        return None
+    from app.engines.moment_stage_trail import _local_observed_best
+
+    best = _local_observed_best(trade, pnl_pts)
+    if best + 1e-9 < _cfg_float(s, "runner_profit_guard_min_best_points", 4.0):
+        return None
+    gain_pct = best / entry * 100.0
+    keep: Optional[float] = None
+    for tier in (1, 2, 3, 4):
+        arm = _cfg_float(s, f"runner_profit_guard_tier{tier}_gain_pct", 0.0)
+        if arm > 0 and gain_pct + 1e-9 >= arm:
+            keep = _cfg_float(s, f"runner_profit_guard_tier{tier}_keep_ratio", 0.0)
+    if keep is None:
+        return None
+    min_lock = entry * _cfg_float(s, "runner_profit_guard_min_lock_pct", 1.0) / 100.0
+    return max(best * keep, min_lock)
+
+
+def runner_profit_guard_exit_reason(
+    trade: PaperTrade,
+    *,
+    pnl_pts: float,
+    live_velocity_3s: float = 0.0,
+) -> Optional[str]:
+    """Sell a runner on the first non-rising print at or below its guard floor.
+
+    A print through the floor is a sale, not a hold — the floor is the most a
+    winner may give back. Rising prints (v3 > 0) defer one evaluation. A flat
+    print counts as not rising — no fallback to the entry-time velocity.
+    """
+    settings = get_settings()
+    floor_pts = runner_profit_guard_floor(trade, settings=settings, pnl_pts=pnl_pts)
+    if floor_pts is None:
+        return None
+    if float(pnl_pts or 0) > floor_pts + 1e-6:
+        return None
+    try:
+        live_v3 = float(live_velocity_3s or 0.0)
+    except (TypeError, ValueError):
+        live_v3 = 0.0
+    if live_v3 > 0:
+        return None
+    return "explosion_runner_profit_guard"
+
+
 def stage_runner_mega_pullback_exit_reason(
     trade: PaperTrade,
     *,
@@ -2500,6 +2561,12 @@ def evaluate_explosion_exit(
     )
     if mega_pullback:
         return mega_pullback, pnl_inr
+
+    runner_guard = runner_profit_guard_exit_reason(
+        trade, pnl_pts=pnl_pts, live_velocity_3s=v3,
+    )
+    if runner_guard:
+        return runner_guard, pnl_inr
 
     reversal_keep = peak_velocity_reversal_keep_reason(
         trade, best=best, pnl_pts=pnl_pts, live_velocity_3s=v3,

@@ -1678,6 +1678,23 @@ class Settings(BaseSettings):
     # that line is a hold until it comes back and turns down. Oct 21 NIFTY 22700
     # PE peaked at 161.50 (floor ~156) and was sold at 150.38.
     unified_profit_ladder_floor_touch_points: float = 2.0
+    # Runner profit guard — a tiered keep-of-peak floor that sells on the first
+    # non-rising print at or below it: no after-peak wait, no touch band. The
+    # 75% layers above still book first on a slow fade; this catches the fast
+    # bleed through them (Oct 21 SENSEX 73400 PE: +47.7pt → −40pt stop).
+    # Floor = max(best × keep for the highest tier reached, entry × min_lock%).
+    runner_profit_guard_enabled: bool = True
+    runner_profit_guard_min_lock_pct: float = 1.0
+    # Cheap premiums: a +6% wiggle on ₹60 is noise, not a run to protect.
+    runner_profit_guard_min_best_points: float = 4.0
+    runner_profit_guard_tier1_gain_pct: float = 5.0
+    runner_profit_guard_tier1_keep_ratio: float = 0.20
+    runner_profit_guard_tier2_gain_pct: float = 12.0
+    runner_profit_guard_tier2_keep_ratio: float = 0.45
+    runner_profit_guard_tier3_gain_pct: float = 25.0
+    runner_profit_guard_tier3_keep_ratio: float = 0.60
+    runner_profit_guard_tier4_gain_pct: float = 50.0
+    runner_profit_guard_tier4_keep_ratio: float = 0.70
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.

@@ -1,0 +1,135 @@
+"""Runner profit guard — a run that printed real green never rides back to the stop.
+
+Oct 21 SENSEX 73400 PE: entry 340.33, peak 388.00 (+47.67pt, +14.0%), then a fast
+bleed through every 75% line to the −40pt adaptive stop (−₹21k on 26 lots).
+"""
+
+from datetime import datetime, timedelta
+from unittest.mock import patch
+
+import pytest
+from zoneinfo import ZoneInfo
+
+from app.config import Settings
+from app.engines.explosion_profit import (
+    evaluate_explosion_exit,
+    runner_profit_guard_exit_reason,
+    runner_profit_guard_floor,
+)
+from app.models.schemas import PaperTrade, Side, StrategyType
+
+IST = ZoneInfo("Asia/Kolkata")
+
+SIDES = [Side.CALL, Side.PUT]
+
+
+def _runner(side: Side, *, entry: float = 340.33, best: float = 47.67, pnl: float = 20.0):
+    return PaperTrade(
+        id=f"guard-{side.value}",
+        symbol="SENSEX",
+        side=side,
+        strike=73400.0,
+        entryPremium=entry,
+        currentPremium=entry + pnl,
+        lots=26,
+        openedAt=datetime.now(IST) - timedelta(seconds=900),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=best,
+        maxLtp=entry + best,
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+            "velocity3s": 6.0,
+            "exitPlan": {
+                "projectedMaxTp": 800.0,
+                "stageSize": 75.0,
+                "stopPoints": 40.0,
+                "trailArmPoints": 24.25,
+                "adaptiveStop": True,
+            },
+        },
+    )
+
+
+def _guard(trade: PaperTrade, s: Settings, *, v3: float):
+    with patch("app.engines.explosion_profit.get_settings", return_value=s):
+        return runner_profit_guard_exit_reason(
+            trade, pnl_pts=trade.currentPremium - trade.entryPremium, live_velocity_3s=v3,
+        )
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_floor_tiers_mirror_for_call_and_put(side):
+    s = Settings()
+    cases = [
+        (340.33, 47.67, 47.67 * s.runner_profit_guard_tier2_keep_ratio),
+        (300.0, 20.0, 20.0 * s.runner_profit_guard_tier1_keep_ratio),
+        (300.0, 90.0, 90.0 * s.runner_profit_guard_tier3_keep_ratio),
+        (300.0, 200.0, 200.0 * s.runner_profit_guard_tier4_keep_ratio),
+    ]
+    for entry, best, expected in cases:
+        trade = _runner(side, entry=entry, best=best, pnl=0.0)
+        assert runner_profit_guard_floor(trade, settings=s) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_tier1_floor_never_below_min_lock(side):
+    s = Settings()
+    trade = _runner(side, entry=300.0, best=16.0, pnl=0.0)
+    min_lock = 300.0 * s.runner_profit_guard_min_lock_pct / 100.0
+    assert runner_profit_guard_floor(trade, settings=s) == pytest.approx(max(16.0 * 0.20, min_lock))
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_unarmed_below_tier1_and_cheap_premium_noise(side):
+    s = Settings()
+    assert runner_profit_guard_floor(_runner(side, entry=340.0, best=10.0), settings=s) is None
+    assert runner_profit_guard_floor(_runner(side, entry=62.1, best=3.9), settings=s) is None
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_oct21_73400_fade_books_green_before_adaptive_stop(side):
+    """Real Settings, full exit stack: the fade sells green inside the 3-min peak wait."""
+    s = Settings()
+    floor = 47.67 * s.runner_profit_guard_tier2_keep_ratio
+    trade = _runner(side, pnl=floor - 1.0)
+    with patch("app.engines.explosion_profit.get_settings", return_value=s), patch(
+        "app.engines.moment_stage_trail.get_settings", return_value=s
+    ), patch("app.engines.explosion_profit._hold_seconds", return_value=900), patch(
+        "app.engines.explosion_profit._seconds_since_peak", return_value=60
+    ):
+        reason, pnl_inr = evaluate_explosion_exit(
+            trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=-1.5,
+        )
+    assert reason == "explosion_runner_profit_guard"
+    assert pnl_inr == pytest.approx((floor - 1.0) * 26 * 20)
+    assert pnl_inr > 10_000
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_print_through_floor_sells_not_holds(side):
+    s = Settings()
+    assert _guard(_runner(side, pnl=-5.0), s, v3=-0.5) == "explosion_runner_profit_guard"
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_holds_above_floor_and_on_rising_print(side):
+    s = Settings()
+    assert _guard(_runner(side, pnl=30.0), s, v3=-1.0) is None
+    assert _guard(_runner(side, pnl=15.0), s, v3=0.8) is None
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_flat_print_sells_without_entry_velocity_fallback(side):
+    s = Settings()
+    trade = _runner(side, pnl=15.0)
+    assert trade.entryContext["velocity3s"] > 0
+    assert _guard(trade, s, v3=0.0) == "explosion_runner_profit_guard"
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_disabled_flag_is_inert(side):
+    s = Settings(runner_profit_guard_enabled=False)
+    assert _guard(_runner(side, pnl=-5.0), s, v3=-1.0) is None
