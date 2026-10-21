@@ -91,11 +91,10 @@ def test_floor_tiers_mirror_for_call_and_put(side):
 
 
 @pytest.mark.parametrize("side", SIDES)
-def test_tier1_floor_never_below_min_lock(side):
+def test_tier1_floor_is_pure_share_of_peak(side):
     s = Settings()
     trade = _runner(side, entry=300.0, best=16.0, pnl=0.0)
-    min_lock = 300.0 * s.runner_profit_guard_min_lock_pct / 100.0
-    assert runner_profit_guard_floor(trade, settings=s) == pytest.approx(max(16.0 * 0.20, min_lock))
+    assert runner_profit_guard_floor(trade, settings=s) == pytest.approx(16.0 * 0.20)
 
 
 @pytest.mark.parametrize("side", SIDES)
@@ -151,11 +150,12 @@ def test_recovery_above_floor_clears_dip_clock(side):
 
 
 @pytest.mark.parametrize("side", SIDES)
-def test_min_lock_print_sells_at_once(side):
+def test_near_breakeven_and_red_prints_wait_for_confirm(side):
     s = Settings()
-    min_lock = 340.33 * s.runner_profit_guard_min_lock_pct / 100.0
-    assert _guard(_runner(side, pnl=min_lock - 0.5), s, v3=-0.5) == "explosion_runner_profit_guard"
-    assert _guard(_runner(side, pnl=-5.0), s, v3=-0.5) == "explosion_runner_profit_guard"
+    for pnl in (2.0, -5.0):
+        assert _guard(_runner(side, pnl=pnl), s, v3=-0.5) is None
+        held = _runner(side, pnl=pnl, below_for=s.runner_profit_guard_confirm_seconds + 1)
+        assert _guard(held, s, v3=-0.5) == "explosion_runner_profit_guard"
 
 
 @pytest.mark.parametrize("side", SIDES)

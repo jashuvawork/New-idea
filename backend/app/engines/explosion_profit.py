@@ -2314,8 +2314,7 @@ def runner_profit_guard_floor(
             keep = _cfg_float(s, f"runner_profit_guard_tier{tier}_keep_ratio", 0.0)
     if keep is None:
         return None
-    min_lock = entry * _cfg_float(s, "runner_profit_guard_min_lock_pct", 1.0) / 100.0
-    return max(best * keep, min_lock)
+    return best * keep
 
 
 def runner_profit_guard_exit_reason(
@@ -2324,14 +2323,13 @@ def runner_profit_guard_exit_reason(
     pnl_pts: float,
     live_velocity_3s: float = 0.0,
 ) -> Optional[str]:
-    """Sell a runner that stays under its guard floor, or slips to the min lock.
+    """Sell a runner that stays under its guard floor.
 
     A dip under the floor must persist ``runner_profit_guard_confirm_seconds``
     before it sells — one-print shakeouts right after a high recover (Oct 21
-    NIFTY 22700 PE dipped to 148.95 after 160.5, then ran to 186.9). A print at
-    or under the min lock (entry + 1%) sells at once: a real winner never rides
-    into red. Rising prints (v3 > 0) defer; a flat print counts as not rising,
-    with no fallback to the entry-time velocity.
+    NIFTY 22700 PE dipped to 148.95 after 160.5, then ran to 186.9). Rising
+    prints (v3 > 0) defer; a flat print counts as not rising, with no fallback
+    to the entry-time velocity.
     """
     settings = get_settings()
     floor_pts = runner_profit_guard_floor(trade, settings=settings, pnl_pts=pnl_pts)
@@ -2358,11 +2356,6 @@ def runner_profit_guard_exit_reason(
         trade.entryContext = ctx
     if live_v3 > 0:
         return None
-    min_lock = float(trade.entryPremium or 0) * _cfg_float(
-        settings, "runner_profit_guard_min_lock_pct", 1.0
-    ) / 100.0
-    if pnl <= min_lock + 1e-6:
-        return "explosion_runner_profit_guard"
     confirm = _cfg_float(settings, "runner_profit_guard_confirm_seconds", 0.0)
     if since.tzinfo is None:
         since = since.replace(tzinfo=IST)

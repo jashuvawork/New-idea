@@ -1686,10 +1686,9 @@ class Settings(BaseSettings):
     # and no touch band. The 75% layers above still book first on a slow fade;
     # this catches the bleed through them (Oct 21 SENSEX 73400 PE: +47.7pt →
     # −40pt stop; 73300 PE replays to the stop on the same tape).
-    # Floor = max(best × keep for the highest tier reached, entry × min_lock%).
-    # Under the floor for confirm_seconds sells; at/under the min lock sells at once.
+    # Floor = best × keep for the highest tier reached. Only a print that stays
+    # under the floor for confirm_seconds sells — there is no instant sale.
     runner_profit_guard_enabled: bool = True
-    runner_profit_guard_min_lock_pct: float = 1.0
     # Cheap premiums: a +6% wiggle on ₹60 is noise, not a run to protect.
     runner_profit_guard_min_best_points: float = 4.0
     # One-print shakeouts right after a high recover (Oct 21 NIFTY 22700 PE).
