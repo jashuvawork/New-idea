@@ -3049,11 +3049,11 @@ class Settings(BaseSettings):
     premium_led_counter_breadth_min_score: float = 90.0
     premium_led_elite_counter_min_score: float = 90.0
     premium_led_explosion_bypass_enabled: bool = True
-    # Explosion-only entries from 9:16 — one minute of today's tape before the first order.
-    # Oct 1's first fill was 09:31. The 09:15:37 Oct 13 NIFTY 22300 PE was the wrong-side loss.
+    # First order is 09:20, same as the general entry clock. The 09:16 explosion
+    # window is closed — 21 Oct NIFTY 23350 PE filled at 09:16 on a one-bar chart.
     explosion_open_entry_enabled: bool = True
     explosion_entry_earliest_hour: int = 9
-    explosion_entry_earliest_minute: int = 16
+    explosion_entry_earliest_minute: int = 20
     # Open premium explosion — NIFTY PE 60→160 style gap rips at 9:15
     open_premium_explosion_enabled: bool = True
     open_premium_min_move_pct: float = 25.0
