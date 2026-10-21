@@ -111,11 +111,11 @@ def defer_modest_peak_keep_for_max_profit_stage_runner(
     *,
     settings: Settings | None = None,
 ) -> bool:
-    """Hold off 75% peak-keep until stage 1 is near-complete on mega projected runners.
+    """Hold off FTV 75% peak-keep until stage 1 is near-complete on mega projected runners.
 
-    Entry stamps projectedMaxTp in the hundreds while stageSize divides the path (e.g.
-    703 / 75). Unified ladder and ftv_runner_pct_trail were booking ~half of a +20pt
-    peak at ~15% gain — before stage trail or pre-stage hold could ride the rip.
+    Premium-neutral: uses the same stageSize / projectedMaxTp stamp for ₹60 and ₹600
+    entry LTP. No per-premium point shortcut — cheap and deep ITM legs defer until the
+    same fraction of stage 1 (e.g. 75 × 0.82 pt) before ftv_runner_pct_trail can arm.
     """
     s = settings or get_settings()
     ctx = trade.entryContext or {}
@@ -131,12 +131,7 @@ def defer_modest_peak_keep_for_max_profit_stage_runner(
     if projected + 1e-6 < min_proj:
         return False
     frac = _cfg_float(s, "moment_stage_near_complete_frac", 0.82)
-    if best + 1e-6 >= stage * max(0.0, min(1.0, frac)):
-        return False
-    min_best = _cfg_float(s, "stage_runner_defer_pct_keep_min_best_points", 28.0)
-    if best + 1e-6 >= min_best:
-        return False
-    return True
+    return best + 1e-6 < stage * max(0.0, min(1.0, frac))
 
 
 def moment_stage_near_complete(

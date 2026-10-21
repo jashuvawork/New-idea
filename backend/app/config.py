@@ -1618,9 +1618,6 @@ class Settings(BaseSettings):
     # NIFTY PUT 22700 exited at +10pt with projected 703. Cheap Oct12 runners (projected
     # ~258) still use modest peak-keep via unified ladder / ftv_runner_pct_trail.
     stage_runner_defer_pct_keep_min_projected_tp: float = 400.0
-    # Below this best-pts, defer 75% keep on mega projected runners (Oct21 +21pt);
-    # Sep2 +31pt at 11.7% still arms once best ≥ this.
-    stage_runner_defer_pct_keep_min_best_points: float = 28.0
     # FTV runner %-of-peak-gain trailing floor. V/FTV moments run in big % from the local
     # base (e.g. Rs68 -> Rs140 = +106%). The absolute stage ladder is tuned for mega point
     # moves and under-protects modest-but-real % moves (a +40% peak can give back to +4%).

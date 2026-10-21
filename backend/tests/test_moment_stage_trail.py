@@ -409,7 +409,7 @@ def test_mega_projected_runner_defers_peak_keep_trail_before_stage_one(mock_ms, 
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.moment_stage_trail.get_settings")
 def test_ftv_pct_floor_arms_on_absolute_points_for_max_profit(mock_ms, mock_s):
-    """Sep2 SENSEX PUT 76300: +31pt is only +11.7% — still arms 75% keep."""
+    """Sep2 +31pt on smaller projection arms; mega projected holds until stage 1 (CE/PE)."""
     from app.engines.moment_stage_trail import ftv_runner_pct_floor
 
     s = _settings()
@@ -430,13 +430,63 @@ def test_ftv_pct_floor_arms_on_absolute_points_for_max_profit(mock_ms, mock_s):
         entryContext={
             "maxProfitCapture": True,
             "momentStageLadder": True,
-            "projectedMaxTp": 800.0,
-            "stageSize": 75.0,
+            "projectedMaxTp": 323.0,
+            "stageSize": 45.0,
         },
     )
     floor = ftv_runner_pct_floor(trade, 31.5, settings=s)
     assert floor is not None
     assert floor == pytest.approx(31.5 * 0.75, rel=0.01)
+
+    mega = PaperTrade(
+        id="sensex-76300-mega",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=76300.0,
+        entryPremium=269.45,
+        currentPremium=300.95,
+        lots=19,
+        openedAt=datetime.now(IST) - timedelta(minutes=6),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=31.5,
+        maxLtp=300.95,
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+        },
+    )
+    assert ftv_runner_pct_floor(mega, 31.5, settings=s) is None
+
+
+@pytest.mark.parametrize("entry", [58.5, 140.02, 418.82])
+def test_mega_runner_defer_same_stage_bar_all_premiums(entry):
+    """Same stage stamp: low/high LTP defer FTV pct-keep until ~82% of stage 1."""
+    from app.engines.moment_stage_trail import defer_modest_peak_keep_for_max_profit_stage_runner
+
+    s = _settings()
+    trade = PaperTrade(
+        id=f"prem-{entry}",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=22700.0,
+        entryPremium=entry,
+        currentPremium=entry + 20.0,
+        lots=10,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=20.0,
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 703.8,
+            "stageSize": 75.0,
+        },
+    )
+    assert defer_modest_peak_keep_for_max_profit_stage_runner(trade, 20.0, settings=s) is True
+    near_stage = 75.0 * 0.82
+    assert defer_modest_peak_keep_for_max_profit_stage_runner(trade, near_stage, settings=s) is False
 
 
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
@@ -596,11 +646,10 @@ def test_pre_stage_floor_owns_trail_before_first_stage(mock_s):
     composed, stage_floor = compose_trail_floor_with_stages(
         trade, 43.22, base_floor=39.72, settings=_settings()
     )
-    pct_keep = 43.22 * 0.75
-    assert stage_floor == pytest.approx(pct_keep, rel=0.01)
-    assert composed == pytest.approx(pct_keep, rel=0.01)
-    assert composed > pre
-    assert composed < 37.46  # +37 pullback still above pct-keep floor
+    # Mega projected 800: FTV 75% keep deferred until stage 1 — pre-stage wide floor owns.
+    assert stage_floor == pytest.approx(pre, rel=0.01)
+    assert composed == pytest.approx(pre, rel=0.01)
+    assert 37.46 > composed  # +37 pullback still above pre-stage floor (no pct-keep yet)
 
 
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
