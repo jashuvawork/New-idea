@@ -1090,6 +1090,27 @@ def _green_profit_hold_ready(
     return since_peak + 1e-6 >= min_after_peak
 
 
+def _profit_floor_touch_sell(
+    pnl_pts: float,
+    floor_pts: float,
+    live_v3: float,
+    settings: Any,
+) -> bool:
+    """True when a green print is on the profit floor and not rising.
+
+    The floor is the line to sell. A price already well through it is a hold
+    until it trades back up to the line and turns down, or the loss stop hits.
+    Oct 21 NIFTY 22700 PE: 75% of the +21.5 peak was ~156, and the ladder sold
+    150.38 the moment the three-minute wait ended.
+    """
+    touch = max(0.0, _cfg_float(settings, "unified_profit_ladder_floor_touch_points", 2.0))
+    if pnl_pts > floor_pts + 1e-6:
+        return False
+    if pnl_pts < floor_pts - touch - 1e-6:
+        return False
+    return live_v3 <= 0
+
+
 def _armed_base_expires_at_iso(trade: PaperTrade) -> str:
     ctx = trade.entryContext or {}
     iso = str(ctx.get("armedBaseExpiresAt") or "")
@@ -2177,10 +2198,13 @@ def unified_profit_ladder_exit_reason(
     hold_seconds: float,
     live_velocity_3s: float = 0.0,
 ) -> Optional[str]:
-    """Book when P&L breaks the unified ladder floor, or on an N× fast fade.
+    """Book when P&L is on the unified ladder floor, or on an N× fast fade.
 
-    Same rule for CALL and PUT. A hot tick (v3 ≥ +2) defers one evaluation but never
-    lowers the floor; the ratchet in ``profit_ladder_floor`` only moves up.
+    Same rule for CALL and PUT. Peak-keep and breakeven sell only inside
+    ``unified_profit_ladder_floor_touch_points`` of the floor, and only when
+    the tick is not rising. A print already through that band is a hold.
+    The multiple lock still sells on a floor break. A hot tick (v3 ≥ +2)
+    defers one evaluation but never lowers the floor.
     """
     settings = get_settings()
     from app.engines.moment_stage_trail import profit_ladder_floor
@@ -2212,9 +2236,9 @@ def unified_profit_ladder_exit_reason(
             return "explosion_profit_ladder_multiple"
         return None
 
-    if pnl_pts > floor_pts + 1e-6:
-        return None
     if not _green_profit_hold_ready(trade, hold_seconds, settings):
+        return None
+    if not _profit_floor_touch_sell(pnl_pts, floor_pts, live_v3, settings):
         return None
     return f"explosion_profit_ladder_{layer}"
 
@@ -2575,12 +2599,14 @@ def evaluate_explosion_exit(
     if (
         pct_keep_floor is not None
         and best >= min_pct_best
-        and pnl_pts <= pct_keep_floor
         and hold >= stage_min_hold
         and _green_profit_hold_ready(trade, hold, settings)
+        and _profit_floor_touch_sell(pnl_pts, pct_keep_floor, v3, settings)
     ):
-        # Aug28 24100 PE: peaked +31pt, faded to +10 — stage_armed waits for +45pt
-        # so the 75% peak-keep floor must exit even before stage 1 completes.
+        # Aug28 24100 PE: peaked +31pt — stage_armed waits for +45pt, so this
+        # 75% line must be able to sell before stage 1. It sells only while
+        # price is still on that line. A print already through it holds, the
+        # same way the unified ladder holds the Oct 21 22700 hole.
         return "explosion_peak_keep_trail", pnl_inr
 
     stage_armed = stage_floor is not None and (
@@ -2600,7 +2626,8 @@ def evaluate_explosion_exit(
             stage_armed = False
     # Stage-trail sale is off. Oct 21 SENSEX 74200 PE was explosion_stage_trail
     # at +18.4pt, 12s after a +26.8 peak, and that put later reached ~855.
-    # The 75% peak-keep above still books a fade once the high is 3 minutes old.
+    # The 75% peak-keep above books a fade once the high is 3 minutes old and
+    # price is still on that line. A print already through the line holds.
     # While a stage floor is armed, the micro trail stays off so the leg holds.
 
     # When stage ladder owns the trail, skip micro step / keep-ratio locks —

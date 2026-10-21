@@ -1652,6 +1652,10 @@ class Settings(BaseSettings):
     unified_profit_ladder_multiple_min_giveback_pct_of_peak: float = 5.0
     unified_profit_ladder_fast_fade_velocity_3s: float = 2.0
     unified_profit_ladder_hot_defer_velocity_3s: float = 2.0
+    # Sell the 75% line only while price is still on it. A print already through
+    # that line is a hold until it comes back and turns down. Oct 21 NIFTY 22700
+    # PE peaked at 161.50 (floor ~156) and was sold at 150.38.
+    unified_profit_ladder_floor_touch_points: float = 2.0
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.
