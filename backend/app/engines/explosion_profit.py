@@ -2324,11 +2324,25 @@ def stage_runner_mega_pullback_exit_reason(
     if pct_floor is None:
         return None
 
-    if not _green_profit_hold_ready(trade, hold_seconds, settings):
-        return None
-
     live_v3, _ = _live_premium_heat(trade, live_velocity_3s=live_velocity_3s)
     if live_v3 >= _cfg_float(settings, "unified_profit_ladder_hot_defer_velocity_3s", 2.0):
+        return None
+
+    min_best_red = _cfg_float(settings, "stage_runner_mega_red_giveback_min_best_points", 28.0)
+    giveback = best - pnl_pts
+    falling_under = _falling_under_profit_floor(pnl_pts, pct_floor, live_v3)
+    mega_red = (
+        bool(getattr(settings, "stage_runner_mega_red_giveback_enabled", True))
+        and best + 1e-6 >= min_best_red
+        and pnl_pts <= 0
+        and live_v3 <= 0
+    )
+    if not _profit_floor_exit_ready(
+        trade,
+        hold_seconds,
+        settings,
+        falling_under=falling_under or mega_red,
+    ):
         return None
 
     touch = max(0.0, _cfg_float(settings, "unified_profit_ladder_floor_touch_points", 2.0))
@@ -2344,10 +2358,8 @@ def stage_runner_mega_pullback_exit_reason(
     ):
         return "explosion_stage_runner_hole_take"
 
-    min_best_red = _cfg_float(settings, "stage_runner_mega_red_giveback_min_best_points", 28.0)
     scratch_max = _cfg_float(settings, "stage_runner_mega_scratch_max_points", 2.0)
     scratch_gb = _cfg_float(settings, "stage_runner_mega_scratch_min_giveback_frac", 0.70)
-    giveback = best - pnl_pts
     if bool(getattr(settings, "stage_runner_mega_red_giveback_enabled", True)) and best + 1e-6 >= min_best_red:
         if pnl_pts <= 0 and live_v3 <= 0:
             return "explosion_stage_runner_red_giveback"

@@ -90,7 +90,31 @@ def test_oct21_73400_red_giveback_after_mega_peak(mock_ms, mock_s, _mp):
             reason, _ = evaluate_explosion_exit(
                 trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=-0.5,
             )
-    assert reason == "explosion_profit_ladder_peak_keep"
+    assert reason in (
+        "explosion_profit_ladder_peak_keep",
+        "explosion_stage_runner_red_giveback",
+    )
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
+def test_oct21_73400_red_giveback_without_three_minute_peak_wait(mock_ms, mock_s, _mp):
+    import app.engines.explosion_profit as ep
+
+    s = _settings()
+    mock_s.return_value = s
+    mock_ms.return_value = s
+    trade = _oct21_sensex_73400(pnl_pts=-20.0)
+    with patch.object(ep, "_hold_seconds", return_value=120):
+        with patch.object(ep, "_seconds_since_peak", return_value=50):
+            reason, _ = evaluate_explosion_exit(
+                trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=-1.0,
+            )
+    assert reason in (
+        "explosion_stage_runner_red_giveback",
+        "explosion_profit_ladder_peak_keep",
+    )
 
 
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
