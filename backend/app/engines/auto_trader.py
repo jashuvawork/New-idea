@@ -809,30 +809,7 @@ async def _open_from_candidate(
                 if blocked:
                     return False, budget_reason
 
-    from app.engines.worst_day_guard import worst_day_blocks_live
-
     if snapshots:
-        live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
-        if live_blocked and settings.enable_live_trading:
-            if bool(getattr(settings, "live_disable_session_lift", False)):
-                return False, "live_no_session_lift"
-
-            from app.engines.chop_live_guards import chop_live_session_lift_allowed
-
-            if not chop_live_session_lift_allowed(state, snap, snapshots):
-                return False, "chop_live_worst_day_no_session_lift"
-
-            from app.engines.top_signal_session_lift import (
-                candidate_qualifies_top_signal_session_lift,
-                snapshots_have_top_signal_session_lift,
-            )
-
-            if not (
-                snapshots_have_top_signal_session_lift(snapshots)
-                or candidate_qualifies_top_signal_session_lift(candidate)
-            ):
-                return False, live_reason
-
         from app.engines.worst_day_guard import worst_day_allows_candidate
         from app.engines.extreme_explosion_moment import is_extreme_explosion_all_in_bypass
 
@@ -3027,22 +3004,6 @@ async def _open_from_candidate(
         ctx_extra["ftvAuthorizationReason"] = final_policy.reason
         ctx_extra["ftvMaxCapitalPct"] = final_policy.max_capital_pct
 
-    if is_live and candidate.mode == "explosion":
-        from app.engines.live_best_trades import live_best_trade_entry_blocked
-
-        live_blocked, live_reason, live_meta = live_best_trade_entry_blocked(
-            candidate,
-            snap,
-            state,
-            snapshots=snapshots,
-            ranking=final_ranking or policy_ranking,
-            chart_meta=chart_meta if chart_meta else None,
-        )
-        if live_blocked:
-            return False, live_reason
-        ctx_extra["liveBestTradeGate"] = True
-        ctx_extra.update({k: v for k, v in live_meta.items() if k != "liveBestTradeGate"})
-
     from app.engines.chop_live_guards import (
         chop_live_entry_blocked,
         chop_live_guard_day_active,
@@ -4573,7 +4534,7 @@ async def process(
             expiry_daily_loss_stop_bypass_active,
             severe_pause_expiring_deep_itm_lift_active,
         )
-        from app.engines.worst_day_guard import session_entry_policy, worst_day_blocks_live
+        from app.engines.worst_day_guard import session_entry_policy
 
         policy, policy_meta = session_entry_policy(state, snapshots)
         extreme_session = snapshots_have_top_signal_session_lift(snapshots)
@@ -4585,25 +4546,11 @@ async def process(
             policy_meta["severePauseDeepItmLift"] = True
         if daily_loss_expiry_bypass:
             policy_meta["dailyLossStopExpiryTopBypass"] = True
-        if settings.enable_live_trading and extreme_session and snapshots:
-            from app.engines.chop_live_guards import chop_live_session_lift_allowed
-
-            ref_snap = next(iter(snapshots.values()))
-            lift_ok = chop_live_session_lift_allowed(state, ref_snap, snapshots)
-            if not lift_ok or bool(getattr(settings, "live_disable_session_lift", False)):
-                session_lift = False
         if policy == "PAUSED" and not session_lift:
             skipped.append({
                 "symbol": "SESSION",
                 "reason": policy_meta.get("pauseReason", "worst_day_paused"),
                 "message": f"Worst day — trading paused ({', '.join(policy_meta.get('worstDay', {}).get('reasons', []))})",
-            })
-        live_blocked, live_reason, _ = worst_day_blocks_live(state, snapshots)
-        if live_blocked and not session_lift:
-            skipped.append({
-                "symbol": "SESSION",
-                "reason": live_reason,
-                "message": "Worst day — live trading blocked until conditions improve",
             })
 
         expiry_ok, expiry_reason, expiry_meta = check_expiry_entry_allowed(state, snapshots)
@@ -4630,7 +4577,6 @@ async def process(
             and (expiry_ok or session_lift)
             and (power_ok or session_lift)
             and (policy != "PAUSED" or session_lift)
-            and (not live_blocked or session_lift)
         )
         if session_entries_ok:
             allocation_enabled = bool(

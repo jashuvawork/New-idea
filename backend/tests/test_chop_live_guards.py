@@ -121,9 +121,9 @@ def test_parse_upstox_compact_symbol():
 
 
 @patch("app.engines.chop_live_guards.get_settings")
-def test_session_lift_disallowed_on_chop_live_day(mock_settings):
+def test_session_lift_stays_allowed_on_chop_live_day(mock_settings):
     mock_settings.return_value = _settings()
-    assert chop_live_session_lift_allowed(_state(), _snap(), {"NIFTY": _snap()}) is False
+    assert chop_live_session_lift_allowed(_state(), _snap(), {"NIFTY": _snap()}) is True
 
 
 @patch("app.engines.chop_live_guards.get_settings")
@@ -146,21 +146,20 @@ def test_worst_day_label_does_not_hard_block_when_switch_off(mock_worst, mock_se
 
 @patch("app.engines.chop_live_guards.get_settings")
 @patch("app.engines.worst_day_guard.identify_worst_day")
-def test_hard_block_worst_day_live(mock_worst, mock_settings):
+def test_worst_day_hard_block_stays_off_like_october_1_paper(mock_worst, mock_settings):
     from app.engines.worst_day_guard import WorstDayVerdict
 
     mock_settings.return_value = _settings()
     mock_worst.return_value = WorstDayVerdict(True, 80.0, ["chop_regime"])
 
-    blocked, reason, meta = chop_live_entry_blocked(
+    _blocked, reason, meta = chop_live_entry_blocked(
         _candidate(base_move=20.0, daily_move=35.0),
         _snap(),
         _state(),
         snapshots={"NIFTY": _snap()},
     )
-    assert blocked
-    assert reason == "chop_live_worst_day_hard_block"
-    assert meta.get("worstDayHardBlock") is True
+    assert reason != "chop_live_worst_day_hard_block"
+    assert meta.get("worstDayHardBlock") is not True
 
 
 @patch("app.engines.chop_live_guards.get_settings")

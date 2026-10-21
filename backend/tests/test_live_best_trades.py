@@ -93,7 +93,7 @@ def test_gate_off_lets_the_paper_book_through(mock_settings):
 
 
 @patch("app.engines.live_best_trades.get_settings")
-def test_blocks_sub_s_grade(mock_settings):
+def test_sub_s_grade_passes_like_october_1_paper(mock_settings):
     mock_settings.return_value = _settings()
     blocked, reason, _ = live_best_trade_entry_blocked(
         _candidate(),
@@ -101,8 +101,8 @@ def test_blocks_sub_s_grade(mock_settings):
         AutoTraderState(),
         ranking={"grade": "A", "evidence": {"tier": "EXPLODING"}},
     )
-    assert blocked
-    assert reason == "live_best_trades_requires_grade_s"
+    assert blocked is False
+    assert reason == "ok"
 
 
 @patch("app.engines.live_best_trades.get_settings")
@@ -112,7 +112,7 @@ def test_blocks_sub_s_grade(mock_settings):
 @patch("app.engines.ict_breakout_monitor.analyze_explosion_event_ict")
 @patch("app.engines.explosion_entry_guards.effective_local_base_move_pct", return_value=8.0)
 @patch("app.engines.explosion_entry_guards.trustworthy_local_base_move", return_value=8.0)
-def test_blocks_immature_pad_without_first_lift(
+def test_immature_pad_passes_like_october_1_paper(
     _trust, _eff, _ict, _lift, _chart, _top, mock_settings,
 ):
     mock_settings.return_value = _settings()
@@ -122,12 +122,12 @@ def test_blocks_immature_pad_without_first_lift(
         AutoTraderState(),
         ranking={"grade": "S", "evidence": {"tier": "EXPLODING"}},
     )
-    assert blocked
-    assert "live_best_trades_immature_pad" in reason
+    assert blocked is False
+    assert reason == "ok"
 
 
 @patch("app.engines.live_best_trades.get_settings")
-def test_pauses_after_one_live_loss(mock_settings):
+def test_session_loss_does_not_add_a_live_only_pause(mock_settings):
     mock_settings.return_value = _settings()
     state = AutoTraderState(
         closedPaperTrades=[
@@ -173,8 +173,8 @@ def test_pauses_after_one_live_loss(mock_settings):
             state,
             ranking={"grade": "S", "evidence": {"tier": "EXPLODING"}},
         )
-    assert blocked
-    assert reason == "live_best_trades_session_loss_pause"
+    assert blocked is False
+    assert reason == "ok"
 
 
 @patch("app.engines.live_best_trades.get_settings")

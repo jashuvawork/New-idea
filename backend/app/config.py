@@ -98,12 +98,10 @@ class Settings(BaseSettings):
     chop_second_tier_stop_breach_ratio: float = 0.85
     chop_second_tier_min_hold_before_loss_seconds: int = 120
     live_broker_reconciliation_enabled: bool = True
-    # Session lift is the same on live and paper. The ₹10k live profile
-    # used to turn this off so a top signal could not lift a chop label.
+    # Ignored. October 1 paper kept session lift on. Live does too.
     chop_live_disable_session_lift: bool = False
-    # Off. Oct 19 the selector had already picked the puts, then this wire
-    # refused every one because the day was still labeled worst. The other chop
-    # guards (immature base, faded rip, extended chase) stay.
+    # Ignored. October 1 paper never applied this blanket (it required live).
+    # Immature base, faded rip, and extended chase still run on both books.
     chop_live_hard_block_worst_day: bool = False
     # Block faded-vertical-rip and extended session chase at live order wire.
     chop_live_block_faded_rip: bool = True
@@ -138,8 +136,7 @@ class Settings(BaseSettings):
     # Trap-stamped chop+elite exits: modest MFE then bleed (Sep08 +1.45pt → adaptive SL).
     chop_live_trap_early_fail_max_best_points: float = 2.0
     chop_live_trap_early_fail_max_hold_seconds: int = 600
-    # Off. Live uses the paper / Oct 1 entry gates. The grade-S / score-200
-    # bar was the ₹10k live profile and does not run on the paper book.
+    # Ignored. October 1 paper never applied the grade-S live bar.
     live_best_trades_only_enabled: bool = False
     live_best_trades_min_grade: str = "S"
     live_best_trades_min_explosion_score: float = 200.0
@@ -150,8 +147,7 @@ class Settings(BaseSettings):
     live_max_open_positions: int = 1
     live_max_same_side_positions: int = 1
     live_pause_after_session_losses: int = 1
-    # Off with the ₹10k profile. A top-signal session lift that paper allows
-    # is allowed on live too.
+    # Ignored. October 1 paper kept the top-signal session lift.
     live_disable_session_lift: bool = False
     live_early_fail_exit_enabled: bool = False
     live_early_fail_min_hold_seconds: int = 45
@@ -3542,8 +3538,7 @@ class Settings(BaseSettings):
     worst_day_elite_bypass_require_chart_align: bool = True
     worst_day_elite_bypass_block_cold_base: bool = True
     worst_day_full_pause_loss_inr: float = -20_000.0
-    # Off: a worst-day label must not refuse every live order. Oct 19 NIFTY
-    # expiry scored chop and this switch blocked the open put vertical.
+    # Ignored. October 1 paper skipped this stop. Live skips it too.
     # The expiry halt, the 3-trade cap, and the ₹20,000 loss stop still apply.
     worst_day_blocks_live: bool = False
     worst_day_call_block_enabled: bool = True
