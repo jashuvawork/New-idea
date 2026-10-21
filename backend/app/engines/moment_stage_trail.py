@@ -387,7 +387,7 @@ def build_moment_stage_plan(
         return None
 
     stage_size = compute_stage_size(projected, s)
-    return {
+    out: dict[str, Any] = {
         "momentStageLadder": True,
         "projectedMaxTp": projected,
         "stageSize": stage_size,
@@ -397,6 +397,20 @@ def build_moment_stage_plan(
         ),
         "stageLateProgress": round(_cfg_float(s, "moment_stage_late_progress", 0.70), 3),
     }
+    if bool(getattr(s, "tp_rung_ladder_exit_enabled", True)) and projected + 1e-6 >= _cfg_float(
+        s, "tp_rung_ladder_min_projected_tp", 400.0
+    ):
+        from app.engines.tp_rung_ladder import build_tp_rung_points
+
+        rungs = build_tp_rung_points(
+            projected_max_tp=projected,
+            stage_size=stage_size,
+            exit_plan=exit_plan,
+            settings=s,
+        )
+        out["tpRungLadder"] = True
+        out["tpRungsPts"] = rungs
+    return out
 
 
 def _ladder_fields(trade: PaperTrade) -> dict[str, Any]:

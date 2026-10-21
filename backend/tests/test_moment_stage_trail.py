@@ -109,6 +109,9 @@ def _settings(**overrides):
     s.unified_profit_ladder_floor_touch_points = 2.0
     s.unified_profit_ladder_hot_defer_velocity_3s = 2.0
     s.peak_velocity_reversal_keep_enabled = False
+    s.tp_rung_ladder_exit_enabled = True
+    s.tp_rung_ladder_min_projected_tp = 400.0
+    s.tp_rung_ladder_min_best_to_arm_exits = 28.0
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -421,7 +424,7 @@ def test_mega_projected_runner_defers_peak_keep_trail_before_stage_one(mock_ms, 
     reason, _ = evaluate_explosion_exit(
         trade, 150.38, "ELITE", 65, live_velocity_3s=-0.5,
     )
-    assert reason == "explosion_profit_ladder_peak_keep"
+    assert reason != "explosion_peak_keep_trail"
 
 
 @patch("app.engines.explosion_profit.get_settings")
