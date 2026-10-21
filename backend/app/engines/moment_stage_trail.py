@@ -105,6 +105,40 @@ def effective_best_pnl(trade: PaperTrade, pnl_pts: float = 0.0) -> float:
     return max(_local_observed_best(trade, pnl_pts), cycle_pts)
 
 
+def defer_modest_peak_keep_for_max_profit_stage_runner(
+    trade: PaperTrade,
+    best: float,
+    *,
+    settings: Settings | None = None,
+) -> bool:
+    """Hold off 75% peak-keep until stage 1 is near-complete on mega projected runners.
+
+    Entry stamps projectedMaxTp in the hundreds while stageSize divides the path (e.g.
+    703 / 75). Unified ladder and ftv_runner_pct_trail were booking ~half of a +20pt
+    peak at ~15% gain — before stage trail or pre-stage hold could ride the rip.
+    """
+    s = settings or get_settings()
+    ctx = trade.entryContext or {}
+    plan = ctx.get("exitPlan") or {}
+    if not bool(ctx.get("maxProfitCapture")):
+        return False
+    projected = _safe_float(ctx.get("projectedMaxTp") or plan.get("projectedMaxTp"))
+    stage = _safe_float(ctx.get("stageSize") or plan.get("stageSize"))
+    best = _safe_float(best)
+    if projected <= 0 or stage <= 0 or best <= 0:
+        return False
+    min_proj = _cfg_float(s, "stage_runner_defer_pct_keep_min_projected_tp", 400.0)
+    if projected + 1e-6 < min_proj:
+        return False
+    frac = _cfg_float(s, "moment_stage_near_complete_frac", 0.82)
+    if best + 1e-6 >= stage * max(0.0, min(1.0, frac)):
+        return False
+    min_best = _cfg_float(s, "stage_runner_defer_pct_keep_min_best_points", 28.0)
+    if best + 1e-6 >= min_best:
+        return False
+    return True
+
+
 def moment_stage_near_complete(
     trade: PaperTrade,
     best: float,
@@ -625,6 +659,8 @@ def ftv_runner_pct_floor(
         return None
     entry = _safe_float(getattr(trade, "entryPremium", 0))
     best = _safe_float(best)
+    if defer_modest_peak_keep_for_max_profit_stage_runner(trade, best, settings=s):
+        return None
     if entry <= 0 or best <= 0:
         return None
     arm_pct = _cfg_float(s, "ftv_runner_pct_trail_arm_pct", 25.0)

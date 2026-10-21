@@ -106,6 +106,38 @@ def test_flag_off_leaves_exit_to_legacy_trail_ce_pe(side):
 
 
 @pytest.mark.parametrize("side", SIDES)
+def test_oct21_mega_projected_runner_hole_not_ftv_peak_keep_at_plus_10_ce_pe(side):
+    """Oct 21 22700: unified ladder may arm; +10pt hole holds (main #794). No FTV pct trail."""
+    from app.engines.moment_stage_trail import ftv_runner_pct_floor
+
+    s = _settings()
+    trade = _trade(
+        side,
+        140.02,
+        21.48,
+        strike=22700.0,
+        seconds=549,
+        ctx={
+            "maxProfitCapture": True,
+            "vBaseFtvRunner": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 703.8,
+            "stageSize": 75.0,
+            "explosionTier": "ELITE",
+        },
+    )
+    floor, layer = profit_ladder_floor(trade, 21.48, settings=s)
+    assert layer == "peak_keep"
+    assert ftv_runner_pct_floor(trade, 21.48, settings=s) is None
+    with _use(s):
+        reason, _ = evaluate_explosion_exit(trade, 150.38, "ELITE", 65, live_velocity_3s=-0.5)
+    assert reason is None or not (
+        str(reason).startswith("explosion_profit_ladder")
+        or reason == "explosion_peak_keep_trail"
+    )
+
+
+@pytest.mark.parametrize("side", SIDES)
 def test_oct12_cheap_premium_books_peak_keep_ce_pe(side):
     """22300 PE @ ₹58.5 peaked +10.2pt (+17%) then rode back to +₹2k."""
     s = _settings()
