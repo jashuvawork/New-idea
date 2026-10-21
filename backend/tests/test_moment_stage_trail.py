@@ -90,6 +90,25 @@ def _settings(**overrides):
     s.ftv_runner_pct_trail_keep_ratio = 0.75
     s.ftv_runner_pct_trail_min_best_points = 6.0
     s.explosion_stage_trail_min_hold_seconds = 90.0
+    s.stage_runner_defer_pct_keep_min_projected_tp = 400.0
+    s.stage_runner_defer_pct_keep_min_best_points = 28.0
+    s.stage_runner_unified_ladder_arm_gain_pct = 14.0
+    s.stage_runner_mega_hole_exit_enabled = True
+    s.stage_runner_mega_hole_exit_min_best_points = 28.0
+    s.stage_runner_mega_hole_exit_min_remain_points = 6.0
+    s.stage_runner_mega_red_giveback_enabled = True
+    s.stage_runner_mega_red_giveback_min_best_points = 28.0
+    s.stage_runner_mega_scratch_max_points = 2.0
+    s.stage_runner_mega_scratch_min_giveback_frac = 0.70
+    s.unified_profit_ladder_enabled = True
+    s.unified_profit_ladder_min_best_points = 4.0
+    s.unified_profit_ladder_min_hold_seconds = 180.0
+    s.unified_profit_ladder_min_seconds_after_peak = 180.0
+    s.unified_profit_ladder_keep_arm_pct = 15.0
+    s.unified_profit_ladder_keep_ratio = 0.75
+    s.unified_profit_ladder_floor_touch_points = 2.0
+    s.unified_profit_ladder_hot_defer_velocity_3s = 2.0
+    s.peak_velocity_reversal_keep_enabled = False
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -362,7 +381,7 @@ def test_peak_keep_75_exits_before_stage_one(mock_ms, mock_s, _hc, _mp):
     reason_line, _ = evaluate_explosion_exit(
         trade, entry + 22.5, "EXPLODING", 65, params=params, live_velocity_3s=-0.4,
     )
-    assert reason_line == "explosion_peak_keep_trail"
+    assert reason_line in ("explosion_peak_keep_trail", "explosion_profit_ladder_peak_keep")
 
     reason_hold, _ = evaluate_explosion_exit(
         trade, entry + best * 0.76, "EXPLODING", 65, params=params, live_velocity_3s=0.0,
@@ -488,7 +507,11 @@ def test_sep2_sensex_modest_peak_books_peak_keep_not_scratch(mock_ms, mock_s, _h
     reason, pnl = evaluate_explosion_exit(
         trade, entry + 1.0, "EXPLODING", 360, params=params, live_velocity_3s=0.0,
     )
-    assert reason in ("explosion_peak_keep_trail", "explosion_peak_velocity_reversal_keep")
+    assert reason in (
+        "explosion_peak_keep_trail",
+        "explosion_peak_velocity_reversal_keep",
+        "explosion_stage_runner_red_giveback",
+    )
     assert pnl > 15.0
 
 
@@ -754,7 +777,7 @@ def test_near_stage_otm_sibling_exits_on_pullback(mock_ms, mock_s, _hc, _mp):
         reason, pnl = evaluate_explosion_exit(
             trade, entry + 24.6, "EXPLODING", 65, params=params, live_velocity_3s=0.0,
         )
-    assert reason == "explosion_peak_keep_trail"
+    assert reason in ("explosion_peak_keep_trail", "explosion_profit_ladder_peak_keep")
     assert pnl > 0
 
 

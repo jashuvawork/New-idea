@@ -718,6 +718,17 @@ def profit_ladder_floor(
     be_floor = entry * _cfg_float(s, "unified_profit_ladder_breakeven_lock_pct", 2.0) / 100.0
     peak_ltp = max(_safe_float(getattr(trade, "maxLtp", 0)), entry + best)
     arm_ratio = max(1.01, _cfg_float(s, "unified_profit_ladder_multiple_arm_ratio", 2.0))
+    gain_arm_pct = _cfg_float(s, "unified_profit_ladder_keep_arm_pct", 15.0)
+    ctx = trade.entryContext or {}
+    if bool(ctx.get("maxProfitCapture")) and trade_uses_moment_stage_ladder(trade):
+        plan = ctx.get("exitPlan") or {}
+        projected = _safe_float(ctx.get("projectedMaxTp") or plan.get("projectedMaxTp"))
+        min_proj = _cfg_float(s, "stage_runner_defer_pct_keep_min_projected_tp", 400.0)
+        if projected + 1e-6 >= min_proj:
+            gain_arm_pct = min(
+                gain_arm_pct,
+                _cfg_float(s, "stage_runner_unified_ladder_arm_gain_pct", 14.0),
+            )
 
     if peak_ltp + 1e-6 >= arm_ratio * entry:
         # Highest integer multiple the peak has crossed. Lock that print and
@@ -728,7 +739,7 @@ def profit_ladder_floor(
         excess = max(0.0, peak_ltp - anchor)
         floor_premium = anchor + excess * keep
         floor_pts, layer = floor_premium - entry, "multiple"
-    elif gain_pct >= _cfg_float(s, "unified_profit_ladder_keep_arm_pct", 15.0):
+    elif gain_pct + 1e-6 >= gain_arm_pct:
         floor_pts, layer = max(best * keep, be_floor), "peak_keep"
     elif (
         getattr(s, "unified_profit_ladder_breakeven_enabled", False) is True

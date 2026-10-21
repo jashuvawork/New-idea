@@ -2243,6 +2243,82 @@ def unified_profit_ladder_exit_reason(
     return f"explosion_profit_ladder_{layer}"
 
 
+def stage_runner_mega_pullback_exit_reason(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+    hold_seconds: float,
+    live_velocity_3s: float = 0.0,
+) -> Optional[str]:
+    """Book mega stage-ladder rips that hole through the 75% line or fade to red.
+
+    Oct 21 SENSEX 73400 PE: +47pt peak, unified ladder missed 15% by 0.1%, FTV
+    floor sat at +35pt while stage-trail sells stay off — fast bleed to +10pt then
+    red had no exit. Touch-sell at the 75% line when price returns; hole-take and
+    red-giveback when it does not.
+    """
+    settings = get_settings()
+    from app.engines.ict_breakout_monitor import _ict_max_profit_trade
+    from app.engines.moment_stage_trail import ftv_runner_pct_floor, trade_uses_moment_stage_ladder
+
+    if not bool(getattr(settings, "stage_runner_mega_hole_exit_enabled", True)) and not bool(
+        getattr(settings, "stage_runner_mega_red_giveback_enabled", True)
+    ):
+        return None
+    if not _ict_max_profit_trade(trade) or not trade_uses_moment_stage_ladder(trade):
+        return None
+    ctx = trade.entryContext or {}
+    plan = ctx.get("exitPlan") or {}
+    projected = float(ctx.get("projectedMaxTp") or plan.get("projectedMaxTp") or 0)
+    if projected + 1e-6 < _cfg_float(settings, "stage_runner_defer_pct_keep_min_projected_tp", 400.0):
+        return None
+
+    best = float(best or 0)
+    pnl_pts = float(pnl_pts or 0)
+    if best <= 0:
+        return None
+
+    pct_floor = ftv_runner_pct_floor(trade, best, settings=settings)
+    if pct_floor is None:
+        return None
+
+    if not _green_profit_hold_ready(trade, hold_seconds, settings):
+        return None
+
+    live_v3, _ = _live_premium_heat(trade, live_velocity_3s=live_velocity_3s)
+    if live_v3 >= _cfg_float(settings, "unified_profit_ladder_hot_defer_velocity_3s", 2.0):
+        return None
+
+    touch = max(0.0, _cfg_float(settings, "unified_profit_ladder_floor_touch_points", 2.0))
+    min_best_hole = _cfg_float(settings, "stage_runner_mega_hole_exit_min_best_points", 28.0)
+    min_remain = _cfg_float(settings, "stage_runner_mega_hole_exit_min_remain_points", 6.0)
+
+    if (
+        bool(getattr(settings, "stage_runner_mega_hole_exit_enabled", True))
+        and best + 1e-6 >= min_best_hole
+        and pnl_pts + 1e-6 >= min_remain
+        and pnl_pts + 1e-6 < pct_floor - touch - 1e-6
+        and live_v3 <= 0
+    ):
+        return "explosion_stage_runner_hole_take"
+
+    min_best_red = _cfg_float(settings, "stage_runner_mega_red_giveback_min_best_points", 28.0)
+    scratch_max = _cfg_float(settings, "stage_runner_mega_scratch_max_points", 2.0)
+    scratch_gb = _cfg_float(settings, "stage_runner_mega_scratch_min_giveback_frac", 0.70)
+    giveback = best - pnl_pts
+    if bool(getattr(settings, "stage_runner_mega_red_giveback_enabled", True)) and best + 1e-6 >= min_best_red:
+        if pnl_pts <= 0 and live_v3 <= 0:
+            return "explosion_stage_runner_red_giveback"
+        if (
+            pnl_pts + 1e-6 <= scratch_max
+            and giveback + 1e-6 >= best * scratch_gb
+            and live_v3 <= 0
+        ):
+            return "explosion_stage_runner_red_giveback"
+    return None
+
+
 def evaluate_explosion_exit(
     trade: PaperTrade,
     current_premium: float,
@@ -2419,6 +2495,12 @@ def evaluate_explosion_exit(
     if ladder_exit:
         return ladder_exit, pnl_inr
 
+    mega_pullback = stage_runner_mega_pullback_exit_reason(
+        trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
+    )
+    if mega_pullback:
+        return mega_pullback, pnl_inr
+
     reversal_keep = peak_velocity_reversal_keep_reason(
         trade, best=best, pnl_pts=pnl_pts, live_velocity_3s=v3,
     )
@@ -2445,7 +2527,10 @@ def evaluate_explosion_exit(
         trade_uses_moment_stage_ladder,
     )
 
-    target = exit_params.target_points
+    try:
+        target = float(exit_params.target_points or 0)
+    except (TypeError, ValueError):
+        target = 0.0
     if max_profit:
         target = max(
             target,
