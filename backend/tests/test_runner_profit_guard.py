@@ -23,7 +23,32 @@ IST = ZoneInfo("Asia/Kolkata")
 SIDES = [Side.CALL, Side.PUT]
 
 
-def _runner(side: Side, *, entry: float = 340.33, best: float = 47.67, pnl: float = 20.0):
+def _runner(
+    side: Side,
+    *,
+    entry: float = 340.33,
+    best: float = 47.67,
+    pnl: float = 20.0,
+    below_for: float | None = None,
+):
+    ctx = {
+        "maxProfitCapture": True,
+        "momentStageLadder": True,
+        "projectedMaxTp": 800.0,
+        "stageSize": 75.0,
+        "velocity3s": 6.0,
+        "exitPlan": {
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+            "stopPoints": 40.0,
+            "trailArmPoints": 24.25,
+            "adaptiveStop": True,
+        },
+    }
+    if below_for is not None:
+        ctx["runnerGuardBelowSince"] = (
+            datetime.now(IST) - timedelta(seconds=below_for)
+        ).isoformat()
     return PaperTrade(
         id=f"guard-{side.value}",
         symbol="SENSEX",
@@ -36,20 +61,7 @@ def _runner(side: Side, *, entry: float = 340.33, best: float = 47.67, pnl: floa
         strategyType=StrategyType.EXPLOSIVE,
         bestPnlPoints=best,
         maxLtp=entry + best,
-        entryContext={
-            "maxProfitCapture": True,
-            "momentStageLadder": True,
-            "projectedMaxTp": 800.0,
-            "stageSize": 75.0,
-            "velocity3s": 6.0,
-            "exitPlan": {
-                "projectedMaxTp": 800.0,
-                "stageSize": 75.0,
-                "stopPoints": 40.0,
-                "trailArmPoints": 24.25,
-                "adaptiveStop": True,
-            },
-        },
+        entryContext=ctx,
     )
 
 
@@ -58,6 +70,10 @@ def _guard(trade: PaperTrade, s: Settings, *, v3: float):
         return runner_profit_guard_exit_reason(
             trade, pnl_pts=trade.currentPremium - trade.entryPremium, live_velocity_3s=v3,
         )
+
+
+def _tier2_floor(s: Settings) -> float:
+    return 47.67 * s.runner_profit_guard_tier2_keep_ratio
 
 
 @pytest.mark.parametrize("side", SIDES)
@@ -91,10 +107,10 @@ def test_unarmed_below_tier1_and_cheap_premium_noise(side):
 
 @pytest.mark.parametrize("side", SIDES)
 def test_oct21_73400_fade_books_green_before_adaptive_stop(side):
-    """Real Settings, full exit stack: the fade sells green inside the 3-min peak wait."""
+    """Real Settings, full exit stack: the held fade sells green inside the 3-min peak wait."""
     s = Settings()
-    floor = 47.67 * s.runner_profit_guard_tier2_keep_ratio
-    trade = _runner(side, pnl=floor - 1.0)
+    pnl = _tier2_floor(s) - 1.0
+    trade = _runner(side, pnl=pnl, below_for=s.runner_profit_guard_confirm_seconds + 5)
     with patch("app.engines.explosion_profit.get_settings", return_value=s), patch(
         "app.engines.moment_stage_trail.get_settings", return_value=s
     ), patch("app.engines.explosion_profit._hold_seconds", return_value=900), patch(
@@ -104,13 +120,40 @@ def test_oct21_73400_fade_books_green_before_adaptive_stop(side):
             trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=-1.5,
         )
     assert reason == "explosion_runner_profit_guard"
-    assert pnl_inr == pytest.approx((floor - 1.0) * 26 * 20)
-    assert pnl_inr > 10_000
+    assert pnl_inr == pytest.approx(pnl * 26 * 20)
+    assert pnl_inr > 5_000
 
 
 @pytest.mark.parametrize("side", SIDES)
-def test_print_through_floor_sells_not_holds(side):
+def test_first_dip_under_floor_holds_and_stamps(side):
     s = Settings()
+    trade = _runner(side, pnl=_tier2_floor(s) - 1.0)
+    assert _guard(trade, s, v3=-1.0) is None
+    assert trade.entryContext.get("runnerGuardBelowSince")
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_dip_that_persists_past_confirm_sells(side):
+    s = Settings()
+    trade = _runner(
+        side, pnl=_tier2_floor(s) - 1.0, below_for=s.runner_profit_guard_confirm_seconds + 1
+    )
+    assert _guard(trade, s, v3=-0.5) == "explosion_runner_profit_guard"
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_recovery_above_floor_clears_dip_clock(side):
+    s = Settings()
+    trade = _runner(side, pnl=_tier2_floor(s) + 3.0, below_for=120)
+    assert _guard(trade, s, v3=-0.5) is None
+    assert "runnerGuardBelowSince" not in trade.entryContext
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_min_lock_print_sells_at_once(side):
+    s = Settings()
+    min_lock = 340.33 * s.runner_profit_guard_min_lock_pct / 100.0
+    assert _guard(_runner(side, pnl=min_lock - 0.5), s, v3=-0.5) == "explosion_runner_profit_guard"
     assert _guard(_runner(side, pnl=-5.0), s, v3=-0.5) == "explosion_runner_profit_guard"
 
 
@@ -118,13 +161,13 @@ def test_print_through_floor_sells_not_holds(side):
 def test_holds_above_floor_and_on_rising_print(side):
     s = Settings()
     assert _guard(_runner(side, pnl=30.0), s, v3=-1.0) is None
-    assert _guard(_runner(side, pnl=15.0), s, v3=0.8) is None
+    assert _guard(_runner(side, pnl=-5.0, below_for=120), s, v3=0.8) is None
 
 
 @pytest.mark.parametrize("side", SIDES)
 def test_flat_print_sells_without_entry_velocity_fallback(side):
     s = Settings()
-    trade = _runner(side, pnl=15.0)
+    trade = _runner(side, pnl=_tier2_floor(s) - 1.0, below_for=120)
     assert trade.entryContext["velocity3s"] > 0
     assert _guard(trade, s, v3=0.0) == "explosion_runner_profit_guard"
 
