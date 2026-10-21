@@ -107,14 +107,15 @@ def test_unarmed_below_tier1_and_cheap_premium_noise(side):
 
 @pytest.mark.parametrize("side", SIDES)
 def test_oct21_73400_fade_books_green_before_adaptive_stop(side):
-    """Real Settings, full exit stack: the held fade sells green inside the 3-min peak wait."""
+    """Real Settings, full exit stack: the held fade sells green before the 75% fall clock."""
     s = Settings()
     pnl = _tier2_floor(s) - 1.0
     trade = _runner(side, pnl=pnl, below_for=s.runner_profit_guard_confirm_seconds + 5)
     with patch("app.engines.explosion_profit.get_settings", return_value=s), patch(
         "app.engines.moment_stage_trail.get_settings", return_value=s
     ), patch("app.engines.explosion_profit._hold_seconds", return_value=900), patch(
-        "app.engines.explosion_profit._seconds_since_peak", return_value=60
+        "app.engines.explosion_profit._seconds_since_peak",
+        return_value=s.unified_profit_ladder_fall_min_seconds_after_peak - 10,
     ):
         reason, pnl_inr = evaluate_explosion_exit(
             trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=-1.5,
