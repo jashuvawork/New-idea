@@ -372,6 +372,42 @@ def test_peak_keep_75_exits_before_stage_one(mock_ms, mock_s, _hc, _mp):
 
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.moment_stage_trail.get_settings")
+def test_mega_projected_runner_defers_peak_keep_trail_before_stage_one(mock_ms, mock_s):
+    """Oct 21 NIFTY PUT 22700 shape — no explosion_peak_keep_trail at +10pt off +21pt best."""
+    mock_s.return_value = _settings()
+    mock_ms.return_value = _settings()
+    entry = 140.02
+    best = 21.48
+    trade = PaperTrade(
+        id="nifty-22700",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=22700.0,
+        entryPremium=entry,
+        currentPremium=150.38,
+        lots=19,
+        openedAt=datetime.now(IST) - timedelta(minutes=9),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=best,
+        maxLtp=entry + best,
+        pnlPoints=10.36,
+        entryContext={
+            "momentStageLadder": True,
+            "maxProfitCapture": True,
+            "vBaseFtvRunner": True,
+            "projectedMaxTp": 703.8,
+            "stageSize": 75.0,
+        },
+    )
+    reason, _ = evaluate_explosion_exit(
+        trade, 150.38, "ELITE", 65, live_velocity_3s=-0.5,
+    )
+    assert reason != "explosion_peak_keep_trail"
+    assert reason is None or not str(reason).startswith("explosion_profit_ladder")
+
+
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
 def test_ftv_pct_floor_arms_on_absolute_points_for_max_profit(mock_ms, mock_s):
     """Sep2 SENSEX PUT 76300: +31pt is only +11.7% — still arms 75% keep."""
     from app.engines.moment_stage_trail import ftv_runner_pct_floor
