@@ -1,6 +1,6 @@
 name: Arm Live EC2
 
-# Arms live on the production book (paper / Oct 1 gates, ₹2,00,000).
+# Arms live on the production book (paper / Oct 1 gates, ₹2,75,000).
 # Does not apply a separate ₹10k profile.
 
 on:

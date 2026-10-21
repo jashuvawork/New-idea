@@ -36,7 +36,8 @@ def test_live_10k_profile_is_removed():
     assert settings.chop_live_disable_session_lift is False
     assert settings.live_early_fail_exit_enabled is False
     assert settings.chop_live_early_fail_exit_enabled is False
-    assert settings.fallback_capital_inr == 200_000
+    assert settings.fallback_capital_inr == 275_000
+    assert settings.max_sizing_capital_inr == 275_000
     assert settings.daily_loss_stop_inr == 20_000
 
 
@@ -83,8 +84,8 @@ def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
         if "=" in line and not line.lstrip().startswith("#"):
             key, value = line.split("=", 1)
             values[key] = value
-    assert values["FALLBACK_CAPITAL_INR"] == "200000"
-    assert values["MAX_SIZING_CAPITAL_INR"] == "200000"
+    assert values["FALLBACK_CAPITAL_INR"] == "275000"
+    assert values["MAX_SIZING_CAPITAL_INR"] == "275000"
     assert values["DAILY_LOSS_STOP_INR"] == "20000"
     assert values["EMERGENCY_STOP_INR"] == "20000"
     assert values["TOP_MOMENTS_MIN_GRADE"] == "A"
