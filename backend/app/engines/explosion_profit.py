@@ -2598,8 +2598,10 @@ def evaluate_explosion_exit(
         )
         if best + 1e-6 < min_peak_pts:
             stage_armed = False
-    if stage_armed and pnl_pts <= stage_floor and hold >= stage_min_hold:
-        return "explosion_stage_trail", pnl_inr
+    # Stage-trail sale is off. Oct 21 SENSEX 74200 PE was explosion_stage_trail
+    # at +18.4pt, 12s after a +26.8 peak, and that put later reached ~855.
+    # The 75% peak-keep above still books a fade once the high is 3 minutes old.
+    # While a stage floor is armed, the micro trail stays off so the leg holds.
 
     # When stage ladder owns the trail, skip micro step / keep-ratio locks —
     # stage floors + projectedMaxTp are the profit path.
