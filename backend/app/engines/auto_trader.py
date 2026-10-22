@@ -5,7 +5,7 @@ import logging
 import math
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -112,10 +112,12 @@ from app.engines.session_timing import entries_allowed_now, entry_window_label, 
 from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
 from app.services.order_executor import (
+    broker_position_quantity,
     find_existing_exit_order,
     live_order_fill,
     live_order_fill_complete,
     live_order_fill_rejected,
+    lots_fitting_broker_margin,
     place_entry_order,
     place_exit_order,
 )
@@ -3039,6 +3041,33 @@ async def _open_from_candidate(
             return False, "broker client required for live / paper-live-parity"
         try:
             if is_live:
+                fitted = lots
+                try:
+                    from app.engines.capital_allocator import _parse_upstox_funds
+
+                    funds = await client.get_funds(force=True)
+                    available, _, _ = _parse_upstox_funds(
+                        funds if isinstance(funds, dict) else {}
+                    )
+                    if available > 0:
+                        fitted = lots_fitting_broker_margin(
+                            lots, lot_mult, fill_premium, available,
+                        )
+                except Exception as exc:
+                    logger.warning("Broker margin read failed before entry: %s", exc)
+                    fitted = lots
+                if fitted < 1:
+                    return False, (
+                        f"entry skipped: broker margin cannot buy {symbol} "
+                        f"at ₹{fill_premium:.2f}"
+                    )
+                if fitted < lots:
+                    logger.info(
+                        "Shrunk live lots %s → %s so the order fits broker margin",
+                        lots,
+                        fitted,
+                    )
+                    lots = fitted
                 order = await place_entry_order(
                     client, snap, candidate.strike, candidate.side, lots,
                 )
@@ -3050,6 +3079,10 @@ async def _open_from_candidate(
                     "brokerSimulated": False,
                 })
                 entry_fill = await live_order_fill(client, str(order.get("order_id") or ""))
+                if live_order_fill_rejected(entry_fill):
+                    message = str(entry_fill.get("statusMessage") or "rejected")
+                    logger.error("Entry rejected for %s: %s", symbol, message)
+                    return False, f"entry rejected: {message}"
                 if live_order_fill_complete(entry_fill):
                     fill_premium = round(float(entry_fill["averagePrice"]), 2)
                     slip_meta = dict(slip_meta or {})
@@ -3378,7 +3411,54 @@ async def _process_open_trades(
             and not broker_ctx.get("brokerSimulated")
         ):
             entry_fill = await live_order_fill(client, str(broker_ctx["brokerOrderId"]))
-            if live_order_fill_complete(entry_fill):
+            if live_order_fill_rejected(entry_fill):
+                held = True
+                try:
+                    rows = await client.get_positions()
+                    if isinstance(rows, list):
+                        held = broker_position_quantity(
+                            rows,
+                            str(broker_ctx.get("instrumentKey") or ""),
+                        ) != 0
+                except Exception as exc:
+                    logger.warning(
+                        "Position read failed for rejected entry %s: %s", trade.id, exc,
+                    )
+                if not held:
+                    message = str(entry_fill.get("statusMessage") or "rejected")
+                    trade.status = "CLOSED"
+                    trade.exitReason = "broker_entry_rejected"
+                    trade.pnlInr = 0.0
+                    trade.pnlPoints = 0.0
+                    trade.closedAt = datetime.now(IST)
+                    trade.sessionDate = datetime.now(IST).strftime("%Y-%m-%d")
+                    broker_ctx["brokerEntryRejected"] = message
+                    trade.entryContext = broker_ctx
+                    state.closedPaperTrades.append(trade)
+                    state.lastExit = {
+                        "tradeId": trade.id,
+                        "symbol": trade.symbol,
+                        "side": trade.side.value if hasattr(trade.side, "value") else str(trade.side),
+                        "reason": "broker_entry_rejected",
+                        "pnlInr": 0.0,
+                        "at": trade.closedAt.isoformat(),
+                    }
+                    await asyncio.to_thread(
+                        trade_store.record_trade_closed, trade, broker_ctx,
+                    )
+                    logger.error(
+                        "Dropped unfilled live entry %s without a sell: %s",
+                        trade.id,
+                        message,
+                    )
+                    skipped.append({
+                        "symbol": trade.symbol,
+                        "reason": "broker_entry_rejected",
+                        "message": message,
+                        "tradeId": trade.id,
+                    })
+                    continue
+            elif live_order_fill_complete(entry_fill):
                 bought = round(float(entry_fill["averagePrice"]), 2)
                 trade.entryPremium = bought
                 broker_ctx["brokerEntryFillPremium"] = bought
@@ -3442,10 +3522,27 @@ async def _process_open_trades(
         if is_live_book and client is not None and broker_ctx.get("brokerExitOrderId"):
             pending_fill = await live_order_fill(client, str(broker_ctx["brokerExitOrderId"]))
             if live_order_fill_rejected(pending_fill):
+                message = str(pending_fill.get("statusMessage") or "rejected")
                 broker_ctx.pop("brokerExitOrderId", None)
                 broker_ctx.pop("brokerExitReason", None)
+                broker_ctx["brokerExitRejected"] = message
+                broker_ctx["brokerExitRetryAfter"] = (
+                    datetime.now(IST) + timedelta(seconds=20)
+                ).isoformat()
                 trade.entryContext = broker_ctx
                 trade.exitReason = None
+                logger.error(
+                    "Exit rejected for %s — next sell waits 20s: %s",
+                    trade.id,
+                    message,
+                )
+                skipped.append({
+                    "symbol": trade.symbol,
+                    "reason": "exit_rejected",
+                    "message": message,
+                    "tradeId": trade.id,
+                })
+                continue
             elif live_order_fill_complete(pending_fill):
                 eval_premium = round(float(pending_fill["averagePrice"]), 2)
                 _pts, pnl = mark_to_market(
@@ -3574,6 +3671,13 @@ async def _process_open_trades(
         needs_broker_exit = (is_live or use_parity) and broker_ctx.get("instrumentKey")
 
         if needs_broker_exit and not broker_ctx.get("brokerExitOrderId"):
+            retry_after = str(broker_ctx.get("brokerExitRetryAfter") or "")
+            if retry_after:
+                try:
+                    if datetime.fromisoformat(retry_after) > datetime.now(IST):
+                        continue
+                except ValueError:
+                    pass
             try:
                 trade.exitReason = exit_reason
                 if is_live:
