@@ -3036,9 +3036,9 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
-    # 09:16 → 09:45: side must match today's index tape. The first minute (09:15)
-    # is blocked so a blind open print cannot pick the wrong side (Oct 13 22300 PE).
-    open_side_confirmation_enabled: bool = True
+    # Off, as on October 1 (#676). When on: 09:16 → 09:45 the side must match today's
+    # index tape (Oct 13 22300 PE). The 09:20 entry clock covers the open minutes.
+    open_side_confirmation_enabled: bool = False
     open_side_confirmation_min_minutes: float = 1.0
     open_side_confirmation_min_index_move_pct: float = 0.10
     open_side_confirmation_min_range_position: float = 0.6
