@@ -1648,6 +1648,14 @@ class Settings(BaseSettings):
     tp_rung_ladder_min_hold_seconds: float = 45.0
     tp_rung_ladder_hot_defer_velocity_3s: float = 2.5
     tp_rung_ladder_red_min_best_points: float = 20.0
+    # Mega stage-ladder legs (projectedMaxTp ≥ min) — patience before between-rung fade.
+    tp_rung_ladder_mega_fade_min_giveback_points: float = 12.0
+    tp_rung_ladder_mega_hot_defer_velocity_3s: float = 4.0
+    tp_rung_ladder_mega_approach_buffer_points: float = 7.0
+    tp_rung_ladder_mega_fall_min_seconds_after_peak: float = 75.0
+    # Above this best, skip between-rung fade; use 75% ladder / rung floor / mega hole.
+    tp_rung_ladder_mega_disable_between_fade_min_best_points: float = 55.0
+    tp_rung_ladder_mega_ladder_first_min_best_points: float = 55.0
     # FTV runner %-of-peak-gain trailing floor. V/FTV moments run in big % from the local
     # base (e.g. Rs68 -> Rs140 = +106%). The absolute stage ladder is tuned for mega point
     # moves and under-protects modest-but-real % moves (a +40% peak can give back to +4%).

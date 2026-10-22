@@ -32,6 +32,29 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
     return x
 
 
+def tp_rung_mega_leg(trade: PaperTrade, settings: Optional[Settings] = None) -> bool:
+    """Mega projected stage-ladder leg — stricter patience before between-rung fade."""
+    s = settings or get_settings()
+    if not trade_uses_tp_rung_ladder(trade, settings=s):
+        return False
+    ctx = trade.entryContext or {}
+    plan = ctx.get("exitPlan") or {}
+    projected = _safe_float(ctx.get("projectedMaxTp") or plan.get("projectedMaxTp"))
+    return projected + 1e-6 >= _cfg_float(s, "tp_rung_ladder_min_projected_tp", 400.0)
+
+
+def _tp_rung_param(
+    settings: Settings,
+    trade: PaperTrade,
+    base_key: str,
+    mega_key: str,
+    default: float,
+) -> float:
+    if tp_rung_mega_leg(trade, settings):
+        return _cfg_float(settings, mega_key, _cfg_float(settings, base_key, default))
+    return _cfg_float(settings, base_key, default)
+
+
 def trade_uses_tp_rung_ladder(trade: PaperTrade, settings: Optional[Settings] = None) -> bool:
     """True when this leg uses the TP rung owner (mega max-profit stage ladder)."""
     s = settings or get_settings()
@@ -181,6 +204,11 @@ def _tp_rung_exit_ready(
     if hold_seconds + 1e-6 < min_hold:
         return False
     min_after = _cfg_float(settings, "unified_profit_ladder_fall_min_seconds_after_peak", 45.0)
+    if tp_rung_mega_leg(trade, settings):
+        min_after = max(
+            min_after,
+            _cfg_float(settings, "tp_rung_ladder_mega_fall_min_seconds_after_peak", 75.0),
+        )
     if min_after <= 0:
         return True
     since = _seconds_since_peak(trade)
@@ -189,12 +217,21 @@ def _tp_rung_exit_ready(
     return since + 1e-6 >= min_after
 
 
-def _attempted_next_rung(best: float, confirmed_idx: int, rungs: list[float], settings: Settings) -> bool:
+def _attempted_next_rung(
+    best: float,
+    confirmed_idx: int,
+    rungs: list[float],
+    settings: Settings,
+    trade: Optional[PaperTrade] = None,
+) -> bool:
     if confirmed_idx < 0 or confirmed_idx + 1 >= len(rungs):
         return False
     conf = rungs[confirmed_idx]
     nxt = rungs[confirmed_idx + 1]
-    buffer = _cfg_float(settings, "tp_rung_ladder_approach_buffer_points", 4.0)
+    if trade is not None and tp_rung_mega_leg(trade, settings):
+        buffer = _cfg_float(settings, "tp_rung_ladder_mega_approach_buffer_points", 7.0)
+    else:
+        buffer = _cfg_float(settings, "tp_rung_ladder_approach_buffer_points", 4.0)
     confirm_need = _cfg_float(settings, "tp_rung_ladder_confirm_slip_points", 0.25)
     mid = conf + (nxt - conf) * 0.5
     approached = best + 1e-6 >= min(mid, nxt - buffer)
@@ -269,23 +306,46 @@ def tp_rung_exit_reason(
     if hold_seconds + 1e-6 < min_hold:
         return None
 
-    if v3 >= _cfg_float(s, "tp_rung_ladder_hot_defer_velocity_3s", 2.5):
+    hot_defer = _tp_rung_param(
+        s,
+        trade,
+        "tp_rung_ladder_hot_defer_velocity_3s",
+        "tp_rung_ladder_mega_hot_defer_velocity_3s",
+        2.5,
+    )
+    if v3 >= hot_defer:
         return None
 
     falling = v3 < 0
     falling_under = v3 < 0 and pnl_pts <= floor + 1e-6
     mega_red = pnl_pts <= 0 and falling
-    urgent = falling_under or mega_red or _attempted_next_rung(best, confirmed, rungs, s)
+    urgent = (
+        falling_under
+        or mega_red
+        or _attempted_next_rung(best, confirmed, rungs, s, trade=trade)
+    )
     if not _tp_rung_exit_ready(trade, hold_seconds, s, falling_under=urgent):
         return None
 
     touch = _cfg_float(s, "tp_rung_ladder_floor_touch_points", 2.0)
-    min_giveback = _cfg_float(s, "tp_rung_ladder_fade_min_giveback_points", 2.0)
+    min_giveback = _tp_rung_param(
+        s,
+        trade,
+        "tp_rung_ladder_fade_min_giveback_points",
+        "tp_rung_ladder_mega_fade_min_giveback_points",
+        2.0,
+    )
+    skip_between_fade = (
+        tp_rung_mega_leg(trade, s)
+        and best + 1e-6
+        >= _cfg_float(s, "tp_rung_ladder_mega_disable_between_fade_min_best_points", 55.0)
+    )
 
     # Between rungs: tried the next TP, fading — bank at last confirmed rung (100→28,36,33).
     if (
-        falling
-        and _attempted_next_rung(best, confirmed, rungs, s)
+        not skip_between_fade
+        and falling
+        and _attempted_next_rung(best, confirmed, rungs, s, trade=trade)
         and (best - pnl_pts) + 1e-6 >= min_giveback
     ):
         return "explosion_tp_rung_between_fade"

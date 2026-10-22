@@ -987,6 +987,18 @@ def set_manual_capital_limit(amount: float) -> CapitalSnapshot:
     return _capital
 
 
+def compute_realized_session_pnl(state: AutoTraderState) -> float:
+    """Booked session PnL — closed legs only (no open MTM)."""
+    from app.engines.session_trade_integrity import real_session_closed_trades
+
+    today = datetime.now(IST).strftime("%Y-%m-%d")
+    return sum(
+        t.pnlInr
+        for t in real_session_closed_trades(state)
+        if (t.sessionDate or today) == today
+    )
+
+
 def compute_session_pnl(state: AutoTraderState) -> float:
     """Realtime session PnL = closed today + open unrealized."""
     from app.engines.session_trade_integrity import (
@@ -1123,7 +1135,16 @@ def update_daily_profit_gate(
 
     capital_base = _capital_base_for_stages()
     session_pnl = compute_session_pnl(state)
-    _best_pnl = max(_best_pnl, session_pnl)
+    realized_pnl = compute_realized_session_pnl(state)
+    _best_pnl = max(_best_pnl, realized_pnl)
+    if (
+        not state.openPaperTrades
+        and realized_pnl > 0
+        and _best_pnl > realized_pnl * 1.5
+    ):
+        # Peak lock must not anchor on open MTM that was given back at exit (Oct 22 73200).
+        _best_pnl = realized_pnl
+        _highest_stage = 0
     min_target = _resolve_daily_target_inr(capital_base)
     min_hit = _best_pnl >= min_target
 

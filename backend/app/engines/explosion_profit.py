@@ -2622,12 +2622,34 @@ def evaluate_explosion_exit(
     if halve_lock:
         return halve_lock, pnl_inr
 
-    from app.engines.tp_rung_ladder import trade_uses_tp_rung_ladder, tp_rung_exit_reason
+    from app.engines.tp_rung_ladder import (
+        tp_rung_mega_leg,
+        trade_uses_tp_rung_ladder,
+        tp_rung_exit_reason,
+    )
 
     tp_rung_owned = trade_uses_tp_rung_ladder(trade, settings=settings)
     tp_rung_armed = tp_rung_owned and best + 1e-6 >= _cfg_float(
         settings, "tp_rung_ladder_min_best_to_arm_exits", 28.0
     )
+    mega_ladder_first = (
+        tp_rung_armed
+        and tp_rung_mega_leg(trade, settings=settings)
+        and best + 1e-6
+        >= _cfg_float(settings, "tp_rung_ladder_mega_ladder_first_min_best_points", 55.0)
+    )
+    if mega_ladder_first:
+        ladder_exit = unified_profit_ladder_exit_reason(
+            trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
+        )
+        if ladder_exit:
+            return ladder_exit, pnl_inr
+        mega_pullback = stage_runner_mega_pullback_exit_reason(
+            trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
+        )
+        if mega_pullback:
+            return mega_pullback, pnl_inr
+
     if tp_rung_armed:
         rung_exit = tp_rung_exit_reason(
             trade,
@@ -2640,17 +2662,18 @@ def evaluate_explosion_exit(
         if rung_exit:
             return rung_exit, pnl_inr
 
-    ladder_exit = unified_profit_ladder_exit_reason(
-        trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
-    )
-    if ladder_exit:
-        return ladder_exit, pnl_inr
+    if not mega_ladder_first:
+        ladder_exit = unified_profit_ladder_exit_reason(
+            trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
+        )
+        if ladder_exit:
+            return ladder_exit, pnl_inr
 
-    mega_pullback = stage_runner_mega_pullback_exit_reason(
-        trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
-    )
-    if mega_pullback:
-        return mega_pullback, pnl_inr
+        mega_pullback = stage_runner_mega_pullback_exit_reason(
+            trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
+        )
+        if mega_pullback:
+            return mega_pullback, pnl_inr
 
     runner_guard = runner_profit_guard_exit_reason(
         trade, pnl_pts=pnl_pts, live_velocity_3s=v3,
@@ -2845,8 +2868,14 @@ def evaluate_explosion_exit(
     pct_ready = _profit_floor_exit_ready(
         trade, hold, settings, falling_under=falling_under_pct
     )
+    tp_rung_mega_peak_keep = (
+        tp_rung_armed
+        and tp_rung_mega_leg(trade, settings=settings)
+        and best + 1e-6
+        >= _cfg_float(settings, "tp_rung_ladder_mega_disable_between_fade_min_best_points", 55.0)
+    )
     if (
-        not tp_rung_armed
+        (not tp_rung_armed or tp_rung_mega_peak_keep)
         and pct_keep_floor is not None
         and best >= min_pct_best
         and pct_ready
