@@ -568,7 +568,7 @@ def _record_deferred_candidate_fallback(
     candidate: EntryCandidate,
     reason: str,
 ) -> bool:
-    """Record only typed failures emitted by the chart gate before order submission."""
+    """Record only typed pre-submission failures (chart gate, expiry OTM strike)."""
     return suppress_after_preorder_rejection(candidate, reason)
 
 
@@ -876,6 +876,7 @@ async def _open_from_candidate(
             settings=settings,
         )
         if otm_blocked:
+            _record_deferred_candidate_fallback(candidate, otm_reason)
             return False, otm_reason
 
         if bool(getattr(settings, "best_trade_block_chop_deep_chase_enabled", True)):

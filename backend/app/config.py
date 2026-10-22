@@ -2169,6 +2169,8 @@ class Settings(BaseSettings):
     instrument_max_entries_per_day: int = 3
     # Exact-leg defer after execution-time premium fade; another leg may win next scan.
     preorder_rejection_suppression_seconds: int = 30
+    # Exact-leg defer after an expiry OTM-strike block so the ATM/ITM leg can take the slot.
+    preorder_structural_rejection_suppression_seconds: int = 120
     # Jul27 scalp churn: tiny win @6 lots → full size @24/25 → stop → repeat same CE.
     # Longer same-strike cooldowns + hard daily cap for scalp only.
     scalp_instrument_win_cooldown_seconds: int = 600
