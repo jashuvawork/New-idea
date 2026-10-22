@@ -21,12 +21,12 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["TOP_FTV_A_ENABLED"] == "true"
     assert env["TOP_FTV_A_MAX_CAPITAL_PCT"] == "0.90"
     assert env["TOP_FTV_A_EXCEPTIONAL_MAX_MOVE_PCT"] == "40"
-    # 15% of today's book. ₹2.75L → ₹41,250. The INR value is the fallback.
+    # 15% of today's book. ₹2L → ₹30,000. The INR value is the fallback.
     assert env["DAILY_LOSS_STOP_FROM_CAPITAL"] == "true"
     assert env["DAILY_LOSS_STOP_PCT"] == "0.15"
     assert env["DAILY_LOSS_STOP_INR"] == "20000"
-    assert env["FALLBACK_CAPITAL_INR"] == "275000"
-    assert env["MAX_SIZING_CAPITAL_INR"] == "275000"
+    assert env["FALLBACK_CAPITAL_INR"] == "200000"
+    assert env["MAX_SIZING_CAPITAL_INR"] == "200000"
     assert env["UNIFIED_PROFIT_LADDER_ENABLED"] == "true"
     assert env["UNIFIED_PROFIT_LADDER_BREAKEVEN_ENABLED"] == "false"
     assert env["WORST_DAY_BLOCKS_LIVE"] == "false"

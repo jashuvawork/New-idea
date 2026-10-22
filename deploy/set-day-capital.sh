@@ -3,7 +3,7 @@
 # Writes FALLBACK_CAPITAL_INR / MAX_SIZING_CAPITAL_INR and POSTs /api/capital.
 # Deploys do not overwrite those two keys, so the number survives the next release.
 #
-#   sudo bash deploy/set-day-capital.sh 275000
+#   sudo bash deploy/set-day-capital.sh 200000
 #
 set -euo pipefail
 
