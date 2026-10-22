@@ -3331,10 +3331,15 @@ def reset_session(*, preserve_open_trades: bool = True) -> None:
     _state_loaded = True
 
 
-def set_capital(amount: float) -> None:
+def set_capital(amount: float):
+    """Apply today's book and keep it across a restart."""
+    from app.engines.capital_allocator import save_day_capital
+
     global _capital_inr
     snap = set_manual_capital_limit(amount)
+    save_day_capital(snap.availableMarginInr)
     _capital_inr = snap.availableMarginInr
+    return snap
 
 
 def get_risk_engine() -> RiskEngine:

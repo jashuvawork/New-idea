@@ -3057,8 +3057,10 @@ class Settings(BaseSettings):
     neutral_breadth_explosion_min_score: float = 55.0
     sensex_rank_bonus: float = 10.0
     nifty_rank_penalty_chop: float = 5.0
-    # Daily risk budget = 10% of the ~200k sizing capital. This is a CEILING that halts
-    # new entries, not a target — selectivity + per-trade caps keep us far below it.
+    # Daily loss stop is 15% of today's book. The INR value is the fallback when
+    # the percentage is off. This is a ceiling that halts new entries, not a target.
+    daily_loss_stop_from_capital: bool = True
+    daily_loss_stop_pct: float = 0.15
     daily_loss_stop_inr: float = 20_000.0
     daily_max_trades_chop: int = 20
     daily_max_trades_pre10_chop: int = 5

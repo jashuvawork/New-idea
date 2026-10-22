@@ -1668,7 +1668,9 @@ def replay_local_base_day(
 
     total = round(sum(_f(t.get("pnlInr")) for t in taken), 0)
     wins = sum(1 for t in taken if _f(t.get("pnlInr")) > 0)
-    daily_stop = _f(getattr(s, "daily_loss_stop_inr", 20_000.0), 20_000.0)
+    from app.engines.capital_allocator import effective_daily_loss_stop_inr
+
+    daily_stop = effective_daily_loss_stop_inr(s)
 
     mode = "local_base_system_params"
     if win_start or win_end or side_filter_v:

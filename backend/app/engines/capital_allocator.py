@@ -1,5 +1,6 @@
 """Capital allocation from Upstox funds + static daily profit target/trail."""
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -159,6 +160,8 @@ class DailyProfitGate:
 
 _capital: Optional[CapitalSnapshot] = None
 _manual_capital_limit_inr: Optional[float] = None
+MIN_DAY_CAPITAL_INR = 10_000.0
+DAY_CAPITAL_FILE = "day_capital.json"
 _session_date: str = ""
 _best_pnl: float = 0.0
 _highest_stage: int = 0
@@ -250,15 +253,87 @@ async def refresh_lot_sizes(client, force: bool = False) -> dict[str, int]:
     return get_lot_sizes()
 
 
-def _effective_capital_inr(available: float) -> float:
-    """Cap sizing book at configured max (e.g. ₹2L) for realistic live deployment."""
+def _env_book_inr() -> float:
     settings = get_settings()
-    cap = settings.max_sizing_capital_inr or settings.fallback_capital_inr
-    if _manual_capital_limit_inr is not None:
-        cap = min(cap, _manual_capital_limit_inr) if cap > 0 else _manual_capital_limit_inr
+    return float(settings.max_sizing_capital_inr or settings.fallback_capital_inr or 0)
+
+
+def _effective_capital_inr(available: float) -> float:
+    """Size to the day's book when one is set, otherwise the env cap.
+
+    A posted day book replaces the env cap, so it can sit above or below
+    ``MAX_SIZING_CAPITAL_INR``. Broker margin still cannot be exceeded.
+    """
+    cap = float(_manual_capital_limit_inr) if _manual_capital_limit_inr is not None else _env_book_inr()
     if cap > 0:
         return min(available, cap)
     return available
+
+
+def book_capital_inr() -> float:
+    """The book the operator set for today, or the env cap when none is set."""
+    if _manual_capital_limit_inr is not None and _manual_capital_limit_inr > 0:
+        return float(_manual_capital_limit_inr)
+    return _env_book_inr()
+
+
+def effective_daily_loss_stop_inr(settings=None, *, capital_inr: Optional[float] = None) -> float:
+    """Daily loss ceiling: 15% of today's book, or the fixed INR when that is off."""
+    s = settings if settings is not None else get_settings()
+    if getattr(s, "daily_loss_stop_from_capital", False) is True:
+        try:
+            pct = float(getattr(s, "daily_loss_stop_pct", 0.15) or 0.15)
+        except (TypeError, ValueError):
+            pct = 0.15
+        if capital_inr is None:
+            use_day_book = settings is None or settings is get_settings()
+            if use_day_book and _manual_capital_limit_inr is not None and _manual_capital_limit_inr > 0:
+                capital_inr = float(_manual_capital_limit_inr)
+            else:
+                try:
+                    capital_inr = float(
+                        getattr(s, "max_sizing_capital_inr", 0)
+                        or getattr(s, "fallback_capital_inr", 0)
+                        or 0
+                    )
+                except (TypeError, ValueError):
+                    capital_inr = 0.0
+        if pct > 0 and capital_inr and float(capital_inr) > 0:
+            return round(float(capital_inr) * pct, 2)
+    try:
+        return float(getattr(s, "daily_loss_stop_inr", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _day_capital_path():
+    from app.services.trade_store import get_store_dir
+
+    return get_store_dir() / DAY_CAPITAL_FILE
+
+
+def save_day_capital(amount: float) -> None:
+    """Remember today's book so a restart keeps it."""
+    try:
+        path = _day_capital_path()
+        path.write_text(json.dumps({"allocatedInr": float(amount)}))
+    except OSError as exc:
+        logger.warning("Could not save day capital: %s", exc)
+
+
+def restore_day_capital() -> Optional[CapitalSnapshot]:
+    """Load the last posted book. Missing or unreadable files leave the env cap."""
+    try:
+        path = _day_capital_path()
+        if not path.is_file():
+            return None
+        data = json.loads(path.read_text())
+        amount = float(data.get("allocatedInr") or 0)
+    except (OSError, ValueError, TypeError):
+        return None
+    if amount < MIN_DAY_CAPITAL_INR:
+        return None
+    return set_manual_capital_limit(amount)
 
 
 def ranked_allocation_weights() -> list[float]:
@@ -809,7 +884,7 @@ async def refresh_capital_from_upstox(
         if force:
             raise
         logger.warning("Upstox capital fetch failed, using fallback: %s", e)
-        available = settings.fallback_capital_inr
+        available = book_capital_inr()
         available = _effective_capital_inr(available)
         used = 0.0
         total = available
@@ -887,10 +962,10 @@ def get_capital_snapshot() -> CapitalSnapshot:
 
 
 def set_manual_capital_limit(amount: float) -> CapitalSnapshot:
-    """Set the operator sizing ceiling used by every capital calculation."""
+    """Set today's sizing book. It replaces the env cap in either direction."""
     value = float(amount)
-    if value <= 0:
-        raise ValueError("Capital allocation must be positive")
+    if value < MIN_DAY_CAPITAL_INR:
+        raise ValueError(f"Capital must be at least ₹{int(MIN_DAY_CAPITAL_INR)}")
     global _capital, _manual_capital_limit_inr
     _manual_capital_limit_inr = value
     effective = _effective_capital_inr(value)
@@ -932,8 +1007,7 @@ def compute_session_pnl(state: AutoTraderState) -> float:
 
 
 def _capital_base_for_stages() -> float:
-    settings = get_settings()
-    return settings.max_sizing_capital_inr or settings.fallback_capital_inr
+    return book_capital_inr()
 
 
 def _resolve_daily_target_inr(capital_base: float) -> float:
@@ -1084,7 +1158,7 @@ def update_daily_profit_gate(
         stages=stages,
     )
 
-    loss_stop = float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
+    loss_stop = effective_daily_loss_stop_inr(settings)
     if loss_stop > 0 and session_pnl <= -abs(loss_stop):
         if snapshots:
             from app.engines.bad_day_routing import expiry_daily_loss_stop_bypass_active

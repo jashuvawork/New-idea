@@ -392,6 +392,6 @@ class RiskProfile(BaseModel):
 
 
 class CapitalConfig(BaseModel):
-    allocatedInr: float = 500_000
+    allocatedInr: float = Field(..., gt=0)
     perTradeRiskInr: float = 12_000
     emergencyStopInr: float = 18_000
