@@ -277,6 +277,35 @@ def book_capital_inr() -> float:
     return _env_book_inr()
 
 
+def effective_daily_loss_stop_inr(settings=None, *, capital_inr: Optional[float] = None) -> float:
+    """Daily loss ceiling: 15% of today's book, or the fixed INR when that is off."""
+    s = settings if settings is not None else get_settings()
+    if getattr(s, "daily_loss_stop_from_capital", False) is True:
+        try:
+            pct = float(getattr(s, "daily_loss_stop_pct", 0.15) or 0.15)
+        except (TypeError, ValueError):
+            pct = 0.15
+        if capital_inr is None:
+            use_day_book = settings is None or settings is get_settings()
+            if use_day_book and _manual_capital_limit_inr is not None and _manual_capital_limit_inr > 0:
+                capital_inr = float(_manual_capital_limit_inr)
+            else:
+                try:
+                    capital_inr = float(
+                        getattr(s, "max_sizing_capital_inr", 0)
+                        or getattr(s, "fallback_capital_inr", 0)
+                        or 0
+                    )
+                except (TypeError, ValueError):
+                    capital_inr = 0.0
+        if pct > 0 and capital_inr and float(capital_inr) > 0:
+            return round(float(capital_inr) * pct, 2)
+    try:
+        return float(getattr(s, "daily_loss_stop_inr", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _day_capital_path():
     from app.services.trade_store import get_store_dir
 
@@ -1129,7 +1158,7 @@ def update_daily_profit_gate(
         stages=stages,
     )
 
-    loss_stop = float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
+    loss_stop = effective_daily_loss_stop_inr(settings)
     if loss_stop > 0 and session_pnl <= -abs(loss_stop):
         if snapshots:
             from app.engines.bad_day_routing import expiry_daily_loss_stop_bypass_active

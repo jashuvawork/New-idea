@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.engines.auto_trader import get_risk_engine, set_capital
+from app.engines.capital_allocator import effective_daily_loss_stop_inr
 from app.models.schemas import CapitalConfig, RiskProfile
 
 router = APIRouter(prefix="/api", tags=["config"])
@@ -18,6 +19,7 @@ async def set_capital_endpoint(config: CapitalConfig):
         "status": "ok",
         "allocatedInr": snap.availableMarginInr,
         "bookCapitalInr": snap.availableMarginInr,
+        "dailyLossStopInr": effective_daily_loss_stop_inr(),
         "source": snap.source,
     }
 

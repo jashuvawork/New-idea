@@ -13,6 +13,7 @@ from app.engines.auto_trader import set_capital
 from app.engines.capital_allocator import (
     _capital_base_for_stages,
     book_capital_inr,
+    effective_daily_loss_stop_inr,
     refresh_capital_from_upstox,
     reset_capital_for_tests,
     restore_day_capital,
@@ -58,6 +59,18 @@ def test_day_book_can_fall_below_the_env_cap():
         snap = set_manual_capital_limit(150_000)
     assert snap.availableMarginInr == 150_000
     assert book_capital_inr() == 150_000
+
+
+def test_daily_loss_stop_is_fifteen_percent_of_the_day_book():
+    reset_capital_for_tests()
+    settings = _settings(book=275_000)
+    settings.daily_loss_stop_from_capital = True
+    settings.daily_loss_stop_pct = 0.15
+    settings.daily_loss_stop_inr = 20_000
+    with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+        assert effective_daily_loss_stop_inr() == 41_250
+        set_manual_capital_limit(100_000)
+        assert effective_daily_loss_stop_inr() == 15_000
 
 
 def test_day_book_rejects_a_typo_below_the_floor():

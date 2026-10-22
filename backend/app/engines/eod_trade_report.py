@@ -397,7 +397,9 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
         t.pop("_exitDt", None)
     total = round(sum(_f(t.get("pnlInr")) for t in taken), 0)
     wins = sum(1 for t in taken if _f(t.get("pnlInr")) > 0)
-    daily_stop = _f(getattr(settings, "daily_loss_stop_inr", 20_000.0), 20_000.0)
+    from app.engines.capital_allocator import effective_daily_loss_stop_inr
+
+    daily_stop = effective_daily_loss_stop_inr(settings)
     return {
         "date": date,
         "status": "ok",
@@ -435,7 +437,9 @@ def apply_portfolio_limits(
     once the day's loss stop is hit. With 1 slot this is the old one-at-a-time behaviour.
     """
     s = settings or get_settings()
-    daily_stop = _f(getattr(s, "daily_loss_stop_inr", 20_000.0), 20_000.0)
+    from app.engines.capital_allocator import effective_daily_loss_stop_inr
+
+    daily_stop = effective_daily_loss_stop_inr(s)
     max_conc = max(1, int(_f(getattr(s, "eod_report_max_concurrent", 1), 1)))
     same_side_cap = max(1, int(_f(getattr(s, "eod_report_same_side_cap", 2), 2)))
     ordered = sorted(candidates, key=lambda t: t.get("_entryDt") or datetime.now(IST))

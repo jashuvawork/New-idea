@@ -21,8 +21,9 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["TOP_FTV_A_ENABLED"] == "true"
     assert env["TOP_FTV_A_MAX_CAPITAL_PCT"] == "0.90"
     assert env["TOP_FTV_A_EXCEPTIONAL_MAX_MOVE_PCT"] == "40"
-    # 10%/day budget — aligned with emergency_stop_inr and the worst-day pause (both ₹20k)
-    # so a full-capital ELITE base runner rides its natural SL instead of a stale ₹6k halt.
+    # 15% of today's book. ₹2.75L → ₹41,250. The INR value is the fallback.
+    assert env["DAILY_LOSS_STOP_FROM_CAPITAL"] == "true"
+    assert env["DAILY_LOSS_STOP_PCT"] == "0.15"
     assert env["DAILY_LOSS_STOP_INR"] == "20000"
     assert env["FALLBACK_CAPITAL_INR"] == "275000"
     assert env["MAX_SIZING_CAPITAL_INR"] == "275000"
@@ -115,6 +116,8 @@ def test_deploy_paths_sync_every_bounded_loss_setting():
         "EXPIRY_EVENING_BLOCK_ENABLED",
         "POWER_HOUR_TOP_ONLY_ENABLED",
         "DAILY_LOSS_STOP_INR",
+        "DAILY_LOSS_STOP_FROM_CAPITAL",
+        "DAILY_LOSS_STOP_PCT",
         "PER_TRADE_CAPITAL_PCT",
         "ORDINARY_ENTRY_MAX_CAPITAL_PCT",
         "FULL_SLEEVE_REQUIRES_ARMED_LAUNCH",

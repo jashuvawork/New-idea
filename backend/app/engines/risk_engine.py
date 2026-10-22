@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from app.config import get_settings
-from app.engines.capital_allocator import get_capital_snapshot
+from app.engines.capital_allocator import effective_daily_loss_stop_inr, get_capital_snapshot
 from app.models.schemas import AutoTraderState, PaperTrade, RiskProfile, Side, StrategyType
 
 
@@ -29,7 +29,7 @@ class RiskEngine:
         settings = get_settings()
         if settings.emergency_stop_enabled and self._daily_pnl <= -settings.emergency_stop_inr:
             return True
-        loss_stop = float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
+        loss_stop = effective_daily_loss_stop_inr(settings)
         if loss_stop > 0 and self._daily_pnl <= -abs(loss_stop):
             return True
         return self.profile.safeMode
