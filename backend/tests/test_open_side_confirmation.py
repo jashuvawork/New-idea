@@ -96,13 +96,29 @@ def test_after_open_window_not_applied_ce_pe(side):
     assert blocked is False
 
 
-def test_enabled_at_one_minute_by_default():
+def test_off_by_default_like_oct1_with_0920_first_entry():
     s = Settings()
-    assert s.open_side_confirmation_enabled is True
-    assert s.open_side_confirmation_min_minutes == 1.0
-    assert s.explosion_entry_earliest_minute == 20
-    snap = _tape("NIFTY", open_=22300.0, hi=22410.0, lo=22285.0, last=22395.0)
-    blocked15, reason15, _ = open_side_confirmation("NIFTY", Side.PUT, snap, now=_at(9, 15, 37), settings=s)
-    blocked16, _, _ = open_side_confirmation("NIFTY", Side.CALL, snap, now=_at(9, 16, 18), settings=s)
-    assert blocked15 and reason15 == "open_side_unconfirmed_first_bar"
-    assert blocked16 is False
+    assert s.open_side_confirmation_enabled is False
+    assert s.entry_earliest_hour == 9 and s.entry_earliest_minute == 20
+    assert s.explosion_entry_earliest_hour == 9 and s.explosion_entry_earliest_minute == 20
+
+
+@pytest.mark.parametrize(
+    "side,open_,hi,lo,last",
+    [
+        # Oct 1 09:31 NIFTY 22900 PE: index +0.09% above open — the gate would refuse it.
+        (Side.PUT, 22545.0, 22580.0, 22530.0, 22565.0),
+        # Oct 14 09:20 NIFTY 22650 CE: index -0.15% below open — the gate would refuse it.
+        (Side.CALL, 22700.0, 22710.0, 22660.0, 22665.0),
+    ],
+)
+def test_default_does_not_block_ce_pe_inside_open_window(side, open_, hi, lo, last):
+    snap = _tape("NIFTY", open_=open_, hi=hi, lo=lo, last=last)
+    blocked_default, _, _ = open_side_confirmation(
+        "NIFTY", side, snap, now=_at(9, 25), settings=Settings(),
+    )
+    blocked_on, _, _ = open_side_confirmation(
+        "NIFTY", side, snap, now=_at(9, 25), settings=_settings(),
+    )
+    assert blocked_default is False
+    assert blocked_on is True
