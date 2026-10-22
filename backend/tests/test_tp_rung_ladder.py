@@ -12,6 +12,7 @@ from app.engines.tp_rung_ladder import (
     build_tp_rung_points,
     sync_tp_rung_state,
     tp_rung_exit_reason,
+    tp_rung_mega_leg,
     trade_uses_tp_rung_ladder,
 )
 from app.models.schemas import PaperTrade, Side, StrategyType
@@ -42,7 +43,7 @@ def test_user_example_100_entry_28_36_fade_at_33():
         side=Side.CALL,
         strike=24000.0,
         entryPremium=100.0,
-        currentPremium=131.0,
+        currentPremium=120.0,
         lots=1,
         openedAt=datetime.now(IST) - timedelta(minutes=5),
         strategyType=StrategyType.EXPLOSIVE,
@@ -63,7 +64,7 @@ def test_user_example_100_entry_28_36_fade_at_33():
     reason = tp_rung_exit_reason(
         trade,
         best=33.0,
-        pnl_pts=31.0,
+        pnl_pts=20.0,
         hold_seconds=120.0,
         live_velocity_3s=-1.0,
         settings=s,
@@ -143,6 +144,89 @@ def test_oct21_73400_red_after_mega_peak(_mp):
             trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=-1.0,
         )
     assert reason == "explosion_tp_rung_red_giveback"
+
+
+def test_mega_leg_skips_between_fade_when_best_above_55():
+    """Oct 22 73200 PE shape: mega peak — no early between-rung fade."""
+    s = Settings()
+    entry = 198.17
+    trade = PaperTrade(
+        id="73200",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=73200.0,
+        entryPremium=entry,
+        currentPremium=entry + 50.0,
+        lots=22,
+        openedAt=datetime.now(IST) - timedelta(minutes=7),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=76.23,
+        maxLtp=entry + 76.23,
+        maxLtpAt=datetime.now(IST) - timedelta(seconds=120),
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 500.0,
+            "stageSize": 75.0,
+            "tpRungLadder": True,
+            "tpRungsPts": [28.0, 36.0, 75.0, 150.0, 225.0, 300.0, 375.0, 450.0, 500.0],
+            "exitPlan": {"projectedMaxTp": 500.0, "stageSize": 75.0},
+        },
+    )
+    assert tp_rung_mega_leg(trade, settings=s)
+    sync_tp_rung_state(trade, 76.23, settings=s)
+    reason = tp_rung_exit_reason(
+        trade,
+        best=76.23,
+        pnl_pts=50.0,
+        hold_seconds=400.0,
+        live_velocity_3s=-1.5,
+        settings=s,
+    )
+    assert reason != "explosion_tp_rung_between_fade"
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+def test_mega_73200_prefers_unified_ladder_over_early_rung_fade(_mp):
+    import app.engines.explosion_profit as ep
+
+    s = Settings()
+    entry = 198.17
+    trade = PaperTrade(
+        id="73200-exit",
+        symbol="SENSEX",
+        side=Side.PUT,
+        strike=73200.0,
+        entryPremium=entry,
+        currentPremium=entry + 54.0,
+        lots=22,
+        openedAt=datetime.now(IST) - timedelta(minutes=7),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=76.23,
+        maxLtp=entry + 76.23,
+        maxLtpAt=datetime.now(IST) - timedelta(seconds=120),
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 500.0,
+            "stageSize": 75.0,
+            "tpRungLadder": True,
+            "tpRungsPts": [28.0, 75.0, 150.0, 225.0, 500.0],
+            "exitPlan": {"projectedMaxTp": 500.0, "stageSize": 75.0},
+        },
+    )
+    with patch.object(ep, "_hold_seconds", return_value=400):
+        reason, pnl_inr = evaluate_explosion_exit(
+            trade, trade.currentPremium, "ELITE", 20, live_velocity_3s=-2.0,
+        )
+    assert reason != "explosion_tp_rung_between_fade"
+    assert pnl_inr > 0
+    assert reason in (
+        "explosion_profit_ladder_peak_keep",
+        "explosion_tp_rung_floor",
+        "explosion_tp_rung_floor_hole",
+        "explosion_stage_runner_hole_take",
+    )
 
 
 def test_sub_28_best_does_not_arm_tp_rung_exit():

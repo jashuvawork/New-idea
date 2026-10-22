@@ -106,6 +106,36 @@ class StageLockTests(unittest.TestCase):
         self.assertTrue(gate.newEntriesAllowed)
         self.assertEqual(gate.status, "STAGE_CAUTION")
 
+    def test_flat_book_clamps_unrealized_peak_lock(self):
+        """After exit, stage lock must not require booked PnL to match open MTM peak."""
+        state = AutoTraderState()
+        state.closedPaperTrades = [
+            PaperTrade(
+                id="1",
+                symbol="SENSEX",
+                side=Side.PUT,
+                strike=73200,
+                entryPremium=200,
+                lots=22,
+                openedAt=NOW,
+                closedAt=NOW,
+                pnlInr=17_058.8,
+                strategyType=StrategyType.EXPLOSIVE,
+                sessionDate=NOW.strftime("%Y-%m-%d"),
+            )
+        ]
+        settings = _legacy_settings()
+        settings.daily_profit_target_inr = 18_000
+        settings.daily_profit_stage_from_target = True
+        settings.daily_profit_stage_target_mults = lambda: [0.5, 1.0, 1.5]
+        with patch("app.engines.capital_allocator.get_settings", return_value=settings):
+            with patch("app.engines.capital_allocator._session_date", NOW.strftime("%Y-%m-%d")):
+                with patch("app.engines.capital_allocator._best_pnl", 33_541.2):
+                    with patch("app.engines.capital_allocator._highest_stage", 4):
+                        gate = update_daily_profit_gate(state)
+        self.assertTrue(gate.newEntriesAllowed)
+        self.assertNotEqual(gate.status, "STAGE_LOCK")
+
     def test_min_44k_does_not_stop_entries(self):
         state = AutoTraderState()
         state.closedPaperTrades = [
