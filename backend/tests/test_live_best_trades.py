@@ -93,16 +93,31 @@ def test_gate_off_lets_the_paper_book_through(mock_settings):
 
 
 @patch("app.engines.live_best_trades.get_settings")
-def test_sub_s_grade_passes_like_october_1_paper(mock_settings):
+def test_sub_s_grade_is_blocked(mock_settings):
     mock_settings.return_value = _settings()
-    blocked, reason, _ = live_best_trade_entry_blocked(
-        _candidate(),
+    blocked, reason, meta = live_best_trade_entry_blocked(
+        _candidate(score=80.0),
         _snap(),
         AutoTraderState(),
         ranking={"grade": "A", "evidence": {"tier": "EXPLODING"}},
     )
+    assert blocked is True
+    assert reason == "live_best_trades_requires_grade_s"
+    assert meta["grade"] == "A"
+
+
+@patch("app.engines.live_best_trades.get_settings")
+def test_grade_s_passes_below_the_old_score_floor(mock_settings):
+    mock_settings.return_value = _settings()
+    blocked, reason, meta = live_best_trade_entry_blocked(
+        _candidate(score=80.0),
+        _snap(),
+        AutoTraderState(),
+        ranking={"grade": "S", "evidence": {"tier": "ELITE"}},
+    )
     assert blocked is False
     assert reason == "ok"
+    assert meta["grade"] == "S"
 
 
 @patch("app.engines.live_best_trades.get_settings")

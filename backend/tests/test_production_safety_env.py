@@ -32,7 +32,7 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["WORST_DAY_BLOCKS_LIVE"] == "false"
     assert env["CHOP_LIVE_HARD_BLOCK_WORST_DAY"] == "false"
     assert env["BEST_TRADE_BLOCK_CHOP_DEEP_CHASE_ENABLED"] == "false"
-    assert env["LIVE_BEST_TRADES_ONLY_ENABLED"] == "false"
+    assert env["LIVE_BEST_TRADES_ONLY_ENABLED"] == "true"
     assert env["LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
     assert env["LIVE_DISABLE_SESSION_LIFT"] == "false"
     assert env["CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
