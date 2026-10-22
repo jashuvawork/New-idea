@@ -7,6 +7,8 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.engines.paper_slippage import mark_to_market
 from app.models.schemas import (
     AutoTraderState,
@@ -298,6 +300,222 @@ def test_rejected_exit_waits_before_the_next_sell():
     assert place_exit.call_count == 0
     assert trade.status == "OPEN"
     assert trade.entryContext["brokerExitRejected"]
+    assert "brokerExitRetryAfter" in trade.entryContext
+
+
+_SIDES = [
+    pytest.param("NIFTY", Side.CALL, 23150, "NSE_FO|23150CE", 65, id="nifty-ce"),
+    pytest.param("SENSEX", Side.PUT, 73800, "BSE_FO|1125579", 20, id="sensex-pe"),
+]
+
+
+def _live_trade(symbol, side, strike, key, lot, *, filled=True, exit_id="sell-1"):
+    ctx = {
+        "instrumentKey": key,
+        "brokerOrderId": "buy-1",
+        "brokerQuantity": 10 * lot,
+        "lotSize": lot,
+        "brokerSimulated": False,
+        "executionMode": "LIVE",
+        "explosionTier": "EXPLODING",
+    }
+    if filled:
+        ctx["brokerEntryFillPremium"] = 100.0
+    if exit_id:
+        ctx["brokerExitOrderId"] = exit_id
+    return PaperTrade(
+        id=f"t-{symbol}-{side.value}",
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        entryPremium=100.0,
+        currentPremium=110.0,
+        lots=10,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext=ctx,
+    )
+
+
+def _live_snap(symbol, side, strike, key, ltp):
+    call_key = key if side == Side.CALL else f"{key}CE"
+    put_key = key if side == Side.PUT else f"{key}PE"
+    return SymbolSnapshot(
+        symbol=symbol,
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        breadth=Breadth(score=50, bias="NEUTRAL", aligned=False),
+        heatmap=[
+            HeatmapStrike(
+                strike=strike,
+                callLtp=ltp if side == Side.CALL else 20.0,
+                putLtp=ltp if side == Side.PUT else 20.0,
+                callInstrumentKey=call_key,
+                putInstrumentKey=put_key,
+            ),
+        ],
+    )
+
+
+def _live_settings():
+    from app.config import get_settings
+
+    return get_settings().model_copy(
+        update={
+            "adaptive_exits_enabled": False,
+            "edge_engine_enabled": False,
+            "explosion_capture_mode": True,
+            "enable_live_trading": True,
+            "auto_trading_enabled": True,
+            "paper_trading": False,
+        }
+    )
+
+
+_REJECTED_SELL = {
+    "status": "rejected",
+    "averagePrice": 0.0,
+    "filledQuantity": 0.0,
+    "statusMessage": "You need to add Rs. 3177775.28 in your account to place this trade.",
+}
+
+
+def _install(trade):
+    import app.engines.auto_trader as auto_trader
+
+    state = AutoTraderState(openPaperTrades=[trade])
+    auto_trader._auto_trader_state = state
+    auto_trader._state_loaded = True
+    return auto_trader, state
+
+
+@pytest.mark.parametrize("symbol,side,strike,key,lot", _SIDES)
+def test_rejected_sell_with_no_broker_position_closes_without_another_sell(
+    symbol, side, strike, key, lot,
+):
+    """Oct 22: sells kept going out for a position the broker never held."""
+    trade = _live_trade(symbol, side, strike, key, lot, filled=True)
+    auto_trader, state = _install(trade)
+    client = MagicMock()
+    client.get_positions = MagicMock(side_effect=lambda: _async([]))
+
+    async def _run():
+        for _ in range(3):
+            await auto_trader.process_exits_only(
+                {symbol: _live_snap(symbol, side, strike, key, 110.0)}, client=client,
+            )
+
+    with (
+        patch.object(auto_trader, "get_settings", return_value=_live_settings()),
+        patch.object(auto_trader, "evaluate_explosion_exit", return_value=("explosion_peak_keep_trail", 1.0)),
+        patch.object(auto_trader, "find_existing_exit_order", return_value=None),
+        patch.object(auto_trader, "place_exit_order", return_value={"order_id": "sell-2"}) as place_exit,
+        patch.object(auto_trader, "live_order_fill", return_value=dict(_REJECTED_SELL)),
+        patch.object(auto_trader.trade_store, "record_trade_closed") as closed,
+        patch.object(auto_trader.trade_store, "record_trade_mark"),
+    ):
+        asyncio.run(_run())
+
+    assert place_exit.call_count == 0
+    assert closed.call_count == 1
+    assert trade.status == "CLOSED"
+    assert trade.exitReason == "broker_position_flat"
+    assert trade.entryContext["brokerPositionFlat"]
+    assert state.openPaperTrades == []
+
+
+@pytest.mark.parametrize("symbol,side,strike,key,lot", _SIDES)
+def test_flat_position_never_filled_books_zero(symbol, side, strike, key, lot):
+    trade = _live_trade(symbol, side, strike, key, lot, filled=False)
+    auto_trader, _state = _install(trade)
+    client = MagicMock()
+    client.get_positions = MagicMock(side_effect=lambda: _async([]))
+    fills = {"buy-1": {"status": "open", "averagePrice": 0.0, "filledQuantity": 0.0}}
+
+    async def _fill(_client, order_id):
+        return fills.get(order_id, dict(_REJECTED_SELL))
+
+    with (
+        patch.object(auto_trader, "get_settings", return_value=_live_settings()),
+        patch.object(auto_trader, "evaluate_explosion_exit", return_value=("explosion_peak_keep_trail", 1.0)),
+        patch.object(auto_trader, "place_exit_order") as place_exit,
+        patch.object(auto_trader, "live_order_fill", side_effect=_fill),
+        patch.object(auto_trader.trade_store, "record_trade_closed"),
+        patch.object(auto_trader.trade_store, "record_trade_mark"),
+    ):
+        asyncio.run(auto_trader.process_exits_only(
+            {symbol: _live_snap(symbol, side, strike, key, 110.0)}, client=client,
+        ))
+
+    assert place_exit.call_count == 0
+    assert trade.exitReason == "broker_position_flat"
+    assert trade.pnlInr == 0
+    assert trade.pnlPoints == 0
+
+
+@pytest.mark.parametrize("symbol,side,strike,key,lot", _SIDES)
+def test_rejected_sell_while_broker_still_holds_keeps_trade_and_waits(
+    symbol, side, strike, key, lot,
+):
+    trade = _live_trade(symbol, side, strike, key, lot, filled=True)
+    auto_trader, state = _install(trade)
+    client = MagicMock()
+    client.get_positions = MagicMock(
+        side_effect=lambda: _async([{"instrument_token": key, "quantity": 10 * lot}]),
+    )
+
+    async def _run():
+        for _ in range(2):
+            await auto_trader.process_exits_only(
+                {symbol: _live_snap(symbol, side, strike, key, 110.0)}, client=client,
+            )
+
+    with (
+        patch.object(auto_trader, "get_settings", return_value=_live_settings()),
+        patch.object(auto_trader, "evaluate_explosion_exit", return_value=("explosion_peak_keep_trail", 1.0)),
+        patch.object(auto_trader, "find_existing_exit_order", return_value=None),
+        patch.object(auto_trader, "place_exit_order", return_value={"order_id": "sell-2"}) as place_exit,
+        patch.object(auto_trader, "live_order_fill", return_value=dict(_REJECTED_SELL)),
+        patch.object(auto_trader.trade_store, "record_trade_closed") as closed,
+        patch.object(auto_trader.trade_store, "record_trade_mark"),
+    ):
+        asyncio.run(_run())
+
+    assert place_exit.call_count == 0
+    assert closed.call_count == 0
+    assert trade.status == "OPEN"
+    assert "brokerExitRetryAfter" in trade.entryContext
+    assert state.openPaperTrades == [trade]
+
+
+@pytest.mark.parametrize("symbol,side,strike,key,lot", _SIDES)
+def test_broker_error_on_sell_waits_before_the_next_sell(symbol, side, strike, key, lot):
+    from app.services.upstox import UpstoxError
+
+    trade = _live_trade(symbol, side, strike, key, lot, filled=True, exit_id=None)
+    auto_trader, _state = _install(trade)
+
+    async def _run():
+        for _ in range(4):
+            await auto_trader.process_exits_only(
+                {symbol: _live_snap(symbol, side, strike, key, 110.0)}, client=MagicMock(),
+            )
+
+    with (
+        patch.object(auto_trader, "get_settings", return_value=_live_settings()),
+        patch.object(auto_trader, "evaluate_explosion_exit", return_value=("explosion_peak_keep_trail", 1.0)),
+        patch.object(auto_trader, "find_existing_exit_order", return_value=None),
+        patch.object(
+            auto_trader, "place_exit_order", side_effect=UpstoxError("UDAPI100500 order rejected"),
+        ) as place_exit,
+        patch.object(auto_trader.trade_store, "record_trade_mark"),
+    ):
+        asyncio.run(_run())
+
+    assert place_exit.call_count == 1
+    assert trade.status == "OPEN"
+    assert trade.entryContext["brokerExitRejected"] == "UDAPI100500 order rejected"
     assert "brokerExitRetryAfter" in trade.entryContext
 
 
