@@ -136,9 +136,9 @@ class Settings(BaseSettings):
     # Trap-stamped chop+elite exits: modest MFE then bleed (Sep08 +1.45pt → adaptive SL).
     chop_live_trap_early_fail_max_best_points: float = 2.0
     chop_live_trap_early_fail_max_hold_seconds: int = 600
-    # Live explosion entries must be grade S. Score, chart, and pad stay shared.
+    # Live explosion entries must be grade A or S. Score, chart, and pad stay shared.
     live_best_trades_only_enabled: bool = True
-    live_best_trades_min_grade: str = "S"
+    live_best_trades_min_grade: str = "A"
     live_best_trades_min_explosion_score: float = 200.0
     live_best_trades_tiers_csv: str = "ELITE,EXPLODING"
     live_best_trades_require_first_lift: bool = True
