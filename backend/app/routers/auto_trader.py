@@ -107,8 +107,16 @@ async def purge_trade_logs():
 
 @router.post("/capital")
 async def set_trading_capital(config: CapitalConfig):
-    set_capital(config.allocatedInr)
-    return {"status": "ok", "allocatedInr": config.allocatedInr}
+    try:
+        snap = set_capital(config.allocatedInr)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "status": "ok",
+        "allocatedInr": snap.availableMarginInr,
+        "bookCapitalInr": snap.availableMarginInr,
+        "source": snap.source,
+    }
 
 
 @router.get("/history")

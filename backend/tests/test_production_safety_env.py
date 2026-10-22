@@ -68,6 +68,17 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["ICT_ELITE_BASE_READY_MIN_VELOCITY_9S"] == "1.5"
 
 
+def test_deploy_leaves_the_day_capital_in_place():
+    workflow = (ROOT / ".github/workflows/deploy-ec2.yml").read_text()
+    updater = (ROOT / "deploy/ec2-update.sh").read_text()
+    assert "FALLBACK_CAPITAL_INR" not in workflow
+    assert "MAX_SIZING_CAPITAL_INR" not in workflow
+    assert "FALLBACK_CAPITAL_INR" not in updater
+    assert "MAX_SIZING_CAPITAL_INR" not in updater
+    assert (ROOT / "deploy/set-day-capital.sh").is_file()
+    assert (ROOT / ".github/workflows/set-day-capital-ec2.yml").is_file()
+
+
 def test_deploy_paths_sync_every_bounded_loss_setting():
     workflow = (ROOT / ".github/workflows/deploy-ec2.yml").read_text()
     updater = (ROOT / "deploy/ec2-update.sh").read_text()
@@ -103,8 +114,6 @@ def test_deploy_paths_sync_every_bounded_loss_setting():
         "DAILY_PROFIT_TARGET_INR",
         "EXPIRY_EVENING_BLOCK_ENABLED",
         "POWER_HOUR_TOP_ONLY_ENABLED",
-        "FALLBACK_CAPITAL_INR",
-        "MAX_SIZING_CAPITAL_INR",
         "DAILY_LOSS_STOP_INR",
         "PER_TRADE_CAPITAL_PCT",
         "ORDINARY_ENTRY_MAX_CAPITAL_PCT",

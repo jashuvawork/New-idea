@@ -3,7 +3,7 @@
 from fastapi import APIRouter
 
 from app.config import audit_week_local_base_overrides, get_settings
-from app.engines.capital_allocator import get_lot_sizes_meta
+from app.engines.capital_allocator import book_capital_inr, get_lot_sizes_meta
 from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.engines.sep917_legacy_profile import sep917_legacy_profile_summary as _sep917_legacy_profile_summary
 from app.engines.structural_guard_settings import structural_guard_summary
@@ -85,6 +85,7 @@ async def deployment_status():
             "perTradeCapitalPct": settings.per_trade_capital_pct,
             "fallbackCapitalInr": settings.fallback_capital_inr,
             "maxSizingCapitalInr": settings.max_sizing_capital_inr,
+            "bookCapitalInr": book_capital_inr(),
             "aggressiveLotSizing": settings.aggressive_lot_sizing,
             "maxLotsPerTrade": settings.max_lots_per_trade,
             "emergencyStopEnabled": settings.emergency_stop_enabled,

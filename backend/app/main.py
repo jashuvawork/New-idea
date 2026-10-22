@@ -313,9 +313,16 @@ async def lifespan(app: FastAPI):
     try:
         from app.engines.capital_allocator import (
             ensure_paper_sizing_capital,
+            restore_day_capital,
             should_use_live_broker_capital,
         )
 
+        restored = restore_day_capital()
+        if restored is not None:
+            logger.info(
+                "Restored day capital ₹%.0f",
+                restored.availableMarginInr,
+            )
         if should_use_live_broker_capital():
             logger.info("Live broker capital sizing enabled — Upstox margin on first refresh")
         else:
