@@ -61,6 +61,7 @@ def _candidate(
 def suppression_settings():
     settings = MagicMock()
     settings.preorder_rejection_suppression_seconds = 30
+    settings.preorder_structural_rejection_suppression_seconds = 120
     with patch(
         "app.engines.preorder_rejection_suppression.get_settings",
         return_value=settings,
@@ -165,6 +166,47 @@ def test_unsafe_or_non_leg_specific_failures_do_not_suppress(reason):
 def test_all_typed_preorder_premium_fade_reasons_suppress(reason):
     candidate = _candidate(24250)
     assert _record_deferred_candidate_fallback(candidate, reason)
+    assert candidate_preorder_rejection_suppressed(candidate)
+
+
+@pytest.mark.usefixtures("suppression_settings")
+@pytest.mark.parametrize(
+    "side,otm_strike,atm_strike",
+    [(Side.CALL, 73600, 73300), (Side.PUT, 73000, 73300)],
+)
+def test_expiry_otm_block_lets_atm_leg_take_slot(side, otm_strike, atm_strike):
+    """Oct 22 SENSEX expiry: 73600 CE selected 91×, OTM-blocked 90× — ATM never got the slot."""
+    otm = _candidate(otm_strike, score=259, symbol="SENSEX", side=side)
+    atm = _candidate(atm_strike, score=211, symbol="SENSEX", side=side)
+
+    first = max(_exclude_preorder_rejected_candidates([otm, atm]), key=lambda c: c.score)
+    assert first.strike == otm_strike
+    assert _record_deferred_candidate_fallback(first, "best_trade_block_expiry_otm_itm_atm_only")
+
+    next_scan = _exclude_preorder_rejected_candidates([otm, atm])
+    assert [c.strike for c in next_scan] == [atm_strike]
+
+
+@pytest.mark.usefixtures("suppression_settings")
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+@pytest.mark.parametrize(
+    "reason",
+    ["best_trade_block_expiry_otm_itm_atm_only", "best_trade_block_expiry_cheap_otm"],
+)
+def test_structural_otm_block_holds_longer_than_premium_fade(side, reason):
+    candidate = _candidate(73600, symbol="SENSEX", side=side)
+    assert suppress_after_preorder_rejection(candidate, reason, now=NOW)
+    assert candidate_preorder_rejection_suppressed(candidate, now=NOW + timedelta(seconds=90))
+    assert not candidate_preorder_rejection_suppressed(
+        candidate, now=NOW + timedelta(seconds=121),
+    )
+
+
+@pytest.mark.usefixtures("suppression_settings")
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+def test_mtf_5m_premium_fade_suppresses_leg(side):
+    candidate = _candidate(73700, symbol="SENSEX", side=side)
+    assert _record_deferred_candidate_fallback(candidate, "exec_mtf_premium_5m_fading")
     assert candidate_preorder_rejection_suppressed(candidate)
 
 
