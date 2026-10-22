@@ -490,10 +490,9 @@ class Settings(BaseSettings):
     sep917_live_checklist_enforcement_enabled: bool = False
     # Persist radar archive + premium tape on WS overlay (9:15+), not only on entry scan.
     radar_record_on_ws_overlay_enabled: bool = True
-    # Off. Oct 19 deep ITM selections (23050+ PE, SENSEX calls) died here
-    # after the selector had already chosen them. Cheap near-base preference
-    # stays a rank signal, not an order refuse.
-    best_trade_block_chop_deep_chase_enabled: bool = False
+    # On. Deep ITM chop/trap chase is refused. The #676 base-call path
+    # (call_atm_itm_base_waive_chop_deep_itm) is the only waiver.
+    best_trade_block_chop_deep_chase_enabled: bool = True
     best_trade_deep_chase_min_premium_inr: float = 120.0
     best_trade_deep_chase_max_local_pct: float = 18.0
     best_trade_cheap_entry_max_premium_inr: float = 85.0
