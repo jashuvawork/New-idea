@@ -43,11 +43,11 @@ def test_post_sep17_hard_gates_off_for_sep9_17_profile():
 
 
 def test_sep917_legacy_profile_defaults():
-    """Sep 9–17 full stack — ATM/ITM ₹18–350, cheap OTM off, FTV book relaxed."""
+    """Sep 9–17 full stack — ATM/ITM ₹18–450, cheap OTM off, FTV book relaxed."""
     s = Settings()
     assert s.sep917_legacy_profile_enabled is True
-    assert s.max_option_premium_inr == 350.0
-    assert s.explosion_max_premium_inr == 350.0
+    assert s.max_option_premium_inr == 450.0
+    assert s.explosion_max_premium_inr == 450.0
     assert s.best_trade_cheap_base_rank_priority_enabled is False
     assert s.explosion_shallow_otm_entry_enabled is False
     assert s.near_base_session_capture_enabled is False

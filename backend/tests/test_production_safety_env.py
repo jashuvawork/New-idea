@@ -17,7 +17,7 @@ def test_production_template_uses_bounded_loss_policy():
     env = _env_values()
     assert env["SEP917_LEGACY_PROFILE_ENABLED"] == "true"
     assert env["FTV_ELITE_TOP_ONLY_ENABLED"] == "false"
-    assert env["MAX_OPTION_PREMIUM_INR"] == "350"
+    assert env["MAX_OPTION_PREMIUM_INR"] == "450"
     assert env["TOP_FTV_A_ENABLED"] == "true"
     assert env["TOP_FTV_A_MAX_CAPITAL_PCT"] == "0.90"
     assert env["TOP_FTV_A_EXCEPTIONAL_MAX_MOVE_PCT"] == "40"

@@ -2170,6 +2170,9 @@ class Settings(BaseSettings):
     instrument_max_entries_per_day: int = 3
     # Exact-leg defer after execution-time premium fade; another leg may win next scan.
     preorder_rejection_suppression_seconds: int = 30
+    # After a live SELL is rejected for insufficient margin, do not spam new exit orders.
+    live_exit_margin_rejection_cooldown_seconds: int = 3600
+    live_exit_order_retry_seconds: int = 90
     # Jul27 scalp churn: tiny win @6 lots → full size @24/25 → stop → repeat same CE.
     # Longer same-strike cooldowns + hard daily cap for scalp only.
     scalp_instrument_win_cooldown_seconds: int = 600
@@ -2452,7 +2455,7 @@ class Settings(BaseSettings):
     expiry_near_expiry_premium_max_inr: float = 300.0
     # Deep ITM on expiry — resting LTP can exceed ₹650 before the vertical prints.
     # Aug26 SENSEX 78200–78400 PUT (42–44% peaks) never reached radar when scan clipped at 500pt.
-    expiry_itm_explosion_scan_max_premium_inr: float = 900.0
+    expiry_itm_explosion_scan_max_premium_inr: float = 450.0
     expiry_pm_itm_min_velocity_pct: float = 0.35
     expiry_pm_itm_min_rank_score: float = 52.0
     expiry_pm_itm_chart_bypass_breadth: bool = True
@@ -3286,9 +3289,9 @@ class Settings(BaseSettings):
 
     # Option premium (LTP) band for entries and scanners
     min_option_premium_inr: float = 18.0
-    max_option_premium_inr: float = 350.0
-    explosion_max_premium_inr: float = 350.0
-    explosion_ict_max_premium_inr: float = 350.0
+    max_option_premium_inr: float = 450.0
+    explosion_max_premium_inr: float = 450.0
+    explosion_ict_max_premium_inr: float = 450.0
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0

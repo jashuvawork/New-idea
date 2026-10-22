@@ -21,10 +21,10 @@ def _settings(*, atm_itm_only: bool = True) -> MagicMock:
     s.expiry_sensex_itm_scan_range = 1200
     s.expiry_itm_scan_range = 800
     s.min_option_premium_inr = 18.0
-    s.explosion_max_premium_inr = 650.0
-    s.max_option_premium_inr = 300.0
-    s.explosion_ict_max_premium_inr = 800.0
-    s.expiry_itm_explosion_scan_max_premium_inr = 900.0
+    s.explosion_max_premium_inr = 450.0
+    s.max_option_premium_inr = 450.0
+    s.explosion_ict_max_premium_inr = 450.0
+    s.expiry_itm_explosion_scan_max_premium_inr = 450.0
     s.expiry_day_min_option_premium_inr = 15.0
     s.all_day_explosion_session_move_min_pct = 40.0
     s.open_premium_min_move_pct = 25.0
@@ -79,9 +79,12 @@ def test_expiry_day_scan_covers_78200_put_when_atm_77600():
 
 def test_deep_itm_premium_allowed_on_expiry_scan():
     s = _settings()
-    # ₹720 resting LTP — above ₹650 explosion max, allowed on expiry ITM scan only.
+    # Above ₹450 hard cap — never scannable (blocks 73800-style deep ITM margin traps).
     assert _premium_ok_for_scan(
         720.0, 5.0, s, expiry_day=True, moneyness="ITM",
+    ) is False
+    assert _premium_ok_for_scan(
+        420.0, 5.0, s, expiry_day=True, moneyness="ITM",
     ) is True
     assert _premium_ok_for_scan(
         720.0, 5.0, s, expiry_day=False, moneyness="ITM",
@@ -107,9 +110,9 @@ def test_scan_chain_detects_deep_itm_puts_on_expiry_day(mock_get_settings, _open
     scan_chain_explosions("SENSEX", chain, spot=77600.0, atm=77600.0, expiry_day=True)
 
     # Afternoon vertical on deep ITM puts
-    chain[2]["put_options"]["ltp"] = 590.0
-    chain[3]["put_options"]["ltp"] = 710.0
-    chain[4]["put_options"]["ltp"] = 840.0
+    chain[2]["put_options"]["ltp"] = 440.0
+    chain[3]["put_options"]["ltp"] = 430.0
+    chain[4]["put_options"]["ltp"] = 520.0
 
     events = scan_chain_explosions(
         "SENSEX", chain, spot=77600.0, atm=77600.0, expiry_day=True,
@@ -117,7 +120,7 @@ def test_scan_chain_detects_deep_itm_puts_on_expiry_day(mock_get_settings, _open
     put_strikes = {e.strike for e in events if e.side == Side.PUT}
     assert 78200.0 in put_strikes, "78200 PE must be scanned on expiry day"
     assert 78300.0 in put_strikes, "78300 PE must be scanned on expiry day"
-    assert 78400.0 in put_strikes, "78400 PE must be scanned on expiry day"
+    assert 78400.0 not in put_strikes, "78400 PE above ₹450 cap must not scan"
 
 
 @patch("app.engines.session_timing.in_open_premium_window", return_value=False)

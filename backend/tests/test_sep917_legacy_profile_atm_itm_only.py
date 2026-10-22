@@ -1,4 +1,4 @@
-"""Sep 9–17 legacy profile — ATM/ITM only, ₹18–350, no cheap OTM stack."""
+"""Sep 9–17 legacy profile — ATM/ITM only, ₹18–450, no cheap OTM stack."""
 
 from datetime import datetime
 from unittest.mock import MagicMock
@@ -28,8 +28,8 @@ def test_legacy_profile_active_by_default():
 def test_legacy_premium_band_and_otm_flags():
     s = Settings()
     assert s.min_option_premium_inr == 18.0
-    assert s.max_option_premium_inr == 350.0
-    assert s.explosion_max_premium_inr == 350.0
+    assert s.max_option_premium_inr == 450.0
+    assert s.explosion_max_premium_inr == 450.0
     assert s.explosion_shallow_otm_entry_enabled is False
     assert s.explosion_shallow_otm_history_steps == 0
     assert s.best_trade_cheap_base_rank_priority_enabled is False
@@ -42,7 +42,7 @@ def test_legacy_premium_band_and_otm_flags():
 def test_legacy_summary_hud_shape():
     summary = sep917_legacy_profile_summary(Settings())
     assert summary["enabled"] is True
-    assert summary["premiumBandInr"] == {"min": 18.0, "max": 350.0}
+    assert summary["premiumBandInr"] == {"min": 18.0, "max": 450.0}
     assert summary["cheapBaseRankPriority"] is False
     assert summary["ftvEliteTopOnly"] is False
     assert summary["skipPrelossWorstDayPause"] is True

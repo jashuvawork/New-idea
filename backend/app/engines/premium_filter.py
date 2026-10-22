@@ -2,7 +2,40 @@
 
 from typing import Any
 
-from app.config import get_settings
+from app.config import Settings, get_settings
+
+
+def _positive_premium_cap(settings: Any, key: str) -> float | None:
+    raw = getattr(settings, key, None)
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        value = float(raw)
+    elif isinstance(raw, str):
+        try:
+            value = float(raw.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    return value if value > 0 else None
+
+
+def explosion_tradeable_max_premium_inr(settings: Settings | None = None) -> float:
+    """Hard ceiling for explosion entry/scan — min of configured caps (default ₹450)."""
+    s = settings or get_settings()
+    caps: list[float] = []
+    for key in (
+        "max_option_premium_inr",
+        "explosion_max_premium_inr",
+        "explosion_ict_max_premium_inr",
+    ):
+        cap = _positive_premium_cap(s, key)
+        if cap is not None:
+            caps.append(cap)
+    if not caps:
+        return 450.0
+    return min(caps)
 
 
 def premium_in_band(
@@ -18,7 +51,8 @@ def premium_in_band(
     settings = get_settings()
     max_prem = settings.max_option_premium_inr
     if mode == "explosion" and settings.explosion_max_premium_inr > 0:
-        max_prem = max(max_prem, settings.explosion_max_premium_inr)
+        max_prem = min(max_prem, settings.explosion_max_premium_inr)
+    max_prem = min(max_prem, explosion_tradeable_max_premium_inr(settings))
     min_prem = settings.min_option_premium_inr
     # Same-day expiry: soften floor so ~₹15–20 near-base rips clear (Aug4 24550 PE).
     if snap is not None and mode == "explosion":
@@ -59,25 +93,26 @@ def premium_in_band(
             pass
         if peak_move_pct >= cheap_peak and premium >= cheap_min:
             min_prem = min(min_prem, cheap_min)
-        # Mid-rip ATM/ITM (180→450+) stays tradeable for max-TP capture.
-        ict_ceil = float(getattr(settings, "explosion_ict_max_premium_inr", 0) or 0)
-        if ict_ceil > max_prem and peak_move_pct >= 28.0:
-            max_prem = max(max_prem, ict_ceil)
+        # ICT mid-rip uses the same hard ceiling — never above tradeable max.
+        ict_ceil = _positive_premium_cap(settings, "explosion_ict_max_premium_inr")
+        if ict_ceil is not None and peak_move_pct >= 28.0:
+            max_prem = min(max_prem, ict_ceil, explosion_tradeable_max_premium_inr(settings))
     return min_prem <= premium <= max_prem
 
 
 def premium_band_label() -> str:
     settings = get_settings()
-    return f"₹{settings.min_option_premium_inr:.0f}–₹{settings.max_option_premium_inr:.0f}"
+    hi = explosion_tradeable_max_premium_inr(settings)
+    return f"₹{settings.min_option_premium_inr:.0f}–₹{hi:.0f}"
 
 
 def premium_reject_reason(premium: float | None, *, mode: str = "default") -> str:
     if premium is None or premium <= 0:
         return "missing_premium"
     settings = get_settings()
-    max_prem = settings.max_option_premium_inr
-    if mode == "explosion" and settings.explosion_max_premium_inr > 0:
-        max_prem = max(max_prem, settings.explosion_max_premium_inr)
+    max_prem = explosion_tradeable_max_premium_inr(settings)
+    if mode != "explosion":
+        max_prem = min(max_prem, float(settings.max_option_premium_inr or max_prem))
     if premium < settings.min_option_premium_inr:
         return f"premium_below_{settings.min_option_premium_inr:.0f}"
     if premium > max_prem:

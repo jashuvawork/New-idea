@@ -46,8 +46,11 @@ async def live_order_fill(client: UpstoxClient, order_id: str) -> dict[str, Any]
             "status": status,
             "averagePrice": average if average > 0 else 0.0,
             "filledQuantity": filled,
+            "statusMessage": str(
+                order.get("status_message") or order.get("statusMessage") or ""
+            ),
         }
-    return {"status": "", "averagePrice": 0.0, "filledQuantity": 0.0}
+    return {"status": "", "averagePrice": 0.0, "filledQuantity": 0.0, "statusMessage": ""}
 
 
 def live_order_fill_complete(fill: dict[str, Any]) -> bool:
@@ -58,6 +61,15 @@ def live_order_fill_complete(fill: dict[str, Any]) -> bool:
 
 def live_order_fill_rejected(fill: dict[str, Any]) -> bool:
     return str(fill.get("status") or "").lower() in _REJECTED_ORDER_STATUSES
+
+
+def live_order_fill_margin_blocked(fill: dict[str, Any]) -> bool:
+    msg = str(fill.get("statusMessage") or fill.get("status_message") or "").lower()
+    if not msg:
+        return False
+    if "insufficient" in msg and ("margin" in msg or "fund" in msg):
+        return True
+    return "additional margin" in msg or "collateral" in msg and "insufficient" in msg
 
 
 async def find_existing_exit_order(

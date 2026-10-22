@@ -115,6 +115,7 @@ from app.services.order_executor import (
     find_existing_exit_order,
     live_order_fill,
     live_order_fill_complete,
+    live_order_fill_margin_blocked,
     live_order_fill_rejected,
     place_entry_order,
     place_exit_order,
@@ -154,6 +155,32 @@ def _try_claim_exit(trade_id: str) -> object | None:
     if task is not None:
         task.add_done_callback(lambda _task: _release_exit_claim(trade_id, token))
     return token
+
+
+def _live_exit_order_submission_blocked(broker_ctx: dict, settings: Any) -> bool:
+    if broker_ctx.get("brokerExitMarginBlocked"):
+        return True
+    raw = broker_ctx.get("brokerExitRejectedAt")
+    if not raw:
+        return False
+    try:
+        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=IST)
+        retry_s = float(getattr(settings, "live_exit_order_retry_seconds", 90) or 90)
+        return (datetime.now(IST) - ts.astimezone(IST)).total_seconds() + 1e-6 < retry_s
+    except ValueError:
+        return False
+
+
+def _note_live_exit_rejection(broker_ctx: dict, fill: dict[str, Any]) -> None:
+    broker_ctx["brokerExitRejectedAt"] = datetime.now(IST).isoformat()
+    msg = str(fill.get("statusMessage") or fill.get("status_message") or "")
+    if msg:
+        broker_ctx["brokerExitLastRejectMessage"] = msg[:500]
+    if live_order_fill_margin_blocked(fill):
+        broker_ctx["brokerExitMarginBlocked"] = True
+        broker_ctx["brokerExitMarginBlockedAt"] = datetime.now(IST).isoformat()
 
 
 def _release_entry_claim(candidate_key: str, token: object) -> None:
@@ -1037,6 +1064,23 @@ async def _open_from_candidate(
             return False, far_reason
 
     signal_premium = candidate.premium
+    from app.engines.premium_filter import premium_in_band, premium_reject_reason
+
+    prem_mode = "explosion" if candidate.mode == "explosion" else "default"
+    peak_for_prem = 0.0
+    if candidate.mode == "explosion" and candidate.explosion_event:
+        peak_for_prem = float(
+            getattr(candidate.explosion_event, "daily_move_pct", 0)
+            or getattr(candidate.explosion_event, "move_pct", 0)
+            or 0
+        )
+    if not premium_in_band(
+        signal_premium,
+        mode=prem_mode,
+        peak_move_pct=peak_for_prem,
+        snap=snap,
+    ):
+        return False, f"exec_{premium_reject_reason(signal_premium, mode=prem_mode)}"
     is_live = settings.enable_live_trading and settings.auto_trading_enabled
     use_parity = _uses_paper_live_parity(settings)
     tier = candidate.tier if candidate.mode == "explosion" else None
@@ -3442,10 +3486,13 @@ async def _process_open_trades(
         if is_live_book and client is not None and broker_ctx.get("brokerExitOrderId"):
             pending_fill = await live_order_fill(client, str(broker_ctx["brokerExitOrderId"]))
             if live_order_fill_rejected(pending_fill):
+                _note_live_exit_rejection(broker_ctx, pending_fill)
                 broker_ctx.pop("brokerExitOrderId", None)
                 broker_ctx.pop("brokerExitReason", None)
                 trade.entryContext = broker_ctx
                 trade.exitReason = None
+                trade_store.record_trade_mark(trade)
+                continue
             elif live_order_fill_complete(pending_fill):
                 eval_premium = round(float(pending_fill["averagePrice"]), 2)
                 _pts, pnl = mark_to_market(
@@ -3574,6 +3621,9 @@ async def _process_open_trades(
         needs_broker_exit = (is_live or use_parity) and broker_ctx.get("instrumentKey")
 
         if needs_broker_exit and not broker_ctx.get("brokerExitOrderId"):
+            if is_live and _live_exit_order_submission_blocked(broker_ctx, settings):
+                _release_exit_claim(trade.id, exit_claim)
+                continue
             try:
                 trade.exitReason = exit_reason
                 if is_live:
@@ -3588,6 +3638,13 @@ async def _process_open_trades(
                     )
                     broker_ctx["brokerExitReason"] = exit_reason
                     broker_ctx["brokerExitMarkPremium"] = round(float(eval_premium), 2)
+                    if live_order_fill_rejected(sell_fill):
+                        _note_live_exit_rejection(broker_ctx, sell_fill)
+                        trade.entryContext = broker_ctx
+                        trade.exitReason = None
+                        trade_store.record_trade_mark(trade)
+                        _release_exit_claim(trade.id, exit_claim)
+                        continue
                     if live_order_fill_complete(sell_fill):
                         eval_premium = round(float(sell_fill["averagePrice"]), 2)
                         _pts, pnl = mark_to_market(
@@ -3628,10 +3685,25 @@ async def _process_open_trades(
                     state.liveOrdersPlaced += 1
             except UpstoxError as e:
                 _release_exit_claim(trade.id, exit_claim)
-                logger.error(
-                    "Exit failed for %s (%s): %s — will retry",
-                    trade.id, _execution_mode(settings), e,
-                )
+                err = str(e).lower()
+                if "insufficient" in err and ("margin" in err or "fund" in err):
+                    _note_live_exit_rejection(
+                        broker_ctx,
+                        {"statusMessage": str(e), "status": "rejected"},
+                    )
+                    trade.entryContext = broker_ctx
+                    trade.exitReason = None
+                    trade_store.record_trade_mark(trade)
+                    logger.error(
+                        "Exit margin-blocked for %s — no further exit spam today: %s",
+                        trade.id,
+                        e,
+                    )
+                else:
+                    logger.error(
+                        "Exit failed for %s (%s): %s — will retry",
+                        trade.id, _execution_mode(settings), e,
+                    )
                 skipped.append({
                     "symbol": trade.symbol,
                     "reason": "exit_pending",

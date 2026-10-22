@@ -1937,16 +1937,20 @@ def _premium_ok_for_scan(
         relax_peak = float(
             getattr(settings, "expiry_open_cheap_rip_min_peak_pct", 15.0) or 15.0
         )
-        max_prem = max(
-            float(settings.explosion_max_premium_inr or settings.max_option_premium_inr),
-            float(getattr(settings, "explosion_ict_max_premium_inr", 0) or 0),
-        )
+        from app.engines.premium_filter import explosion_tradeable_max_premium_inr
+
+        max_prem = explosion_tradeable_max_premium_inr(settings)
         if premium >= floor and lift >= relax_peak and premium <= max_prem:
             return True
-    # Expiry deep ITM — intrinsic premium exceeds ₹650 before the vertical prints.
+    # Expiry deep ITM — still capped by tradeable max (₹450 default), not unbounded intrinsic.
     if expiry_day and str(moneyness or "").upper() == "ITM":
-        itm_ceil = float(
-            getattr(settings, "expiry_itm_explosion_scan_max_premium_inr", 900.0) or 900.0
+        from app.engines.premium_filter import explosion_tradeable_max_premium_inr
+
+        itm_ceil = min(
+            float(
+                getattr(settings, "expiry_itm_explosion_scan_max_premium_inr", 450.0) or 450.0
+            ),
+            explosion_tradeable_max_premium_inr(settings),
         )
         floor = float(getattr(settings, "expiry_day_min_option_premium_inr", 15.0) or 15.0)
         if open_window and near_atm:
@@ -1963,7 +1967,9 @@ def _premium_ok_for_scan(
         return False
     max_prem = settings.explosion_max_premium_inr or settings.max_option_premium_inr
     if open_move >= settings.all_day_explosion_session_move_min_pct:
-        return premium <= max(max_prem, 500.0)
+        from app.engines.premium_filter import explosion_tradeable_max_premium_inr
+
+        return premium <= explosion_tradeable_max_premium_inr(settings)
     if open_move >= settings.open_premium_min_move_pct:
         return premium <= max_prem
     return False

@@ -219,6 +219,12 @@ def _process_patches(state, candidate, events, opener):
             return_value=False,
         )
     )
+    stack.enter_context(
+        patch(
+            "app.engines.open_side_confirmation.open_side_confirmation",
+            return_value=(False, "ok", {}),
+        )
+    )
     return stack
 
 
