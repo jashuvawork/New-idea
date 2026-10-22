@@ -2,7 +2,7 @@
 # Flip live or paper execution without a separate live profile.
 #
 # Capital, loss stops, and entry gates are copied from
-# deploy/env.production.template (the paper / Oct 1 book, ₹2,75,000).
+# deploy/env.production.template (the live book, ₹2,00,000).
 # This does not apply a ₹10k overlay.
 #
 # Run on the EC2 instance:

@@ -9,7 +9,7 @@ on:
       capital_inr:
         description: Today's capital in rupees (whole number, at least 10000)
         required: true
-        default: "275000"
+        default: "200000"
 
 env:
   AWS_REGION: ap-south-1
