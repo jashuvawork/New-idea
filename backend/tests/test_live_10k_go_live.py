@@ -32,6 +32,7 @@ def test_live_10k_profile_is_removed():
     assert "ARM-LIVE-10K" not in blob
     settings = Settings()
     assert settings.live_best_trades_only_enabled is True
+    assert settings.live_best_trades_min_grade == "A"
     assert settings.live_disable_session_lift is False
     assert settings.chop_live_disable_session_lift is False
     assert settings.live_early_fail_exit_enabled is False
@@ -52,6 +53,7 @@ def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
                 "EMERGENCY_STOP_INR=1000",
                 "TOP_MOMENTS_MIN_GRADE=S",
                 "LIVE_BEST_TRADES_ONLY_ENABLED=true",
+                "LIVE_BEST_TRADES_MIN_GRADE=S",
                 "LIVE_EARLY_FAIL_EXIT_ENABLED=true",
                 "LIVE_DISABLE_SESSION_LIFT=true",
                 "CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED=true",
@@ -90,6 +92,7 @@ def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
     assert values["EMERGENCY_STOP_INR"] == "20000"
     assert values["TOP_MOMENTS_MIN_GRADE"] == "A"
     assert values["LIVE_BEST_TRADES_ONLY_ENABLED"] == "true"
+    assert values["LIVE_BEST_TRADES_MIN_GRADE"] == "A"
     assert values["LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
     assert values["LIVE_DISABLE_SESSION_LIFT"] == "false"
     assert values["CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"

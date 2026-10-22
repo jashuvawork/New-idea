@@ -28,7 +28,7 @@ def _settings(**overrides):
     s = MagicMock()
     s.enable_live_trading = True
     s.live_best_trades_only_enabled = True
-    s.live_best_trades_min_grade = "S"
+    s.live_best_trades_min_grade = "A"
     s.live_best_trades_min_explosion_score = 200.0
     s.live_best_trades_tiers_csv = "ELITE,EXPLODING"
     s.live_best_trades_require_first_lift = True
@@ -93,8 +93,37 @@ def test_gate_off_lets_the_paper_book_through(mock_settings):
 
 
 @patch("app.engines.live_best_trades.get_settings")
-def test_sub_s_grade_is_blocked(mock_settings):
+def test_grade_a_passes(mock_settings):
     mock_settings.return_value = _settings()
+    blocked, reason, meta = live_best_trade_entry_blocked(
+        _candidate(score=80.0),
+        _snap(),
+        AutoTraderState(),
+        ranking={"grade": "A", "evidence": {"tier": "EXPLODING"}},
+    )
+    assert blocked is False
+    assert reason == "ok"
+    assert meta["grade"] == "A"
+    assert meta["minGrade"] == "A"
+
+
+@patch("app.engines.live_best_trades.get_settings")
+def test_below_a_is_blocked(mock_settings):
+    mock_settings.return_value = _settings()
+    blocked, reason, meta = live_best_trade_entry_blocked(
+        _candidate(score=80.0),
+        _snap(),
+        AutoTraderState(),
+        ranking={"grade": "B", "evidence": {"tier": "EXPLODING"}},
+    )
+    assert blocked is True
+    assert reason == "live_best_trades_requires_grade_a_or_s"
+    assert meta["grade"] == "B"
+
+
+@patch("app.engines.live_best_trades.get_settings")
+def test_explicit_grade_s_bar_still_blocks_a(mock_settings):
+    mock_settings.return_value = _settings(live_best_trades_min_grade="S")
     blocked, reason, meta = live_best_trade_entry_blocked(
         _candidate(score=80.0),
         _snap(),
@@ -103,7 +132,7 @@ def test_sub_s_grade_is_blocked(mock_settings):
     )
     assert blocked is True
     assert reason == "live_best_trades_requires_grade_s"
-    assert meta["grade"] == "A"
+    assert meta["minGrade"] == "S"
 
 
 @patch("app.engines.live_best_trades.get_settings")

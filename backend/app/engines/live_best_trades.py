@@ -48,7 +48,7 @@ def live_best_trade_entry_blocked(
     ranking: Mapping[str, Any] | None = None,
     chart_meta: dict[str, Any] | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
-    """Live explosion orders require grade S.
+    """Live explosion orders require grade A or S.
 
     Score, chart alignment, pad maturity, position count, and the one-loss
     pause stay on the shared gates. This bar is only the grade.
@@ -69,7 +69,7 @@ def live_best_trade_entry_blocked(
 
         resolved = rank_entry_candidate(candidate, snapshot=snap) or {}
     grade = str(resolved.get("grade") or "").upper()
-    min_grade = str(getattr(settings, "live_best_trades_min_grade", "S") or "S").upper()
+    min_grade = str(getattr(settings, "live_best_trades_min_grade", "A") or "A").upper()
     meta["grade"] = grade
     meta["minGrade"] = min_grade
     if min_grade == "S" and grade != "S":
