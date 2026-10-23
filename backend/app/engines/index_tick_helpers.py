@@ -145,10 +145,11 @@ def resolve_index_session(symbol: str, snap: Any = None) -> dict[str, float]:
 
 
 def _snap_session_extremes(snap: Any) -> tuple[float, float]:
-    """Broker candle-derived session high/low from the snapshot (available at open/restart).
+    """Today's high/low from the snapshot when the tick tape is still cold.
 
-    Read from chartAnalysis.institutional (SMC sessionHigh/sessionLow), falling back to the
-    MarketProfile opening-range extremes. Returns (0.0, 0.0) when unavailable.
+    Broker dayHigh/dayLow are today's cash session. SMC sessionHigh/sessionLow are
+    the max of the whole chart window (yesterday included) and are only a fallback
+    when the quote did not stamp a day range.
     """
     if snap is None:
         return 0.0, 0.0
@@ -156,6 +157,10 @@ def _snap_session_extremes(snap: Any) -> tuple[float, float]:
         ca = getattr(snap, "chartAnalysis", None)
         inst = getattr(ca, "institutional", None) if ca is not None else None
         if isinstance(inst, dict):
+            day_hi = float(inst.get("dayHigh") or 0)
+            day_lo = float(inst.get("dayLow") or 0)
+            if day_hi > 0 and day_lo > 0:
+                return day_hi, day_lo
             hi = float(inst.get("sessionHigh") or 0)
             lo = float(inst.get("sessionLow") or 0)
             if hi > 0 or lo > 0:
@@ -639,16 +644,16 @@ def index_trend_breakout(
     side_u = _side_str(side)
     if side_u not in ("CALL", "PUT"):
         return out
-    ext = _session_extremes.get(sym) or {}
-    hi = float(ext.get("hi") or 0)
-    lo = float(ext.get("lo") or 0)
-    spot = float(getattr(snap, "spot", 0) or 0) or float(ext.get("last") or 0)
-    # Seed / widen from the broker candle-derived session high/low so the override is
-    # accurate IMMEDIATELY at open and after any restart (the tick tracker starts cold and
-    # would otherwise need to rebuild the full-session extremes from the first tick).
+    resolved = resolve_index_session(sym, snap)
+    hi = float(resolved.get("hi") or 0)
+    lo = float(resolved.get("lo") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0) or float(resolved.get("last") or 0)
+    # Widen from the snapshot only with today's range. _snap_session_extremes
+    # returns broker day high/low when the quote stamped them, and the SMC
+    # window only when it did not.
     snap_hi, snap_lo = _snap_session_extremes(snap)
     if snap_hi > 0:
-        hi = max(hi, snap_hi)
+        hi = max(hi, snap_hi) if hi > 0 else snap_hi
     if snap_lo > 0:
         lo = min(lo, snap_lo) if lo > 0 else snap_lo
     if spot <= 0 or hi <= 0 or lo <= 0:

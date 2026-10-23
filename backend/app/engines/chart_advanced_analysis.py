@@ -540,9 +540,28 @@ def build_chart_analysis(
     sl = swing_lows[-1][1] if swing_lows else min(lows)
     trend = "UP" if closes[-1] >= closes[min(5, len(closes) - 1)] else "DOWN"
 
-    dh = day_high or (max(highs) if highs else spot)
-    dl = day_low or (min(lows) if lows else spot)
-    pc = prev_close or (closes[0] if closes else spot)
+    from app.engines.index_candle_rollover import (
+        cash_session_candles,
+        prior_close_before_cash_session,
+    )
+
+    session_rows = cash_session_candles(primary_candles)
+    _session_opens, session_highs, session_lows, session_closes = _candle_rows(session_rows)
+    if session_highs and spot > 0:
+        session_highs = list(session_highs)
+        session_lows = list(session_lows)
+        session_closes = list(session_closes)
+        session_highs[-1] = max(session_highs[-1], spot)
+        session_lows[-1] = min(session_lows[-1], spot)
+        session_closes[-1] = spot
+
+    dh = day_high or (max(session_highs) if session_highs else (max(highs) if highs else spot))
+    dl = day_low or (min(session_lows) if session_lows else (min(lows) if lows else spot))
+    pc = float(prev_close or 0)
+    if pc <= 0:
+        pc = prior_close_before_cash_session(primary_candles)
+    if pc <= 0 and not session_rows:
+        pc = closes[0] if closes else spot
 
     fib = compute_fibonacci_levels(sl, sh, spot, trend=trend)
     pivots = compute_pivot_points(dh, dl, pc)
@@ -550,6 +569,22 @@ def build_chart_analysis(
     pitchfork = compute_andrews_pitchfork(swing_lows, swing_highs, spot)
     ichimoku = compute_ichimoku(highs, lows, closes, spot)
     smc = analyze_smc_ict(opens, highs, lows, closes, spot)
+    if session_highs and session_lows:
+        # SMC sessionHigh is max(entire chart). That chart includes yesterday, so
+        # premium/discount and "session low" were measured from the wrong day.
+        session_high = max(session_highs)
+        session_low = min(session_lows)
+        eq = (session_high + session_low) / 2.0
+        smc = dict(smc)
+        smc["sessionHigh"] = round(session_high, 2)
+        smc["sessionLow"] = round(session_low, 2)
+        smc["equilibrium"] = round(eq, 2)
+        if spot > eq * 1.001:
+            smc["premiumDiscount"] = "PREMIUM"
+        elif spot < eq * 0.999:
+            smc["premiumDiscount"] = "DISCOUNT"
+        else:
+            smc["premiumDiscount"] = "EQUILIBRIUM"
 
     patterns: list[dict[str, Any]] = []
     pattern_sources: list[tuple[str, list]] = []
@@ -589,11 +624,18 @@ def build_chart_analysis(
         compute_vwap,
     )
 
-    volumes = [
-        float(c[5]) if isinstance(c, list) and len(c) > 5
-        else float(c.get("volume", 0) or 0) if isinstance(c, dict) else 0.0
-        for c in primary_candles
-    ]
+    def _bar_volume(row: Any) -> float:
+        if isinstance(row, list) and len(row) > 5:
+            return float(row[5] or 0)
+        if isinstance(row, dict):
+            return float(row.get("volume", 0) or 0)
+        return 0.0
+
+    vwap_bars = session_rows or primary_candles
+    vwap_highs = session_highs or highs
+    vwap_lows = session_lows or lows
+    vwap_closes = session_closes or closes
+    volumes = [_bar_volume(row) for row in vwap_bars]
     squeeze = asdict(compute_squeeze(highs, lows, closes))
     adx = asdict(compute_adx(highs, lows, closes))
     supertrend = asdict(compute_supertrend(highs, lows, closes))
@@ -606,9 +648,9 @@ def build_chart_analysis(
         rsi_ceiling=float(getattr(_s, "decisive_candle_rsi_ceiling", 80.0) or 80.0),
         pullback_lookback=int(getattr(_s, "decisive_candle_pullback_lookback", 5) or 5),
     ))
-    # Always compute VWAP — indices carry no candle volume, so it falls back to a
-    # price-anchored session mean (still gives position + reclaim for turn confirmation).
-    vwap = asdict(compute_vwap(highs, lows, closes, volumes))
+    # Session VWAP is today's cash bars. The chart window also holds yesterday,
+    # and that mean is not the session the reclaim check is named for.
+    vwap = asdict(compute_vwap(vwap_highs, vwap_lows, vwap_closes, volumes))
 
     return ChartAnalysis(
         consensus=consensus,

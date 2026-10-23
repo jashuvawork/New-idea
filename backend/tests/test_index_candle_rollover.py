@@ -178,6 +178,18 @@ def test_before_0915_does_not_block():
     assert blocked is False
 
 
+def test_untimestamped_candles_are_not_treated_as_today():
+    stale = [
+        [22600, 22620, 22590, 22610, 0],
+        [22610, 22612, 22580, 22590, 0],
+        [22590, 22592, 22570, 22575, 0],
+    ]
+    blocked, _, _ = index_candle_rollover_blocked(
+        Side.CALL, stale, spot=22570.0, now=NOW, settings=_settings(),
+    )
+    assert blocked is False
+
+
 def test_yesterday_candles_are_ignored():
     stale = [
         ["2026-10-22T15:20:00+05:30", 22600, 22620, 22590, 22610, 0],
