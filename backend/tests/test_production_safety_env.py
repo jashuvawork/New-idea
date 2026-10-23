@@ -37,7 +37,7 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["WIN_REENTRY_REQUIRES_VELOCITY_ENABLED"] == "false"
     assert env["OPEN_SIDE_CONFIRMATION_ENABLED"] == "true"
     assert env["OPEN_SIDE_CONFIRMATION_MIN_MINUTES"] == "1"
-    assert env["INDEX_CANDLE_ROLLOVER_BLOCK_ENABLED"] == "true"
+    assert env["INDEX_CANDLE_ROLLOVER_BLOCK_ENABLED"] == "false"
     assert env["INDEX_CANDLE_ROLLOVER_STEPS"] == "3"
     assert env["INDEX_CANDLE_ROLLOVER_MIN_GIVEBACK_PCT"] == "0.04"
     assert env["LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
