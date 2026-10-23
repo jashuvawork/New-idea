@@ -96,9 +96,10 @@ def test_after_open_window_not_applied_ce_pe(side):
     assert blocked is False
 
 
-def test_off_by_default_like_oct1_with_0920_first_entry():
+def test_on_from_0915_to_0945_and_first_order_stays_0920():
     s = Settings()
-    assert s.open_side_confirmation_enabled is False
+    assert s.open_side_confirmation_enabled is True
+    assert s.open_caution_until_hour == 9 and s.open_caution_until_minute == 45
     assert s.entry_earliest_hour == 9 and s.entry_earliest_minute == 20
     assert s.explosion_entry_earliest_hour == 9 and s.explosion_entry_earliest_minute == 20
 
@@ -106,19 +107,19 @@ def test_off_by_default_like_oct1_with_0920_first_entry():
 @pytest.mark.parametrize(
     "side,open_,hi,lo,last",
     [
-        # Oct 1 09:31 NIFTY 22900 PE: index +0.09% above open — the gate would refuse it.
+        # Oct 1 09:31 NIFTY 22900 PE: index +0.09% above open — refused inside the window.
         (Side.PUT, 22545.0, 22580.0, 22530.0, 22565.0),
-        # Oct 14 09:20 NIFTY 22650 CE: index -0.15% below open — the gate would refuse it.
+        # Oct 14 09:20 NIFTY 22650 CE: index -0.15% below open — refused inside the window.
         (Side.CALL, 22700.0, 22710.0, 22660.0, 22665.0),
     ],
 )
-def test_default_does_not_block_ce_pe_inside_open_window(side, open_, hi, lo, last):
+def test_default_blocks_the_wrong_side_only_inside_0915_0945(side, open_, hi, lo, last):
     snap = _tape("NIFTY", open_=open_, hi=hi, lo=lo, last=last)
-    blocked_default, _, _ = open_side_confirmation(
+    blocked_open, _, _ = open_side_confirmation(
         "NIFTY", side, snap, now=_at(9, 25), settings=Settings(),
     )
-    blocked_on, _, _ = open_side_confirmation(
-        "NIFTY", side, snap, now=_at(9, 25), settings=_settings(),
+    blocked_later, _, _ = open_side_confirmation(
+        "NIFTY", side, snap, now=_at(9, 45), settings=Settings(),
     )
-    assert blocked_default is False
-    assert blocked_on is True
+    assert blocked_open is True
+    assert blocked_later is False

@@ -5,7 +5,8 @@ built from the previous session's bars, while NIFTY V-reversed up off the open a
 22300 CE ran +194%. During the open window the side must be confirmed by *today's*
 index tape: price moved away from the session open in the trade's direction and sits
 in that side's half of the session range. CALL and PUT are exact mirrors.
-The first minute stays blocked, so the earliest order is 09:16.
+Active from 09:15 until 09:45, then idle. The first minute stays blocked.
+The first order stays 09:20.
 """
 
 from __future__ import annotations
