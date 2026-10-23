@@ -158,6 +158,16 @@ def _inside_open_window(now: datetime, settings: Any) -> bool:
     return _SESSION_OPEN_MINUTES <= minutes < until
 
 
+def open_caution_window_active(
+    now: datetime | None = None,
+    settings: Any = None,
+) -> bool:
+    """True during the open-caution entry window (09:15–09:44:59 IST)."""
+    settings = settings or get_settings()
+    current = (now or datetime.now(IST)).astimezone(IST)
+    return _inside_open_window(current, settings)
+
+
 def index_candle_rollover_blocked(
     side: Side | str,
     candles_1m: list[Any] | None = None,

@@ -405,6 +405,89 @@ def test_armed_base_execution_chart_bypass_requires_strong_orderflow(
         assert reason.startswith("exec_")
 
 
+def test_open_window_chart_fetch_failure_blocks_instead_of_snapshot_fallback():
+    chart = SpotChart(
+        direction="BULLISH",
+        momentum5Pct=0.12,
+        momentum15Pct=0.10,
+        trendStrength=40,
+        spot=24000,
+    )
+    snap = _snap(chart)
+
+    with (
+        patch(
+            "app.engines.execution_chart_monitor.get_settings",
+            return_value=_settings(),
+        ),
+        patch(
+            "app.engines.execution_chart_monitor.fetch_live_trade_charts",
+            AsyncMock(side_effect=RuntimeError("upstox down")),
+        ),
+        patch(
+            "app.engines.index_candle_rollover.open_caution_window_active",
+            return_value=True,
+        ),
+    ):
+        passed, reason, meta = asyncio.run(
+            monitor_trade_chart_before_execution(
+                AsyncMock(),
+                "NIFTY",
+                Side.CALL,
+                24000,
+                snap,
+                trade_score=80,
+                mode="explosion",
+            )
+        )
+
+    assert passed is False
+    assert reason == "exec_live_chart_required_open_window"
+    assert meta["source"] == "snapshot_fallback"
+    assert meta["openCautionWindow"] is True
+
+
+def test_after_open_window_chart_fetch_failure_may_use_snapshot_fallback():
+    chart = SpotChart(
+        direction="BULLISH",
+        momentum5Pct=0.12,
+        momentum15Pct=0.10,
+        trendStrength=40,
+        spot=24000,
+    )
+    snap = _snap(chart)
+
+    with (
+        patch(
+            "app.engines.execution_chart_monitor.get_settings",
+            return_value=_settings(),
+        ),
+        patch(
+            "app.engines.execution_chart_monitor.fetch_live_trade_charts",
+            AsyncMock(side_effect=RuntimeError("upstox down")),
+        ),
+        patch(
+            "app.engines.index_candle_rollover.open_caution_window_active",
+            return_value=False,
+        ),
+    ):
+        passed, reason, meta = asyncio.run(
+            monitor_trade_chart_before_execution(
+                AsyncMock(),
+                "NIFTY",
+                Side.CALL,
+                24000,
+                snap,
+                trade_score=80,
+                mode="explosion",
+            )
+        )
+
+    assert passed is True
+    assert reason == "ok"
+    assert meta["source"] == "snapshot_fallback"
+
+
 def test_fetch_live_trade_charts_includes_quote_context():
     with patch("app.engines.execution_chart_monitor.get_settings") as mock_settings:
         mock_settings.return_value = _settings()

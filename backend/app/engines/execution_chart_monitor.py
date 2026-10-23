@@ -294,6 +294,8 @@ async def monitor_trade_chart_before_execution(
     if not settings.execution_chart_gate_enabled:
         return True, "ok", {"enabled": False}
 
+    decision_now = datetime.now(IST)
+
     from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
     from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_event
     from app.engines.morning_premium_capture import premium_led_bypass_for_snap
@@ -462,14 +464,8 @@ async def monitor_trade_chart_before_execution(
         )
     except Exception as exc:
         logger.warning("Execution chart fetch failed for %s — using snapshot: %s", symbol, exc)
-        blocked, reason = chart_blocks_side(
-            side, snap.spotChart, trade_score=trade_score,
-            breadth_aligned_bypass=breadth_bypass,
-            premium_led_bypass=structure_chart_bypass,
-            expiry_explosion_bypass=expiry_chart_bypass,
-            strict_first_lift_bypass=strict_chart_bypass,
-            index_trough_bypass=index_trough_bypass,
-        )
+        from app.engines.index_candle_rollover import open_caution_window_active
+
         fallback = {
             "enabled": True,
             "source": "snapshot_fallback",
@@ -479,6 +475,19 @@ async def monitor_trade_chart_before_execution(
             "firstLiftBypass": first_lift_bypass,
             "padLaneChartBypass": pad_lane_chart_bypass,
         }
+        if open_caution_window_active(decision_now, settings):
+            fallback["openCautionWindow"] = True
+            fallback["passed"] = False
+            fallback["blockReason"] = "exec_live_chart_required_open_window"
+            return False, "exec_live_chart_required_open_window", fallback
+        blocked, reason = chart_blocks_side(
+            side, snap.spotChart, trade_score=trade_score,
+            breadth_aligned_bypass=breadth_bypass,
+            premium_led_bypass=structure_chart_bypass,
+            expiry_explosion_bypass=expiry_chart_bypass,
+            strict_first_lift_bypass=strict_chart_bypass,
+            index_trough_bypass=index_trough_bypass,
+        )
         if blocked:
             return False, f"exec_{reason}", fallback
         return True, "ok", fallback
@@ -493,6 +502,7 @@ async def monitor_trade_chart_before_execution(
         candles_1m,
         candles_5m,
         spot=float(meta.get("spot") or getattr(snap, "spot", 0) or 0),
+        now=decision_now,
         settings=settings,
     )
     if roll_blocked:
