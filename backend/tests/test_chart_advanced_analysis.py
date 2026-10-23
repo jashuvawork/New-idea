@@ -1,6 +1,6 @@
 """Advanced chart analysis — MTF, Fibonacci, patterns, SMC."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.engines.chart_advanced_analysis import (
@@ -70,9 +70,13 @@ def test_smt_divergence_bearish():
 
 
 def test_session_range_ignores_yesterday():
-    yesterday = ["2026-10-22T15:20:00+05:30", 100, 110, 90, 100, 0]
-    today_open = ["2026-10-23T09:15:00+05:30", 200, 206, 198, 204, 0]
-    today_next = ["2026-10-23T09:16:00+05:30", 204, 210, 202, 208, 0]
+    # cash_session_candles uses the live IST date. A hardcoded session date
+    # becomes yesterday after midnight and the filter drops today's bars.
+    today = datetime.now(IST).date()
+    prior = today - timedelta(days=1)
+    yesterday = [f"{prior.isoformat()}T15:20:00+05:30", 100, 110, 90, 100, 0]
+    today_open = [f"{today.isoformat()}T09:15:00+05:30", 200, 206, 198, 204, 0]
+    today_next = [f"{today.isoformat()}T09:16:00+05:30", 204, 210, 202, 208, 0]
     profile = MarketProfile(poc=208, openingRangeHigh=210, openingRangeLow=198)
     analysis = build_chart_analysis(
         [yesterday, today_open, today_next],

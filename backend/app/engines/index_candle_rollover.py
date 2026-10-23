@@ -172,7 +172,7 @@ def index_candle_rollover_blocked(
     Active only from 09:15 until 09:45. The same decline after 09:45 does not block.
     """
     settings = settings or get_settings()
-    if getattr(settings, "index_candle_rollover_block_enabled", True) is not True:
+    if getattr(settings, "index_candle_rollover_block_enabled", False) is not True:
         return False, "", {}
     side_v = _side_val(side)
     if side_v not in ("CALL", "PUT"):
