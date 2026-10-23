@@ -34,19 +34,65 @@ def _side_val(side: Side | str) -> str:
 def _session_rows(candles: list[Any] | None, now: datetime) -> list[Any]:
     today = now.astimezone(IST).date()
     kept: list[Any] = []
-    saw_ts = False
     for row in candles or []:
         ts = _candle_ts(row)
         if ts is None:
             continue
-        saw_ts = True
         local = ts.astimezone(IST)
         minutes = local.hour * 60 + local.minute
         if local.date() == today and minutes >= _SESSION_OPEN_MINUTES:
             kept.append(row)
-    if not saw_ts:
-        return list(candles or [])
     return kept
+
+
+def cash_session_candles(
+    candles: list[Any] | None,
+    now: datetime | None = None,
+) -> list[Any]:
+    """Today's bars from 09:15 IST. A bar with no timestamp is not today's bar."""
+    current = now or datetime.now(IST)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=IST)
+    return _session_rows(candles, current.astimezone(IST))
+
+
+def _row_close(row: Any) -> float:
+    try:
+        if isinstance(row, (list, tuple)) and len(row) >= 5:
+            return float(row[4] or 0)
+        if isinstance(row, dict):
+            return float(row.get("close") or row.get("c") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0
+
+
+def prior_close_before_cash_session(
+    candles: list[Any] | None,
+    now: datetime | None = None,
+) -> float:
+    """Last close before today's 09:15. Zero when the series has no timestamps."""
+    current = now or datetime.now(IST)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=IST)
+    current = current.astimezone(IST)
+    today = current.date()
+    last = 0.0
+    for row in candles or []:
+        ts = _candle_ts(row)
+        if ts is None:
+            continue
+        local = ts.astimezone(IST)
+        minutes = local.hour * 60 + local.minute
+        before_cash = local.date() < today or (
+            local.date() == today and minutes < _SESSION_OPEN_MINUTES
+        )
+        if not before_cash:
+            continue
+        close = _row_close(row)
+        if close > 0:
+            last = close
+    return last
 
 
 def _ohlc(row: Any) -> tuple[float, float, float, float] | None:

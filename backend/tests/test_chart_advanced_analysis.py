@@ -69,6 +69,24 @@ def test_smt_divergence_bearish():
     assert smt["type"] == "bearish_smt"
 
 
+def test_session_range_ignores_yesterday():
+    yesterday = ["2026-10-22T15:20:00+05:30", 100, 110, 90, 100, 0]
+    today_open = ["2026-10-23T09:15:00+05:30", 200, 206, 198, 204, 0]
+    today_next = ["2026-10-23T09:16:00+05:30", 204, 210, 202, 208, 0]
+    profile = MarketProfile(poc=208, openingRangeHigh=210, openingRangeLow=198)
+    analysis = build_chart_analysis(
+        [yesterday, today_open, today_next],
+        [],
+        208.0,
+        profile,
+        symbol="NIFTY",
+    )
+    assert analysis.institutional["sessionHigh"] == 210.0
+    assert analysis.institutional["sessionLow"] == 198.0
+    assert analysis.pivots["P"] == round((210 + 198 + 100) / 3, 2)
+    assert analysis.vwap["vwap"] > 190
+
+
 def test_build_chart_analysis_mtf():
     closes = [100 + i * 0.2 for i in range(80)]
     candles_1m = _candles(closes)

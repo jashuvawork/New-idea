@@ -989,13 +989,44 @@ def premium_blocks_entry(
     )
 
 
+def _quote_float(raw: Any) -> float:
+    try:
+        return float(raw or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _index_prev_close(quote: dict[str, Any], spot: float, ohlc: dict[str, Any]) -> float:
+    """Yesterday's close. Upstox index quotes often omit it or set ohlc.close = ltp."""
+    for key in ("prev_close", "prevClose"):
+        prev = _quote_float(quote.get(key))
+        if prev > 0:
+            return prev
+    net = quote.get("net_change")
+    if net is None:
+        net = quote.get("change")
+    if net is not None and spot > 0:
+        implied = spot - _quote_float(net)
+        if implied > 0:
+            return implied
+    for candidate in (ohlc.get("close"), quote.get("close")):
+        prev = _quote_float(candidate)
+        if prev > 0 and (spot <= 0 or abs(prev - spot) > 1e-6):
+            return prev
+    return 0.0
+
+
 def pro_index_quote_context(quote: dict[str, Any], spot: float) -> dict[str, Any]:
     """Day structure from Upstox index quote."""
-    prev = float(quote.get("close") or quote.get("prev_close") or spot)
     ohlc = quote.get("ohlc") or {}
-    day_open = float(ohlc.get("open") or quote.get("open") or spot)
-    day_high = float(ohlc.get("high") or quote.get("high") or spot)
-    day_low = float(ohlc.get("low") or quote.get("low") or spot)
+    if not isinstance(ohlc, dict):
+        ohlc = {}
+    # Missing OHLC must stay missing. Substituting the live spot made a restart
+    # tick, or a quote with no open, look like the cash-session open.
+    day_open = _quote_float(ohlc.get("open") or quote.get("open"))
+    day_high = _quote_float(ohlc.get("high") or quote.get("high"))
+    day_low = _quote_float(ohlc.get("low") or quote.get("low"))
+    prev = _index_prev_close(quote, float(spot or 0), ohlc)
     gap_pct = ((spot - prev) / prev * 100) if prev else 0.0
     from_open_pct = ((spot - day_open) / day_open * 100) if day_open else 0.0
     range_pct = ((day_high - day_low) / day_low * 100) if day_low else 0.0

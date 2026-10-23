@@ -404,6 +404,49 @@ def test_index_trend_breakout_rejects_new_high_without_thrust():
     assert index_trend_breakout("SENSEX", Side.CALL, snap)["breakout"] is False
 
 
+def test_rally_points_use_broker_day_low_not_yesterday():
+    from app.engines.index_rally_side_flip import index_rally_metrics
+    from app.models.schemas import ChartAnalysis
+
+    reset_index_tick_helpers_for_tests()
+    snap = _snap_put()
+    snap.spot = 22750.0
+    snap.chartAnalysis = ChartAnalysis(
+        institutional={
+            "dayHigh": 22760.0,
+            "dayLow": 22740.0,
+            "sessionHigh": 22880.0,
+            "sessionLow": 22600.0,
+        }
+    )
+    metrics = index_rally_metrics("NIFTY", snap)
+    assert metrics["rallyPoints"] == 10.0
+    assert metrics["slidePoints"] == 10.0
+
+
+def test_broker_day_range_beats_yesterday_chart_session():
+    """Yesterday's chart high must not count as a fresh session high after a restart."""
+    from app.engines.index_tick_helpers import index_trend_breakout
+    from app.models.schemas import ChartAnalysis
+
+    reset_index_tick_helpers_for_tests()
+    _seed_ltp("SENSEX", [77540 + i * 2.0 for i in range(31)], step=1.5)
+    snap = _snap_put(direction="BULLISH", momentum5Pct=0.165)
+    snap.spot = 77590.0
+    snap.chartAnalysis = ChartAnalysis(
+        institutional={
+            "dayHigh": 77800.0,
+            "dayLow": 77440.0,
+            "sessionHigh": 77600.0,
+            "sessionLow": 77440.0,
+        }
+    )
+    bo = index_trend_breakout("SENSEX", Side.CALL, snap)
+    assert bo["breakout"] is False
+    assert bo.get("hi") == 77800.0
+    assert bo.get("lo") == 77440.0
+
+
 def test_trend_breakout_seeds_session_hilo_from_snapshot_when_ticks_cold():
     """After a restart the tick tracker is cold — broker session H/L still enables the override."""
     from app.engines.index_tick_helpers import index_trend_breakout
