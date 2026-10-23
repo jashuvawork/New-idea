@@ -2039,9 +2039,9 @@ class Settings(BaseSettings):
     explosion_post_peak_reentry_base_span_seconds: float = 6.0
     explosion_post_peak_reentry_min_reacceleration_pct: float = 8.0
     explosion_post_peak_reentry_min_velocity_3s: float = 1.5
-    # After a winning close on the same CE/PE strike, the next entry needs
-    # live 3s velocity back at or above explosion_post_peak_reentry_min_velocity_3s.
-    win_reentry_requires_velocity_enabled: bool = True
+    # Off, as on October 1 (#676). A winning close does not require fresh 3s
+    # velocity. The spent flat-to-vertical guard above still asks for 1.5.
+    win_reentry_requires_velocity_enabled: bool = False
     # Block re-entry on a strike that already ripped to session peak and is still
     # trading near the top on weak velocity (Aug25 24250 PE ₹121 peak → ₹110 chase).
     # Near-peak / 8% first-lift chase (#652) — off for Sep 9–17 production profile.
