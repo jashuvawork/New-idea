@@ -964,7 +964,7 @@ def win_reentry_velocity_blocked(
 ) -> tuple[bool, str]:
     """After a winning close, the same CE/PE strike needs live velocity before reentry."""
     settings = get_settings()
-    if not bool(getattr(settings, "win_reentry_requires_velocity_enabled", True)):
+    if not bool(getattr(settings, "win_reentry_requires_velocity_enabled", False)):
         return False, ""
     prior = _latest_same_strike_explosion_close(
         state, symbol=symbol, side=side, strike=strike,
