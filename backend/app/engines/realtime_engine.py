@@ -541,6 +541,7 @@ async def build_symbol_snapshot(
 
         chart_analysis = None
         day_from_open_pct = 0.0
+        qctx: dict = {}
         try:
             from app.engines.chart_advanced_analysis import build_chart_analysis
             from app.engines.spot_direction import _candle_rows, pro_index_quote_context
@@ -571,6 +572,12 @@ async def build_symbol_snapshot(
                 day_low=day_low,
                 symbol=symbol,
             )
+            if chart_analysis is not None and float(qctx.get("dayOpen") or 0) > 0:
+                inst = dict(chart_analysis.institutional or {})
+                inst["dayOpen"] = qctx["dayOpen"]
+                inst["dayHigh"] = qctx["dayHigh"]
+                inst["dayLow"] = qctx["dayLow"]
+                chart_analysis.institutional = inst
         except Exception as exc:
             logger.debug("Chart analysis skipped for %s: %s", symbol, exc)
 

@@ -54,6 +54,40 @@ def _snap_put(**chart_kw) -> SymbolSnapshot:
     )
 
 
+def test_cash_open_ignores_preopen_ticks_and_keeps_the_0915_print():
+    from datetime import datetime
+
+    from app.engines.index_tick_helpers import (
+        index_session_extremes,
+        record_index_session_extreme,
+    )
+
+    reset_index_tick_helpers_for_tests()
+    preopen = datetime(2026, 10, 23, 9, 8, tzinfo=IST)
+    record_index_session_extreme("NIFTY", 22680.0, now=preopen)
+    assert index_session_extremes("NIFTY") == {}
+
+    # A leftover pre-open tape must be replaced by the first cash-session tick.
+    from app.engines import index_tick_helpers as helpers
+
+    helpers._session_extremes["NIFTY"] = {
+        "date": preopen.date(),
+        "open": 22680.0,
+        "hi": 22690.0,
+        "lo": 22670.0,
+        "last": 22685.0,
+    }
+    cash = datetime(2026, 10, 23, 9, 15, tzinfo=IST)
+    record_index_session_extreme("NIFTY", 22743.2, now=cash)
+    later = datetime(2026, 10, 23, 9, 28, tzinfo=IST)
+    record_index_session_extreme("NIFTY", 22748.0, now=later)
+    ext = index_session_extremes("NIFTY")
+    assert ext["open"] == 22743.2
+    assert ext["fromCashOpen"] is True
+    assert ext["hi"] == 22748.0
+    assert ext["last"] == 22748.0
+
+
 def test_index_tick_helpers_confirm_put_on_falling_spot():
     reset_index_tick_helpers_for_tests()
     clear_ticks()
