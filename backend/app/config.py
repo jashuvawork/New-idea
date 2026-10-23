@@ -3044,15 +3044,16 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
-    # Off, as on October 1 (#676). When on: 09:16 → 09:45 the side must match today's
-    # index tape (Oct 13 22300 PE). The 09:20 entry clock covers the open minutes.
-    open_side_confirmation_enabled: bool = False
+    # 09:15 → 09:45 only. The side must match today's index tape (Oct 13 22300 PE).
+    # Idle from 09:45. The first order stays 09:20.
+    open_side_confirmation_enabled: bool = True
     open_side_confirmation_min_minutes: float = 1.0
     open_side_confirmation_min_index_move_pct: float = 0.10
     open_side_confirmation_min_range_position: float = 0.6
-    # Refuse a call while today's candles are each closing lower off the local
-    # high, and a put while they are each closing higher off the local low.
-    # The composite 5m direction can still read bullish during that rollover.
+    # 09:15 → 09:45 only. Refuse a call while today's candles are each closing
+    # lower off the local high, and a put while they are each closing higher
+    # off the local low. Idle from 09:45. The composite 5m direction can still
+    # read bullish during that rollover.
     index_candle_rollover_block_enabled: bool = True
     index_candle_rollover_steps: int = 3
     index_candle_rollover_min_giveback_pct: float = 0.04

@@ -1,5 +1,8 @@
 """Block a side when today's index candles are stepping off the local extreme.
 
+Only from 09:15 to 09:45. After 09:45 this check is idle and the composite
+chart gate stands on its own.
+
 The 5-minute composite can stay bullish while price is already leaving the high.
 Oct 23 Nifty 22800 CE filled at 09:28 with a bullish 3-bar chart (+0.15%) and the
 open-side tape still above the open, while the index was stepping down off
@@ -99,6 +102,16 @@ def _series_rollover(
     return None
 
 
+def _inside_open_window(now: datetime, settings: Any) -> bool:
+    """09:15 inclusive through the open-caution end (09:45). Idle at 09:45:00."""
+    minutes = now.hour * 60 + now.minute + now.second / 60.0
+    until = (
+        int(getattr(settings, "open_caution_until_hour", 9) or 9) * 60
+        + int(getattr(settings, "open_caution_until_minute", 45) or 45)
+    )
+    return _SESSION_OPEN_MINUTES <= minutes < until
+
+
 def index_candle_rollover_blocked(
     side: Side | str,
     candles_1m: list[Any] | None = None,
@@ -108,7 +121,10 @@ def index_candle_rollover_blocked(
     now: Optional[datetime] = None,
     settings: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
-    """Return (blocked, reason, meta). Either 1m or 5m stepping off the extreme blocks."""
+    """Return (blocked, reason, meta). Either 1m or 5m stepping off the extreme blocks.
+
+    Active only from 09:15 until 09:45. The same decline after 09:45 does not block.
+    """
     settings = settings or get_settings()
     if getattr(settings, "index_candle_rollover_block_enabled", True) is not True:
         return False, "", {}
@@ -116,6 +132,8 @@ def index_candle_rollover_blocked(
     if side_v not in ("CALL", "PUT"):
         return False, "", {}
     now = (now or datetime.now(IST)).astimezone(IST)
+    if not _inside_open_window(now, settings):
+        return False, "", {}
     steps = int(getattr(settings, "index_candle_rollover_steps", 3) or 3)
     min_giveback = float(
         getattr(settings, "index_candle_rollover_min_giveback_pct", 0.04) or 0.04
