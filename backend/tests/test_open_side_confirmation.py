@@ -96,6 +96,39 @@ def test_after_open_window_not_applied_ce_pe(side):
     assert blocked is False
 
 
+def test_broker_day_open_beats_a_preopen_tick_open():
+    """A pre-open print as the tape open must not confirm a call that is flat to the cash open.
+
+    Oct 23 09:28 Nifty was +0.02% from the cash open. Measuring from a 22680
+    pre-open tick made that look like a confirmed rally.
+    """
+    from app.models.schemas import ChartAnalysis
+
+    index_tick_helpers._session_extremes["NIFTY"] = {
+        "date": _at(9, 28).date(),
+        "open": 22680.0,
+        "hi": 22763.0,
+        "lo": 22680.0,
+        "last": 22748.0,
+    }
+    snap = SimpleNamespace(
+        spot=22748.0,
+        chartAnalysis=ChartAnalysis(
+            institutional={
+                "dayOpen": 22743.2,
+                "dayHigh": 22786.9,
+                "dayLow": 22699.8,
+            }
+        ),
+    )
+    blocked, reason, meta = open_side_confirmation(
+        "NIFTY", Side.CALL, snap, now=_at(9, 28, 20), settings=_settings(),
+    )
+    assert blocked and reason == "open_side_call_index_not_above_open"
+    assert meta["sessionOpen"] == 22743.2
+    assert meta["movePct"] < 0.10
+
+
 def test_on_from_0915_to_0945_and_first_order_stays_0920():
     s = Settings()
     assert s.open_side_confirmation_enabled is True

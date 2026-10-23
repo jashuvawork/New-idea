@@ -41,9 +41,107 @@ _pending_wake_symbols: set[str] = set()
 _observer_registered: bool = False
 
 
+_CASH_OPEN_MINUTES = 9 * 60 + 15
+
+
 def index_session_extremes(symbol: str) -> dict[str, Any]:
     """Live intraday index session open/high/low/last for one symbol (tick-maintained)."""
     return dict(_session_extremes.get(str(symbol or "").upper()) or {})
+
+
+def record_index_session_extreme(
+    symbol: str,
+    ltp: float,
+    *,
+    now: Optional[Any] = None,
+) -> None:
+    """Track today's cash-session open from the first tick at or after 09:15 IST.
+
+    A pre-open print, or the first tick after a restart, is not the cash open.
+    Leaving that print in place made 09:15–09:45 confirmation measure the move
+    from the wrong price.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    sym = str(symbol or "").upper()
+    if not sym:
+        return
+    price = float(ltp or 0)
+    if price <= 0:
+        return
+    current = now or datetime.now(ZoneInfo("Asia/Kolkata"))
+    if getattr(current, "tzinfo", None) is not None:
+        current = current.astimezone(ZoneInfo("Asia/Kolkata"))
+    minutes = current.hour * 60 + current.minute
+    if minutes < _CASH_OPEN_MINUTES:
+        return
+    today = current.date()
+    ext = _session_extremes.get(sym)
+    if ext is None or ext.get("date") != today or not ext.get("fromCashOpen"):
+        _session_extremes[sym] = {
+            "date": today,
+            "open": price,
+            "hi": price,
+            "lo": price,
+            "last": price,
+            "fromCashOpen": True,
+        }
+        return
+    if price > float(ext["hi"]):
+        ext["hi"] = price
+    if price < float(ext["lo"]):
+        ext["lo"] = price
+    ext["last"] = price
+
+
+def broker_day_ohlc(snap: Any) -> tuple[float, float, float]:
+    """Official day open/high/low stamped from the index quote. Not the SMC range."""
+    if snap is None:
+        return 0.0, 0.0, 0.0
+    try:
+        ca = getattr(snap, "chartAnalysis", None)
+        inst = getattr(ca, "institutional", None) if ca is not None else None
+        if isinstance(inst, dict):
+            return (
+                float(inst.get("dayOpen") or 0),
+                float(inst.get("dayHigh") or 0),
+                float(inst.get("dayLow") or 0),
+            )
+    except Exception:
+        pass
+    return 0.0, 0.0, 0.0
+
+
+def resolve_index_session(symbol: str, snap: Any = None) -> dict[str, float]:
+    """Cash-session open/high/low/last for side confirmation.
+
+    The broker day open wins over the tick tape. A restart inside 09:15–09:45
+    otherwise treats the first post-restart tick as the open.
+    """
+    ext = index_session_extremes(symbol)
+    session_open = float(ext.get("open") or 0)
+    hi = float(ext.get("hi") or 0)
+    lo = float(ext.get("lo") or 0)
+    last = float(ext.get("last") or 0)
+    day_open, day_high, day_low = broker_day_ohlc(snap)
+    if day_open > 0:
+        session_open = day_open
+    if day_high > 0:
+        hi = max(hi, day_high) if hi > 0 else day_high
+    if day_low > 0:
+        lo = min(lo, day_low) if lo > 0 else day_low
+    spot = float(getattr(snap, "spot", 0) or 0) or last
+    if spot > 0 and hi > 0:
+        hi = max(hi, spot)
+    if spot > 0 and lo > 0:
+        lo = min(lo, spot)
+    return {
+        "open": session_open,
+        "hi": hi,
+        "lo": lo,
+        "last": spot if spot > 0 else last,
+    }
 
 
 def _snap_session_extremes(snap: Any) -> tuple[float, float]:
@@ -243,24 +341,10 @@ def _on_index_tick(instrument_key: str, ltp: float) -> None:
         cutoff = time.monotonic() - hist_secs
         while lh and lh[0][0] < cutoff:
             lh.popleft()
-    # Maintain intraday session high/low from the live tape (reset on a new IST day).
+    # Cash-session open/high/low. Pre-open ticks are ignored so they cannot
+    # become today's open for the 09:15–09:45 side check.
     try:
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-
-        today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
-        ext = _session_extremes.get(symbol)
-        if ext is None or ext.get("date") != today:
-            _session_extremes[symbol] = {
-                "date": today, "open": float(ltp),
-                "hi": float(ltp), "lo": float(ltp), "last": float(ltp),
-            }
-        else:
-            if float(ltp) > ext["hi"]:
-                ext["hi"] = float(ltp)
-            if float(ltp) < ext["lo"]:
-                ext["lo"] = float(ltp)
-            ext["last"] = float(ltp)
+        record_index_session_extreme(symbol, float(ltp))
     except Exception:
         pass
     try:

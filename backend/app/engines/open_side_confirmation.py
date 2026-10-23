@@ -6,7 +6,8 @@ built from the previous session's bars, while NIFTY V-reversed up off the open a
 index tape: price moved away from the session open in the trade's direction and sits
 in that side's half of the session range. CALL and PUT are exact mirrors.
 Active from 09:15 until 09:45, then idle. The first minute stays blocked.
-The first order stays 09:20.
+The first order stays 09:20. The cash open is the broker day open when the
+quote has it; a pre-open tick or a restart tick is not the open.
 """
 
 from __future__ import annotations
@@ -61,13 +62,13 @@ def open_side_confirmation(
             "minutesSinceOpen": round(minutes - MARKET_OPEN_MINUTES, 2),
         }
 
-    from app.engines.index_tick_helpers import index_session_extremes
+    from app.engines.index_tick_helpers import resolve_index_session
 
-    ext = index_session_extremes(symbol)
+    ext = resolve_index_session(symbol, snap)
     session_open = float(ext.get("open") or 0)
     hi = float(ext.get("hi") or 0)
     lo = float(ext.get("lo") or 0)
-    spot = float(getattr(snap, "spot", 0) or 0) or float(ext.get("last") or 0)
+    spot = float(ext.get("last") or 0) or float(getattr(snap, "spot", 0) or 0)
     if session_open <= 0 or spot <= 0 or hi <= 0 or lo <= 0:
         return True, "open_side_no_session_tape", {}
     hi, lo = max(hi, spot), min(lo, spot)
