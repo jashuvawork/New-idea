@@ -3050,6 +3050,12 @@ class Settings(BaseSettings):
     open_side_confirmation_min_minutes: float = 1.0
     open_side_confirmation_min_index_move_pct: float = 0.10
     open_side_confirmation_min_range_position: float = 0.6
+    # Refuse a call while today's candles are each closing lower off the local
+    # high, and a put while they are each closing higher off the local low.
+    # The composite 5m direction can still read bullish during that rollover.
+    index_candle_rollover_block_enabled: bool = True
+    index_candle_rollover_steps: int = 3
+    index_candle_rollover_min_giveback_pct: float = 0.04
     open_caution_min_explosion_score: int = 45
     open_caution_score_bonus: int = 0
     open_caution_min_rank_score: float = 55.0
