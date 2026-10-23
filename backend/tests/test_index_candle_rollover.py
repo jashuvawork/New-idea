@@ -18,9 +18,24 @@ def _bar(minute: int, open_: float, high: float, low: float, close: float) -> li
 
 def _settings(**overrides) -> Settings:
     settings = Settings()
+    settings.index_candle_rollover_block_enabled = True
     for key, value in overrides.items():
         setattr(settings, key, value)
     return settings
+
+
+def test_candle_confirmation_is_off_by_default():
+    candles = [
+        _bar(26, 22760, 22761, 22752, 22754),
+        _bar(27, 22754, 22755, 22746, 22748),
+        _bar(28, 22748, 22749, 22744, 22746),
+    ]
+    assert Settings().index_candle_rollover_block_enabled is False
+    blocked, reason, _ = index_candle_rollover_blocked(
+        Side.CALL, candles, spot=22745.0, now=NOW,
+    )
+    assert blocked is False
+    assert reason == ""
 
 
 def test_call_blocked_when_each_minute_closes_lower_off_the_high():

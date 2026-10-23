@@ -88,6 +88,43 @@ def test_cash_open_ignores_preopen_ticks_and_keeps_the_0915_print():
     assert ext["last"] == 22748.0
 
 
+def test_flat_tape_does_not_inherit_an_older_spike():
+    import time
+
+    from app.engines import index_tick_helpers as ith
+
+    reset_index_tick_helpers_for_tests()
+    clear_ticks()
+    key = INDEX_KEYS["SENSEX"]
+    ith._last_spike["SENSEX"] = {
+        "v3": -0.20, "v9": -0.20, "ltp": 77000.0, "mono": time.monotonic() - 30.0,
+    }
+    record_tick(key, 76900.0)
+    from app.services import tick_store
+
+    hist = tick_store._tick_history[key.replace(":", "|")]
+    hist[0].received_mono -= 3.0
+    record_tick(key, 76900.0)
+    board = evaluate_index_tick_helpers(snap=_snap_put(), side=Side.PUT)
+    assert board.velocity_3s == 0.0
+    assert board.tick_spike is False
+
+
+def test_a_spike_from_the_last_five_seconds_fills_a_missing_tape():
+    import time
+
+    from app.engines import index_tick_helpers as ith
+
+    reset_index_tick_helpers_for_tests()
+    clear_ticks()
+    ith._last_spike["SENSEX"] = {
+        "v3": -0.08, "v9": -0.05, "ltp": 76900.0, "mono": time.monotonic(),
+    }
+    board = evaluate_index_tick_helpers(snap=_snap_put(), side=Side.PUT)
+    assert board.velocity_3s == -0.08
+    assert board.tick_spike is True
+
+
 def test_index_tick_helpers_confirm_put_on_falling_spot():
     reset_index_tick_helpers_for_tests()
     clear_ticks()

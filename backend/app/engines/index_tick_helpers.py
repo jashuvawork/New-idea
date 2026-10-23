@@ -383,6 +383,7 @@ def _on_index_tick(instrument_key: str, ltp: float) -> None:
         "v3": float(v3),
         "v9": float(v9 or 0.0),
         "ltp": float(ltp),
+        "mono": time.monotonic(),
     }
     if bool(getattr(settings, "index_spike_history_enabled", True)):
         hist = _spike_history[symbol]
@@ -449,6 +450,7 @@ def evaluate_index_tick_helpers(
         return out
 
     # Live index tape velocity (actual spot move, not strike premium).
+    v3 = None
     key = INDEX_KEYS.get(symbol)
     if key:
         try:
@@ -472,10 +474,14 @@ def evaluate_index_tick_helpers(
                 out.velocity_9s = float(v9)
         except Exception:
             pass
-    # Fall back to last spike stamp if live tape is quiet but we just saw a spike.
-    if out.velocity_3s == 0.0:
+    # A missing 3s read can reuse a spike from the last few seconds. A flat
+    # read (0) is a real print and must not be replaced by an older spike.
+    if v3 is None:
         spike = last_index_spike(symbol)
-        if spike:
+        age_limit = 5.0
+        mono = spike.get("mono")
+        fresh = mono is not None and (time.monotonic() - float(mono)) <= age_limit
+        if fresh:
             out.velocity_3s = float(spike.get("v3") or 0)
             out.velocity_9s = float(spike.get("v9") or out.velocity_9s)
 
