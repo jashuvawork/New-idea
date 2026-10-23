@@ -692,6 +692,33 @@ def test_put_peak_rollover_bypasses_live_bullish_block(mock_settings):
     assert reason == "ok"
 
 
+def test_missing_quote_open_is_not_replaced_with_spot():
+    from app.engines.spot_direction import pro_index_quote_context
+
+    ctx = pro_index_quote_context({"last_price": 22740.0, "ohlc": {}}, 22740.0)
+    assert ctx["dayOpen"] == 0
+    assert ctx["dayHigh"] == 0
+    assert ctx["dayLow"] == 0
+    assert ctx["fromOpenPct"] == 0
+    assert ctx["prevClose"] == 0
+
+
+def test_prev_close_uses_net_change_when_ohlc_close_is_the_ltp():
+    from app.engines.spot_direction import pro_index_quote_context
+
+    ctx = pro_index_quote_context(
+        {
+            "last_price": 22750.0,
+            "net_change": 20.0,
+            "ohlc": {"open": 22740.0, "high": 22760.0, "low": 22730.0, "close": 22750.0},
+        },
+        22750.0,
+    )
+    assert ctx["prevClose"] == 22730.0
+    assert ctx["dayOpen"] == 22740.0
+    assert ctx["gapPct"] == round((22750.0 - 22730.0) / 22730.0 * 100, 3)
+
+
 def test_deep_trough_call_recovery_before_mom5_crosses_zero():
     """Sep01 morning CALL — mom5 still negative but recovering vs deep mom15."""
     from app.engines.spot_direction import index_trough_momentum_turn

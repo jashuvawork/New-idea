@@ -37,24 +37,26 @@ def _session_extremes_and_spot(
     symbol: str,
     snap: SymbolSnapshot,
 ) -> tuple[float, float, float]:
-    """Session high, low, and live spot from tick tape or broker candles."""
+    """Today's cash-session high, low, and live spot.
+
+    Broker day high/low win. The SMC chart range includes yesterday's bars and
+    must not count as a rally off the session low.
+    """
     from app.engines.index_tick_helpers import (
         _snap_session_extremes,
-        index_session_extremes,
+        resolve_index_session,
     )
 
     sym = symbol.upper()
-    ext = index_session_extremes(sym)
-    hi = float(ext.get("hi") or 0)
-    lo = float(ext.get("lo") or 0)
-    spot = float(getattr(snap, "spot", 0) or 0) or float(ext.get("last") or 0)
-
+    resolved = resolve_index_session(sym, snap)
+    hi = float(resolved.get("hi") or 0)
+    lo = float(resolved.get("lo") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0) or float(resolved.get("last") or 0)
     snap_hi, snap_lo = _snap_session_extremes(snap)
     if snap_hi > 0:
-        hi = max(hi, snap_hi)
+        hi = max(hi, snap_hi) if hi > 0 else snap_hi
     if snap_lo > 0:
         lo = min(lo, snap_lo) if lo > 0 else snap_lo
-
     return hi, lo, spot
 
 

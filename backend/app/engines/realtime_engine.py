@@ -555,12 +555,25 @@ async def build_symbol_snapshot(
                 day_low = qctx["dayLow"]
                 day_from_open_pct = float(qctx.get("fromOpenPct") or 0)
             except Exception:
-                _, highs, lows, closes = _candle_rows(candles_1m)
-                if highs and lows:
-                    day_high = max(highs)
-                    day_low = min(lows)
-                if closes:
-                    prev_close = closes[0]
+                from app.engines.index_candle_rollover import (
+                    cash_session_candles,
+                    prior_close_before_cash_session,
+                )
+
+                rows = cash_session_candles(candles_1m)
+                opens, highs, lows, _closes = _candle_rows(rows)
+                if opens and highs and lows:
+                    qctx = {
+                        "dayOpen": float(opens[0]),
+                        "dayHigh": float(max(highs)),
+                        "dayLow": float(min(lows)),
+                    }
+                    day_high = qctx["dayHigh"]
+                    day_low = qctx["dayLow"]
+                    if spot > 0 and qctx["dayOpen"] > 0:
+                        day_from_open_pct = (spot - qctx["dayOpen"]) / qctx["dayOpen"] * 100.0
+                        qctx["fromOpenPct"] = day_from_open_pct
+                prev_close = prior_close_before_cash_session(candles_1m)
 
             chart_analysis = build_chart_analysis(
                 candles_1m,
