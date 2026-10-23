@@ -132,6 +132,52 @@ def test_flag_off_lets_the_rollover_through():
     assert reason == ""
 
 
+def test_same_decline_after_0945_does_not_block():
+    candles = [
+        _bar(26, 22760, 22761, 22752, 22754),
+        _bar(27, 22754, 22755, 22746, 22748),
+        _bar(28, 22748, 22749, 22744, 22746),
+    ]
+    later = datetime(2026, 10, 23, 10, 0, tzinfo=IST)
+    blocked, reason, _ = index_candle_rollover_blocked(
+        Side.CALL, candles, spot=22745.0, now=later, settings=_settings(),
+    )
+    assert blocked is False
+    assert reason == ""
+
+
+def test_window_ends_at_0945_exactly():
+    candles = [
+        _bar(26, 22760, 22761, 22752, 22754),
+        _bar(27, 22754, 22755, 22746, 22748),
+        _bar(28, 22748, 22749, 22744, 22746),
+    ]
+    at_end = datetime(2026, 10, 23, 9, 45, tzinfo=IST)
+    blocked, _, _ = index_candle_rollover_blocked(
+        Side.CALL, candles, spot=22745.0, now=at_end, settings=_settings(),
+    )
+    assert blocked is False
+    still_open = datetime(2026, 10, 23, 9, 44, 59, tzinfo=IST)
+    blocked_open, reason, _ = index_candle_rollover_blocked(
+        Side.CALL, candles, spot=22745.0, now=still_open, settings=_settings(),
+    )
+    assert blocked_open is True
+    assert reason == "index_falling_from_local_high"
+
+
+def test_before_0915_does_not_block():
+    candles = [
+        _bar(26, 22760, 22761, 22752, 22754),
+        _bar(27, 22754, 22755, 22746, 22748),
+        _bar(28, 22748, 22749, 22744, 22746),
+    ]
+    early = datetime(2026, 10, 23, 9, 14, 59, tzinfo=IST)
+    blocked, _, _ = index_candle_rollover_blocked(
+        Side.CALL, candles, spot=22745.0, now=early, settings=_settings(),
+    )
+    assert blocked is False
+
+
 def test_yesterday_candles_are_ignored():
     stale = [
         ["2026-10-22T15:20:00+05:30", 22600, 22620, 22590, 22610, 0],
