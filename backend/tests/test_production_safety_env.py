@@ -34,6 +34,9 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["BEST_TRADE_BLOCK_CHOP_DEEP_CHASE_ENABLED"] == "true"
     assert env["LIVE_BEST_TRADES_ONLY_ENABLED"] == "true"
     assert env["LIVE_BEST_TRADES_MIN_GRADE"] == "A"
+    assert env["INDEX_CANDLE_ROLLOVER_BLOCK_ENABLED"] == "true"
+    assert env["INDEX_CANDLE_ROLLOVER_STEPS"] == "3"
+    assert env["INDEX_CANDLE_ROLLOVER_MIN_GIVEBACK_PCT"] == "0.04"
     assert env["LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
     assert env["LIVE_DISABLE_SESSION_LIFT"] == "false"
     assert env["CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
@@ -104,6 +107,9 @@ def test_deploy_paths_sync_every_bounded_loss_setting():
         "CHOP_LIVE_HARD_BLOCK_WORST_DAY",
         "BEST_TRADE_BLOCK_CHOP_DEEP_CHASE_ENABLED",
         "LIVE_BEST_TRADES_ONLY_ENABLED",
+        "INDEX_CANDLE_ROLLOVER_BLOCK_ENABLED",
+        "INDEX_CANDLE_ROLLOVER_STEPS",
+        "INDEX_CANDLE_ROLLOVER_MIN_GIVEBACK_PCT",
         "LIVE_BEST_TRADES_MIN_GRADE",
         "LIVE_EARLY_FAIL_EXIT_ENABLED",
         "LIVE_DISABLE_SESSION_LIFT",
