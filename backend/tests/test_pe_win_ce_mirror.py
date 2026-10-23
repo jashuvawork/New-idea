@@ -278,3 +278,50 @@ def test_put_chase_blocked_after_put_win_on_other_index(mock_trades, _mock_bo):
     assert blocked is True
     assert reason == "pe_win_ce_mirror_block_cross_index_put"
     assert meta.get("putWinSymbol") == "NIFTY"
+
+
+@patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={"breakout": True})
+@patch("app.engines.pe_win_ce_mirror._collect_session_trades")
+def test_other_index_breakout_does_not_waive_the_put_chase(mock_trades, _mock_bo):
+    from datetime import timedelta
+
+    closed = datetime.now(IST) - timedelta(minutes=2)
+    win = _put_win_trade(8042.0)
+    win.closed_at = closed
+    win.symbol = "NIFTY"
+    mock_trades.return_value = [win]
+    sensex_snap = _rally_snap("SENSEX")
+    candidate = SimpleNamespace(
+        mode="explosion", side=Side.PUT, symbol="SENSEX", snap=sensex_snap,
+    )
+    blocked, reason, _ = pe_win_ce_mirror_put_chase_blocked(
+        candidate,
+        SimpleNamespace(),
+        {"SENSEX": sensex_snap, "NIFTY": _rally_snap("NIFTY")},
+        settings=Settings(),
+    )
+    assert blocked is True
+    assert reason == "pe_win_ce_mirror_block_cross_index_put"
+
+
+@patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_armed", return_value=(False, "", {}))
+@patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={"breakout": True})
+@patch("app.engines.pe_win_ce_mirror._collect_session_trades")
+def test_same_index_put_breakout_can_continue(mock_trades, _mock_bo, _mock_arm):
+    from datetime import timedelta
+
+    closed = datetime.now(IST) - timedelta(minutes=2)
+    win = _put_win_trade(8042.0)
+    win.closed_at = closed
+    win.symbol = "NIFTY"
+    mock_trades.return_value = [win]
+    snap = _rally_snap("NIFTY")
+    candidate = SimpleNamespace(
+        mode="explosion", side=Side.PUT, symbol="NIFTY", snap=snap,
+    )
+    blocked, reason, meta = pe_win_ce_mirror_put_chase_blocked(
+        candidate, SimpleNamespace(), {"NIFTY": snap}, settings=Settings(),
+    )
+    assert blocked is False
+    assert reason == "ok"
+    assert meta.get("putSlideBreakout") is True

@@ -1,7 +1,7 @@
 """Block a side when today's index candles are stepping off the local extreme.
 
-Only from 09:15 to 09:45. After 09:45 this check is idle and the composite
-chart gate stands on its own.
+Off by default. Only from 09:15 to 09:45 when the flag is on. After 09:45
+this check is idle and the composite chart gate stands on its own.
 
 The 5-minute composite can stay bullish while price is already leaving the high.
 Oct 23 Nifty 22800 CE filled at 09:28 with a bullish 3-bar chart (+0.15%) and the
