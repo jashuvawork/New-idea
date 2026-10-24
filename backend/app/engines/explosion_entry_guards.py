@@ -1031,10 +1031,15 @@ def post_peak_chase_blocked(
     near_top = float(
         getattr(settings, "explosion_post_peak_chase_near_top_frac", 0.12) or 0.12
     )
+    min_peak_age = getattr(
+        settings, "explosion_post_peak_chase_min_peak_age_seconds", 45.0
+    )
+    min_peak_age = 45.0 if min_peak_age is None else float(min_peak_age)
     try:
         from app.engines.explosion_detector import (
             get_session_low_premium,
             get_session_peak_premium,
+            premium_near_high_age_seconds,
             recent_premium_run,
         )
 
@@ -1046,7 +1051,31 @@ def post_peak_chase_blocked(
     run = float(r.get("run") or 0)
     if high <= 0 or current <= 0:
         return False, ""
-    if run >= min_run and current >= high * (1.0 - near_top):
+
+    def _top_already_traded(level: float) -> bool:
+        """True once price has been near this high long enough to be a finished top."""
+        if level <= 0 or min_peak_age <= 0:
+            return True
+        try:
+            age = premium_near_high_age_seconds(
+                sym,
+                strike,
+                side,
+                level,
+                lookback_seconds=lookback,
+                near_frac=near_top,
+            )
+        except Exception:
+            return False
+        return age >= min_peak_age
+
+    # A brand-new high is the lift. Exhaustion means this price was already
+    # traded, and we are still buying it.
+    if (
+        run >= min_run
+        and current >= high * (1.0 - near_top)
+        and _top_already_traded(high)
+    ):
         return True, "explosion_post_peak_chase"
 
     # Session-level post-peak: a SLOW-GRIND rip (e.g. PE 15->100 over hours) shows only a small
@@ -1063,7 +1092,14 @@ def post_peak_chase_blocked(
             sp = sl = 0.0
         if sp > 0 and sl > 0:
             session_run = (sp - sl) / sl
-            if session_run >= min_run and current >= sp * (1.0 - near_top):
+            near_session_top = current >= sp * (1.0 - near_top)
+            # Day-high seeded above every sampled print is an older top.
+            unseen_completed_top = high > 0 and sp > high * (1.0 + near_top)
+            if (
+                session_run >= min_run
+                and near_session_top
+                and (unseen_completed_top or _top_already_traded(sp))
+            ):
                 return True, "explosion_post_peak_chase_session"
     return False, ""
 

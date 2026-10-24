@@ -1612,6 +1612,50 @@ def recent_premium_run(
     return out
 
 
+def premium_near_high_age_seconds(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    level: float,
+    *,
+    lookback_seconds: float,
+    near_frac: float,
+) -> float:
+    """Seconds since an earlier sample traded within ``near_frac`` of ``level``.
+
+    Zero when only the latest sample is that high. That print is the lift itself.
+    A completed top has already traded near this price before the current sample.
+    """
+    if side is None or not symbol or float(level or 0) <= 0:
+        return 0.0
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    dq = _local_base_hist.get(_open_key(symbol, strike, side_val))
+    if not dq or len(dq) < 2:
+        return 0.0
+    now = dq[-1][0]
+    lo_cut = now - timedelta(seconds=float(lookback_seconds))
+    rows = [
+        (ts, float(p))
+        for ts, p in dq
+        if ts >= lo_cut and _is_meaningful_premium(p)
+    ]
+    if len(rows) < 2:
+        return 0.0
+    bar = float(level) * (1.0 - max(0.0, float(near_frac)))
+    last_ts = rows[-1][0]
+    first_at_level = None
+    for ts, price in rows[:-1]:
+        if price >= bar:
+            first_at_level = ts
+            break
+    if first_at_level is None:
+        return 0.0
+    try:
+        return max(0.0, (last_ts - first_at_level).total_seconds())
+    except (AttributeError, TypeError):
+        return 0.0
+
+
 def option_premium_series(
     symbol: str,
     strike: float,
