@@ -51,6 +51,15 @@ def test_profile_opening_range_is_todays_first_cash_bars():
     assert profile.poc == 204
 
 
+def test_profile_keeps_untimestamped_replay_bars():
+    candles = [[0, 100, 110, 90, 105, 0] for _ in range(20)]
+    profile = _build_profile(candles, 105)
+    assert profile.openingRangeHigh == 110
+    assert profile.openingRangeLow == 90
+    assert profile.vah == 110
+    assert profile.val == 90
+
+
 def test_profile_does_not_invent_a_value_area():
     empty = _build_profile([], 24000)
     assert empty.poc == 24000
