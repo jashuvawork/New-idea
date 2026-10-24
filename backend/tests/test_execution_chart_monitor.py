@@ -447,6 +447,51 @@ def test_open_window_chart_fetch_failure_blocks_instead_of_snapshot_fallback():
     assert meta["openCautionWindow"] is True
 
 
+def test_after_open_window_lift_lane_may_use_snapshot_when_fetch_fails():
+    chart = SpotChart(
+        direction="BULLISH",
+        momentum5Pct=0.12,
+        momentum15Pct=0.10,
+        trendStrength=40,
+        spot=24000,
+    )
+    snap = _snap(chart)
+
+    with (
+        patch(
+            "app.engines.execution_chart_monitor.get_settings",
+            return_value=_settings(),
+        ),
+        patch(
+            "app.engines.execution_chart_monitor.fetch_live_trade_charts",
+            AsyncMock(side_effect=RuntimeError("upstox down")),
+        ),
+        patch(
+            "app.engines.index_candle_rollover.open_caution_window_active",
+            return_value=False,
+        ),
+        patch(
+            "app.engines.pad_lane_capture.resolve_strict_pad_lane_for_entry",
+            return_value=(False, True),
+        ),
+    ):
+        passed, reason, meta = asyncio.run(
+            monitor_trade_chart_before_execution(
+                AsyncMock(),
+                "NIFTY",
+                Side.CALL,
+                24000,
+                snap,
+                trade_score=80,
+                mode="explosion",
+            )
+        )
+
+    assert passed is True
+    assert reason == "ok"
+    assert meta.get("liftCaptureSnapshotFallback") is True
+
+
 def test_after_open_window_chart_fetch_failure_blocks_not_snapshot_fallback():
     chart = SpotChart(
         direction="BULLISH",

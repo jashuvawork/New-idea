@@ -107,6 +107,72 @@ def test_after_open_window_not_applied_ce_pe(side):
     assert blocked is False
 
 
+def test_cash_tick_tape_open_ok_without_broker_day_stamp():
+    index_tick_helpers._session_extremes["NIFTY"] = {
+        "date": _at(9, 25).date(),
+        "open": 22300.0,
+        "hi": 22320.0,
+        "lo": 22295.0,
+        "last": 22310.0,
+        "fromCashOpen": True,
+    }
+    snap = SimpleNamespace(spot=22310.0)
+    blocked, reason, _ = open_side_confirmation(
+        "NIFTY", Side.CALL, snap, now=_at(9, 25), settings=_settings(),
+    )
+    assert blocked and reason == "open_side_call_index_not_above_open"
+
+
+def test_pr676_waives_open_side_for_call_atm_itm_base_lift():
+    from types import SimpleNamespace
+
+    from app.models.schemas import ChartAnalysis, Side, SymbolSnapshot
+
+    snap = SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp="2026-10-01T09:25:00+05:30",
+        marketPhase="LIVE_MARKET",
+        spot=74005.0,
+        atmStrike=74000.0,
+        dataAvailable=True,
+        chartAnalysis=ChartAnalysis(
+            institutional={"dayOpen": 74000.0, "dayHigh": 74020.0, "dayLow": 73980.0},
+        ),
+    )
+    index_tick_helpers._session_extremes["SENSEX"] = {
+        "date": _at(9, 25).date(),
+        "open": 74000.0,
+        "hi": 74020.0,
+        "lo": 73980.0,
+        "last": 74005.0,
+        "fromCashOpen": True,
+    }
+    cand = SimpleNamespace(
+        mode="explosion",
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=73900.0,
+        alert={
+            "tier": "EXPLODING",
+            "armedBaseLaunch": True,
+            "ictFirstLift": True,
+            "localBaseMovePct": 11.0,
+        },
+        pretrade_meta={},
+        snap=snap,
+    )
+    blocked, reason, meta = open_side_confirmation(
+        "SENSEX",
+        Side.CALL,
+        snap,
+        candidate=cand,
+        now=_at(9, 25),
+        settings=_settings(),
+    )
+    assert blocked is False
+    assert meta.get("openSideCaptureWaived") == "call_atm_itm_base_capture"
+
+
 def test_after_first_order_time_requires_broker_day_open():
     """Restart tick tape without broker dayOpen must not confirm sides after 09:20."""
     snap = _tape(
