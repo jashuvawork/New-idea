@@ -55,6 +55,16 @@ def test_daily_loss_stop_does_not_imply_paper_execution():
     assert not paper_execution_active(settings)
 
 
+def test_live_armed_stays_live_when_auto_trader_loop_disabled_in_env():
+    settings = Settings(
+        enable_live_trading=True,
+        auto_trading_enabled=False,
+        paper_trading=True,
+    )
+    assert execution_mode_label(settings) == "LIVE"
+    assert not paper_execution_active(settings)
+
+
 def test_sync_autotrader_flags_live_wins_over_stale_paper_env():
     settings = Settings(
         enable_live_trading=True,
@@ -64,4 +74,18 @@ def test_sync_autotrader_flags_live_wins_over_stale_paper_env():
     state = AutoTraderState(paperTrading=True, liveTradingEnabled=False)
     sync_autotrader_execution_flags(state, settings)
     assert state.liveTradingEnabled is True
+    assert state.autoTradingEnabled is True
+    assert state.paperTrading is False
+
+
+def test_sync_autotrader_live_armed_keeps_paper_false_when_auto_disabled():
+    settings = Settings(
+        enable_live_trading=True,
+        auto_trading_enabled=False,
+        paper_trading=True,
+    )
+    state = AutoTraderState(paperTrading=True, liveTradingEnabled=False)
+    sync_autotrader_execution_flags(state, settings)
+    assert state.liveTradingEnabled is True
+    assert state.autoTradingEnabled is False
     assert state.paperTrading is False

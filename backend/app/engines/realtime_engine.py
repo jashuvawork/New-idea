@@ -286,11 +286,9 @@ def _build_profile(candles: list, spot: float) -> MarketProfile:
     open look like a break of a range that was not today's. A series with no
     cash-session print does not invent a ±50 point value area around spot.
     """
-    from app.engines.index_candle_rollover import cash_session_candles
-
     spot_px = float(spot or 0)
     blank = MarketProfile(poc=round(spot_px, 2) if spot_px > 0 else 0.0)
-    session = cash_session_candles(candles)
+    session = _cash_rows_or_raw(candles)
     bars = [hlc for row in session if (hlc := _bar_hlc(row)) is not None]
     if not bars:
         return blank
