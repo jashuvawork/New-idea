@@ -144,11 +144,12 @@ def resolve_index_session(symbol: str, snap: Any = None) -> dict[str, float]:
 
 
 def _snap_session_extremes(snap: Any) -> tuple[float, float]:
-    """Today's high/low from the snapshot when the tick tape is still cold.
+    """Broker dayHigh/dayLow. A missing quote range stays missing.
 
-    Broker dayHigh/dayLow are today's cash session. SMC sessionHigh/sessionLow are
-    the max of the whole chart window (yesterday included) and are only a fallback
-    when the quote did not stamp a day range.
+    SMC sessionHigh/sessionLow and the market-profile opening range are the
+    chart window. At the open that window is yesterday, so they are not a
+    stand-in for the cash-session high and low. The tick tape is the other
+    source, via resolve_index_session.
     """
     if snap is None:
         return 0.0, 0.0
@@ -160,18 +161,6 @@ def _snap_session_extremes(snap: Any) -> tuple[float, float]:
             day_lo = float(inst.get("dayLow") or 0)
             if day_hi > 0 and day_lo > 0:
                 return day_hi, day_lo
-            hi = float(inst.get("sessionHigh") or 0)
-            lo = float(inst.get("sessionLow") or 0)
-            if hi > 0 or lo > 0:
-                return hi, lo
-    except Exception:
-        pass
-    try:
-        prof = getattr(snap, "marketProfile", None)
-        if prof is not None:
-            hi = float(getattr(prof, "openingRangeHigh", 0) or 0)
-            lo = float(getattr(prof, "openingRangeLow", 0) or 0)
-            return hi, lo
     except Exception:
         pass
     return 0.0, 0.0
@@ -653,9 +642,8 @@ def index_trend_breakout(
     hi = float(resolved.get("hi") or 0)
     lo = float(resolved.get("lo") or 0)
     spot = float(getattr(snap, "spot", 0) or 0) or float(resolved.get("last") or 0)
-    # Widen from the snapshot only with today's range. _snap_session_extremes
-    # returns broker day high/low when the quote stamped them, and the SMC
-    # window only when it did not.
+    # Widen from the snapshot only with the broker day range. A chart
+    # sessionHigh from the multi-day window is not today's high.
     snap_hi, snap_lo = _snap_session_extremes(snap)
     if snap_hi > 0:
         hi = max(hi, snap_hi) if hi > 0 else snap_hi

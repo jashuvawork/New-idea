@@ -52,9 +52,9 @@ def _trend_follow(
         return None
 
     side = None
-    if spot > profile.openingRangeHigh and breadth.bias == "BULLISH" and breadth.aligned:
+    if profile.openingRangeHigh > 0 and spot > profile.openingRangeHigh and breadth.bias == "BULLISH" and breadth.aligned:
         side = Side.CALL
-    elif spot < profile.openingRangeLow and breadth.bias == "BEARISH" and breadth.aligned:
+    elif profile.openingRangeLow > 0 and spot < profile.openingRangeLow and breadth.bias == "BEARISH" and breadth.aligned:
         side = Side.PUT
 
     if not side:
