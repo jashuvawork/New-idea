@@ -112,8 +112,12 @@ def session_has_green_mode(
     for t in trades:
         if _mode_of(t) != mode:
             continue
-        pnl = float(getattr(t, "pnl_inr", 0) or 0)
-        best = float(getattr(t, "best_pnl_points", 0) or 0)
+        pnl = float(
+            getattr(t, "pnl_inr", 0) or getattr(t, "pnlInr", 0) or 0
+        )
+        best = float(
+            getattr(t, "best_pnl_points", 0) or getattr(t, "bestPnlPoints", 0) or 0
+        )
         if pnl > 0:
             return True
         if not require_win and best >= 1.0:
