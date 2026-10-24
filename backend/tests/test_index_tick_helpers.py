@@ -88,6 +88,30 @@ def test_cash_open_ignores_preopen_ticks_and_keeps_the_0915_print():
     assert ext["last"] == 22748.0
 
 
+def test_resolve_index_session_uses_spot_when_range_not_stamped_yet():
+    from types import SimpleNamespace
+
+    from app.engines.index_tick_helpers import resolve_index_session
+
+    from app.engines import index_tick_helpers as ith
+
+    reset_index_tick_helpers_for_tests()
+    ith._session_extremes["NIFTY"] = {
+        "date": datetime(2026, 10, 23, 9, 25, tzinfo=IST).date(),
+        "open": 22743.2,
+        "hi": 0.0,
+        "lo": 0.0,
+        "last": 22748.0,
+        "fromCashOpen": True,
+    }
+    snap = SimpleNamespace(spot=22750.0)
+    ext = resolve_index_session("NIFTY", snap)
+    assert ext["open"] == 22743.2
+    assert ext["hi"] == 22750.0
+    assert ext["lo"] == 22750.0
+    assert ext["last"] == 22750.0
+
+
 def test_flat_tape_does_not_inherit_an_older_spike():
     import time
 

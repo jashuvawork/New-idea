@@ -33,7 +33,12 @@ def _reset_tape():
 
 def _tape(symbol: str, *, open_: float, hi: float, lo: float, last: float, broker_day: bool = True):
     index_tick_helpers._session_extremes[symbol] = {
-        "date": _at(9, 15).date(), "open": open_, "hi": hi, "lo": lo, "last": last,
+        "date": _at(9, 15).date(),
+        "open": open_,
+        "hi": hi,
+        "lo": lo,
+        "last": last,
+        "fromCashOpen": True,
     }
     snap = SimpleNamespace(spot=last)
     if broker_day:
@@ -50,21 +55,22 @@ def _tape(symbol: str, *, open_: float, hi: float, lo: float, last: float, broke
 
 
 @pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
-def test_first_bar_blocks_both_sides(side):
-    """Oct 13 22300 PE entered 09:15:37 — neither side is confirmed in the first minute."""
-    snap = _tape("NIFTY", open_=22300.0, hi=22310.0, lo=22290.0, last=22308.6)
-    blocked, reason, _ = open_side_confirmation(
-        "NIFTY", side, snap, now=_at(9, 15, 37), settings=_settings(),
-    )
-    assert blocked and reason == "open_side_unconfirmed_first_bar"
+def test_before_0925_macro_gate_is_inactive(side):
+    """09:15–09:24: PR #676 capture may run; macro index side check starts at 09:25."""
+    snap = _tape("NIFTY", open_=22300.0, hi=22410.0, lo=22285.0, last=22395.0)
+    for t in (_at(9, 15, 37), _at(9, 20, 10), _at(9, 24, 59)):
+        blocked, reason, _ = open_side_confirmation(
+            "NIFTY", side, snap, now=t, settings=_settings(),
+        )
+        assert blocked is False and reason == ""
 
 
 def test_oct13_rally_off_open_blocks_pe_allows_ce():
-    """NIFTY V-up off the open: CE confirmed, PE blocked."""
+    """NIFTY V-up off the open: CE confirmed, PE blocked (inside 09:25–09:45)."""
     snap = _tape("NIFTY", open_=22300.0, hi=22410.0, lo=22285.0, last=22395.0)
     s = _settings()
-    put_blocked, put_reason, _ = open_side_confirmation("NIFTY", Side.PUT, snap, now=_at(9, 16, 18), settings=s)
-    call_blocked, _, meta = open_side_confirmation("NIFTY", Side.CALL, snap, now=_at(9, 16, 18), settings=s)
+    put_blocked, put_reason, _ = open_side_confirmation("NIFTY", Side.PUT, snap, now=_at(9, 26), settings=s)
+    call_blocked, _, meta = open_side_confirmation("NIFTY", Side.CALL, snap, now=_at(9, 26), settings=s)
     assert put_blocked and put_reason == "open_side_put_index_not_below_open"
     assert call_blocked is False
     assert meta["movePct"] > 0.10
@@ -73,8 +79,8 @@ def test_oct13_rally_off_open_blocks_pe_allows_ce():
 def test_slide_off_open_allows_pe_blocks_ce():
     snap = _tape("SENSEX", open_=72812.0, hi=72840.0, lo=72610.0, last=72625.0)
     s = _settings()
-    put_blocked, _, _ = open_side_confirmation("SENSEX", Side.PUT, snap, now=_at(9, 20, 10), settings=s)
-    call_blocked, call_reason, _ = open_side_confirmation("SENSEX", Side.CALL, snap, now=_at(9, 20, 10), settings=s)
+    put_blocked, _, _ = open_side_confirmation("SENSEX", Side.PUT, snap, now=_at(9, 30), settings=s)
+    call_blocked, call_reason, _ = open_side_confirmation("SENSEX", Side.CALL, snap, now=_at(9, 30), settings=s)
     assert put_blocked is False
     assert call_blocked and call_reason == "open_side_call_index_not_above_open"
 
@@ -174,10 +180,11 @@ def test_pr676_waives_open_side_for_call_atm_itm_base_lift():
 
 
 def test_after_first_order_time_requires_broker_day_open():
-    """Restart tick tape without broker dayOpen must not confirm sides after 09:20."""
+    """Restart tick tape without broker dayOpen or cash-open stamp blocks from 09:25."""
     snap = _tape(
         "NIFTY", open_=22700.0, hi=22750.0, lo=22690.0, last=22740.0, broker_day=False,
     )
+    index_tick_helpers._session_extremes["NIFTY"].pop("fromCashOpen", None)
     blocked, reason, meta = open_side_confirmation(
         "NIFTY", Side.CALL, snap, now=_at(9, 25), settings=_settings(),
     )
@@ -218,9 +225,11 @@ def test_broker_day_open_beats_a_preopen_tick_open():
     assert meta["movePct"] < 0.10
 
 
-def test_on_from_0915_to_0945_and_first_order_stays_0920():
+def test_window_0925_to_0945_and_first_order_stays_0920():
     s = Settings()
     assert s.open_side_confirmation_enabled is True
+    assert s.open_side_confirmation_start_hour == 9
+    assert s.open_side_confirmation_start_minute == 25
     assert s.open_caution_until_hour == 9 and s.open_caution_until_minute == 45
     assert s.entry_earliest_hour == 9 and s.entry_earliest_minute == 20
     assert s.explosion_entry_earliest_hour == 9 and s.explosion_entry_earliest_minute == 20
@@ -235,7 +244,7 @@ def test_on_from_0915_to_0945_and_first_order_stays_0920():
         (Side.CALL, 22700.0, 22710.0, 22660.0, 22665.0),
     ],
 )
-def test_default_blocks_the_wrong_side_only_inside_0915_0945(side, open_, hi, lo, last):
+def test_default_blocks_the_wrong_side_only_inside_0925_0945(side, open_, hi, lo, last):
     snap = _tape("NIFTY", open_=open_, hi=hi, lo=lo, last=last)
     blocked_open, _, _ = open_side_confirmation(
         "NIFTY", side, snap, now=_at(9, 25), settings=Settings(),

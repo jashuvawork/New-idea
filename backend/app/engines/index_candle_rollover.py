@@ -149,13 +149,10 @@ def _series_rollover(
 
 
 def _inside_open_window(now: datetime, settings: Any) -> bool:
-    """09:15 inclusive through the open-caution end (09:45). Idle at 09:45:00."""
-    minutes = now.hour * 60 + now.minute + now.second / 60.0
-    until = (
-        int(getattr(settings, "open_caution_until_hour", 9) or 9) * 60
-        + int(getattr(settings, "open_caution_until_minute", 45) or 45)
-    )
-    return _SESSION_OPEN_MINUTES <= minutes < until
+    """Same window as macro open-side index confirmation (default 09:25–09:45)."""
+    from app.engines.open_side_confirmation import open_side_index_confirmation_window_active
+
+    return open_side_index_confirmation_window_active(now, settings)
 
 
 def open_caution_window_active(

@@ -180,6 +180,19 @@ def test_window_ends_at_0945_exactly():
     assert reason == "index_falling_from_local_high"
 
 
+def test_before_0925_side_confirm_window_does_not_block():
+    candles = [
+        _bar(26, 22760, 22761, 22752, 22754),
+        _bar(27, 22754, 22755, 22746, 22748),
+        _bar(28, 22748, 22749, 22744, 22746),
+    ]
+    pre_confirm = datetime(2026, 10, 23, 9, 22, 0, tzinfo=IST)
+    blocked, _, _ = index_candle_rollover_blocked(
+        Side.CALL, candles, spot=22745.0, now=pre_confirm, settings=_settings(),
+    )
+    assert blocked is False
+
+
 def test_before_0915_does_not_block():
     candles = [
         _bar(26, 22760, 22761, 22752, 22754),
