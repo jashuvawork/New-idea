@@ -3047,6 +3047,8 @@ class Settings(BaseSettings):
     # 09:15 → 09:45 only. The side must match today's index tape (Oct 13 22300 PE).
     # Idle from 09:45. The first order stays 09:20.
     open_side_confirmation_enabled: bool = True
+    open_side_confirmation_start_hour: int = 9
+    open_side_confirmation_start_minute: int = 25
     open_side_confirmation_min_minutes: float = 1.0
     open_side_confirmation_min_index_move_pct: float = 0.10
     open_side_confirmation_min_range_position: float = 0.6

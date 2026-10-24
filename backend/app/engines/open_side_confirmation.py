@@ -5,9 +5,9 @@ built from the previous session's bars, while NIFTY V-reversed up off the open a
 22300 CE ran +194%. During the open window the side must be confirmed by *today's*
 index tape: price moved away from the session open in the trade's direction and sits
 in that side's half of the session range. CALL and PUT are exact mirrors.
-Active from 09:15 until 09:45, then idle. The first minute stays blocked.
-The first order stays 09:20. The cash open is the broker day open when the
-quote has it; a pre-open tick or a restart tick is not the open.
+Macro index side confirmation runs **09:25–09:45** IST (first entries may still
+fire from 09:20 under PR #676 capture lanes). The cash open is the broker day
+open when the quote has it; a pre-open tick or a restart tick is not the open.
 
 PR #676 top-moment capture (ATM/ITM base + first lift) may waive the macro index
 move/range bar when structural base + lift evidence is already confirmed.
@@ -24,6 +24,38 @@ from app.models.schemas import Side
 
 IST = ZoneInfo("Asia/Kolkata")
 MARKET_OPEN_MINUTES = 9 * 60 + 15
+
+
+def _ist_minutes(now: datetime) -> float:
+    return now.hour * 60 + now.minute + now.second / 60.0
+
+
+def open_side_confirmation_window_start_minutes(settings: Any) -> float:
+    settings = settings or get_settings()
+    return (
+        int(_cfg_float(settings, "open_side_confirmation_start_hour", 9)) * 60
+        + int(_cfg_float(settings, "open_side_confirmation_start_minute", 25))
+    )
+
+
+def open_side_confirmation_window_end_minutes(settings: Any) -> float:
+    settings = settings or get_settings()
+    return (
+        int(_cfg_float(settings, "open_caution_until_hour", 9)) * 60
+        + int(_cfg_float(settings, "open_caution_until_minute", 45))
+    )
+
+
+def open_side_index_confirmation_window_active(
+    now: datetime,
+    settings: Any = None,
+) -> bool:
+    """True during macro index side confirmation (default 09:25–09:44:59 IST)."""
+    settings = settings or get_settings()
+    minutes = _ist_minutes(now.astimezone(IST))
+    start = open_side_confirmation_window_start_minutes(settings)
+    end = open_side_confirmation_window_end_minutes(settings)
+    return start <= minutes < end
 
 
 def _cfg_float(settings: Any, name: str, default: float) -> float:
@@ -127,20 +159,11 @@ def open_side_confirmation(
     if getattr(settings, "open_side_confirmation_enabled", True) is not True:
         return False, "", {}
     now = (now or datetime.now(IST)).astimezone(IST)
-    minutes = now.hour * 60 + now.minute + now.second / 60.0
-    until = (
-        int(_cfg_float(settings, "open_caution_until_hour", 9)) * 60
-        + int(_cfg_float(settings, "open_caution_until_minute", 45))
-    )
-    if minutes < MARKET_OPEN_MINUTES or minutes >= until:
+    minutes = _ist_minutes(now)
+    if not open_side_index_confirmation_window_active(now, settings):
         return False, "", {}
 
     side_v = _side_val(side)
-    min_wait = _cfg_float(settings, "open_side_confirmation_min_minutes", 1.0)
-    if minutes < MARKET_OPEN_MINUTES + min_wait:
-        return True, "open_side_unconfirmed_first_bar", {
-            "minutesSinceOpen": round(minutes - MARKET_OPEN_MINUTES, 2),
-        }
 
     from app.engines.index_tick_helpers import (
         broker_day_ohlc,
@@ -155,21 +178,16 @@ def open_side_confirmation(
     spot = float(ext.get("last") or 0) or float(getattr(snap, "spot", 0) or 0)
     if session_open <= 0 or spot <= 0 or hi <= 0 or lo <= 0:
         return True, "open_side_no_session_tape", {}
-    entry_earliest_min = (
-        int(_cfg_float(settings, "entry_earliest_hour", 9)) * 60
-        + int(_cfg_float(settings, "entry_earliest_minute", 20))
-    )
-    if minutes >= entry_earliest_min:
-        broker_open, _, _ = broker_day_ohlc(snap)
-        if broker_open <= 0:
-            tape = index_session_extremes(symbol)
-            tape_ok = bool(tape.get("fromCashOpen")) and float(tape.get("open") or 0) > 0
-            if not tape_ok:
-                return True, "open_side_broker_day_open_required", {
-                    "sessionOpen": round(session_open, 2),
-                    "spot": round(spot, 2),
-                    "tapeOpenOnly": True,
-                }
+    broker_open, _, _ = broker_day_ohlc(snap)
+    if broker_open <= 0:
+        tape = index_session_extremes(symbol)
+        tape_ok = bool(tape.get("fromCashOpen")) and float(tape.get("open") or 0) > 0
+        if not tape_ok:
+            return True, "open_side_broker_day_open_required", {
+                "sessionOpen": round(session_open, 2),
+                "spot": round(spot, 2),
+                "tapeOpenOnly": True,
+            }
     hi, lo = max(hi, spot), min(lo, spot)
 
     move_pct = (spot - session_open) / session_open * 100.0
@@ -216,6 +234,14 @@ def open_side_confirmation_summary(snapshots: dict[str, Any], *, settings: Any =
     settings = settings or get_settings()
     out: dict[str, Any] = {
         "enabled": getattr(settings, "open_side_confirmation_enabled", True) is True,
+        "windowStartIst": (
+            f"{int(getattr(settings, 'open_side_confirmation_start_hour', 9)):02d}:"
+            f"{int(getattr(settings, 'open_side_confirmation_start_minute', 25)):02d}"
+        ),
+        "windowEndIst": (
+            f"{int(getattr(settings, 'open_caution_until_hour', 9)):02d}:"
+            f"{int(getattr(settings, 'open_caution_until_minute', 45)):02d}"
+        ),
         "symbols": {},
     }
     for sym, snap in (snapshots or {}).items():

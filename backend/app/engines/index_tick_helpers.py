@@ -73,7 +73,7 @@ def record_index_session_extreme(
     current = now or datetime.now(ZoneInfo("Asia/Kolkata"))
     if getattr(current, "tzinfo", None) is not None:
         current = current.astimezone(ZoneInfo("Asia/Kolkata"))
-    minutes = current.hour * 60 + current.minute
+    minutes = current.hour * 60 + current.minute + current.second / 60.0
     if minutes < _CASH_OPEN_MINUTES:
         return
     today = current.date()
@@ -132,10 +132,9 @@ def resolve_index_session(symbol: str, snap: Any = None) -> dict[str, float]:
     if day_low > 0:
         lo = min(lo, day_low) if lo > 0 else day_low
     spot = float(getattr(snap, "spot", 0) or 0) or last
-    if spot > 0 and hi > 0:
-        hi = max(hi, spot)
-    if spot > 0 and lo > 0:
-        lo = min(lo, spot)
+    if spot > 0:
+        hi = max(hi, spot) if hi > 0 else spot
+        lo = min(lo, spot) if lo > 0 else spot
     return {
         "open": session_open,
         "hi": hi,
