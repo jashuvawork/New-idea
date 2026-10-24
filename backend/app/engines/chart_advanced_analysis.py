@@ -555,36 +555,56 @@ def build_chart_analysis(
         session_lows[-1] = min(session_lows[-1], spot)
         session_closes[-1] = spot
 
-    dh = day_high or (max(session_highs) if session_highs else (max(highs) if highs else spot))
-    dl = day_low or (min(session_lows) if session_lows else (min(lows) if lows else spot))
+    from app.services.upstox import _candle_ts
+
+    stamped = any(_candle_ts(row) is not None for row in primary_candles)
+    # A timestamped chart is a live Upstox series. Today's high is the cash
+    # session or the quote. The multi-day window, and the live spot, are not
+    # a substitute. An untimestamped series is a self-contained replay.
+    dh = float(day_high or 0)
+    dl = float(day_low or 0)
+    if dh <= 0:
+        if session_highs:
+            dh = max(session_highs)
+        elif not stamped and highs:
+            dh = max(highs)
+    if dl <= 0:
+        if session_lows:
+            dl = min(session_lows)
+        elif not stamped and lows:
+            dl = min(lows)
     pc = float(prev_close or 0)
     if pc <= 0:
         pc = prior_close_before_cash_session(primary_candles)
-    if pc <= 0 and not session_rows:
-        pc = closes[0] if closes else spot
+    if pc <= 0 and not stamped and closes:
+        pc = closes[0]
 
     fib = compute_fibonacci_levels(sl, sh, spot, trend=trend)
     pivots = compute_pivot_points(dh, dl, pc)
     gann = compute_gann_levels(dl, dh)
     pitchfork = compute_andrews_pitchfork(swing_lows, swing_highs, spot)
     ichimoku = compute_ichimoku(highs, lows, closes, spot)
-    smc = analyze_smc_ict(opens, highs, lows, closes, spot)
     if session_highs and session_lows:
-        # SMC sessionHigh is max(entire chart). That chart includes yesterday, so
-        # premium/discount and "session low" were measured from the wrong day.
-        session_high = max(session_highs)
-        session_low = min(session_lows)
-        eq = (session_high + session_low) / 2.0
-        smc = dict(smc)
-        smc["sessionHigh"] = round(session_high, 2)
-        smc["sessionLow"] = round(session_low, 2)
-        smc["equilibrium"] = round(eq, 2)
-        if spot > eq * 1.001:
-            smc["premiumDiscount"] = "PREMIUM"
-        elif spot < eq * 0.999:
-            smc["premiumDiscount"] = "DISCOUNT"
-        else:
+        # Structure, premium/discount, and session high from today's cash bars.
+        # The 300-bar window still feeds Ichimoku and RSI, which need warmup.
+        smc = analyze_smc_ict(
+            _session_opens, session_highs, session_lows, session_closes, spot,
+        )
+    else:
+        smc = analyze_smc_ict(opens, highs, lows, closes, spot)
+        if stamped:
+            # Yesterday's swing is still in the warmup window. It is not
+            # today's session, and it must not score a premium or a BOS.
+            smc = dict(smc)
+            smc["sessionHigh"] = 0.0
+            smc["sessionLow"] = 0.0
+            smc["equilibrium"] = 0.0
             smc["premiumDiscount"] = "EQUILIBRIUM"
+            smc["bos"] = None
+            smc["choch"] = None
+            smc["stopHunt"] = None
+            smc["judasSwing"] = False
+            smc["displacement"] = False
 
     patterns: list[dict[str, Any]] = []
     pattern_sources: list[tuple[str, list]] = []
@@ -631,10 +651,14 @@ def build_chart_analysis(
             return float(row.get("volume", 0) or 0)
         return 0.0
 
-    vwap_bars = session_rows or primary_candles
-    vwap_highs = session_highs or highs
-    vwap_lows = session_lows or lows
-    vwap_closes = session_closes or closes
+    if stamped and session_rows:
+        vwap_bars = session_rows
+        vwap_highs, vwap_lows, vwap_closes = session_highs, session_lows, session_closes
+    elif stamped:
+        vwap_bars, vwap_highs, vwap_lows, vwap_closes = [], [], [], []
+    else:
+        vwap_bars = primary_candles
+        vwap_highs, vwap_lows, vwap_closes = highs, lows, closes
     volumes = [_bar_volume(row) for row in vwap_bars]
     squeeze = asdict(compute_squeeze(highs, lows, closes))
     adx = asdict(compute_adx(highs, lows, closes))

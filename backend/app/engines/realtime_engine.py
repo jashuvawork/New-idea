@@ -96,11 +96,55 @@ def _atm_strike(spot: float, symbol: str) -> float:
     return atm_strike(spot, symbol)
 
 
+def _cash_rows_or_raw(candles: list) -> list:
+    """Today's 09:15 IST bars when the series is timestamped.
+
+    Live Upstox charts are ~300 bars so RSI and MACD can warm up. The head of
+    that series is yesterday. Rows with no timestamp (tests, replays) stay as
+    given, because there is no session date to filter.
+    """
+    if not candles:
+        return []
+    from app.engines.index_candle_rollover import cash_session_candles
+    from app.services.upstox import _candle_ts
+
+    if any(_candle_ts(row) is not None for row in candles):
+        return cash_session_candles(candles)
+    return list(candles)
+
+
+def _bar_hlc(row: Any) -> tuple[float, float, float] | None:
+    try:
+        if isinstance(row, (list, tuple)) and len(row) >= 5:
+            high, low, close = float(row[2] or 0), float(row[3] or 0), float(row[4] or 0)
+        elif isinstance(row, dict):
+            high = float(row.get("high") or 0)
+            low = float(row.get("low") or 0)
+            close = float(row.get("close") or 0)
+        else:
+            return None
+    except (TypeError, ValueError):
+        return None
+    if high <= 0 or low <= 0 or close <= 0:
+        return None
+    return high, low, close
+
+
+def _quoted_float(raw: Any) -> float | None:
+    if raw is None or raw is False or raw == "":
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _detect_regime(candles: list, spot: float = 0.0) -> Regime:
-    if not candles or len(candles) < 10:
+    rows = _cash_rows_or_raw(candles)
+    if not rows or len(rows) < 10:
         return Regime.RANGE_BOUND
 
-    closes = [c[4] if isinstance(c, list) else c.get("close", 0) for c in candles[-20:]]
+    closes = [c[4] if isinstance(c, list) else c.get("close", 0) for c in rows[-20:]]
     if not closes:
         return Regime.RANGE_BOUND
 
@@ -136,6 +180,9 @@ def _build_orderflow(
     delta_vel = vol_accel = breakout_vel = tick_mom = 0.0
     signed_mom = 0.0
     bid_ask_imb = 50.0
+    # Price and volume pace from today's cash bars. The chart tail at 09:20
+    # still contains yesterday, and that gap is not a 5-minute impulse.
+    candles = _cash_rows_or_raw(candles)
 
     if candles and len(candles) >= 5:
         volumes = [c[5] if isinstance(c, list) else c.get("volume", 0) for c in candles[-10:]]
@@ -233,25 +280,34 @@ def _build_orderflow(
 
 
 def _build_profile(candles: list, spot: float) -> MarketProfile:
-    if not candles:
-        return MarketProfile(poc=spot, vah=spot + 50, val=spot - 50)
+    """POC, value area, and opening range from today's 09:15 cash bars.
 
-    highs = [c[2] if isinstance(c, list) else c.get("high", 0) for c in candles]
-    lows = [c[3] if isinstance(c, list) else c.get("low", 0) for c in candles]
-    closes = [c[4] if isinstance(c, list) else c.get("close", 0) for c in candles]
+    The first 15 bars of the 300-bar chart are yesterday. Using them made the
+    open look like a break of a range that was not today's. A series with no
+    cash-session print does not invent a ±50 point value area around spot.
+    """
+    from app.engines.index_candle_rollover import cash_session_candles
 
-    poc = sum(closes) / len(closes) if closes else spot
-    vah = max(highs) if highs else spot + 50
-    val = min(lows) if lows else spot - 50
-    or_high = max(highs[:15]) if len(highs) >= 15 else vah
-    or_low = min(lows[:15]) if len(lows) >= 15 else val
+    spot_px = float(spot or 0)
+    blank = MarketProfile(poc=round(spot_px, 2) if spot_px > 0 else 0.0)
+    session = cash_session_candles(candles)
+    bars = [hlc for row in session if (hlc := _bar_hlc(row)) is not None]
+    if not bars:
+        return blank
 
+    highs = [bar[0] for bar in bars]
+    lows = [bar[1] for bar in bars]
+    closes = [bar[2] for bar in bars]
+    poc = sum(closes) / len(closes)
+    # Opening range is the first 15 cash minutes. Before that many bars
+    # exist, the range printed so far is still today's range.
+    or_n = min(15, len(bars))
     return MarketProfile(
         poc=round(poc, 2),
-        vah=round(vah, 2),
-        val=round(val, 2),
-        openingRangeHigh=round(or_high, 2),
-        openingRangeLow=round(or_low, 2),
+        vah=round(max(highs), 2),
+        val=round(min(lows), 2),
+        openingRangeHigh=round(max(highs[:or_n]), 2),
+        openingRangeLow=round(min(lows[:or_n]), 2),
     )
 
 
@@ -265,18 +321,31 @@ def _build_greeks(chain: list, atm: float, spot: float, *, symbol: str = "") -> 
         strike = row.get("strike_price") or row.get("strike", 0)
         if abs(float(strike or 0) - atm) > near:
             continue
-        ce = row.get("call_options", {}) or row.get("CE", {})
-        greeks = ce.get("greeks", {}) or {}
-        iv = ce.get("implied_volatility") or greeks.get("iv", 15)
+        ce = row.get("call_options", {}) or row.get("CE", {}) or {}
+        raw_greeks = ce.get("greeks") or {}
+        greeks = raw_greeks if isinstance(raw_greeks, dict) else {}
+        iv = _quoted_float(ce.get("implied_volatility"))
+        if iv is None or iv <= 0:
+            iv = _quoted_float(greeks.get("iv"))
+            if iv is not None and iv <= 0:
+                iv = None
+        delta = _quoted_float(greeks.get("delta"))
+        gamma = _quoted_float(greeks.get("gamma"))
+        theta = _quoted_float(greeks.get("theta"))
+        vega = _quoted_float(greeks.get("vega"))
+        if iv is None and delta is None and gamma is None and theta is None and vega is None:
+            continue
+        # ivRank is a scale of the quoted IV. Upstox does not send a rank,
+        # and a missing IV is not rank 50 or IV 15.
         return Greeks(
-            delta=greeks.get("delta", 0.45),
-            gamma=greeks.get("gamma", 0.002),
-            theta=greeks.get("theta", -5),
-            vega=greeks.get("vega", 10),
-            ivExpansion=1.0 + (iv - 15) / 100 if iv else 1.0,
-            ivRank=min(100, max(0, iv * 3)) if iv else 50,
+            delta=0.0 if delta is None else delta,
+            gamma=0.0 if gamma is None else gamma,
+            theta=0.0 if theta is None else theta,
+            vega=0.0 if vega is None else vega,
+            ivExpansion=(1.0 + (iv - 15.0) / 100.0) if iv else 1.0,
+            ivRank=min(100.0, max(0.0, iv * 3.0)) if iv else 0.0,
         )
-    return Greeks()
+    return Greeks(ivRank=0.0)
 
 
 def _scan_runners(

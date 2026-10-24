@@ -91,6 +91,24 @@ def test_session_range_ignores_yesterday():
     assert analysis.vwap["vwap"] > 190
 
 
+def test_yesterday_only_chart_is_not_todays_session():
+    prior = datetime.now(IST).date() - timedelta(days=1)
+    yesterday = [f"{prior.isoformat()}T15:20:00+05:30", 100, 110, 90, 100, 1000]
+    analysis = build_chart_analysis(
+        [yesterday],
+        [],
+        100.0,
+        MarketProfile(poc=100),
+        symbol="NIFTY",
+    )
+    assert analysis.institutional["sessionHigh"] == 0.0
+    assert analysis.institutional["sessionLow"] == 0.0
+    assert analysis.institutional["premiumDiscount"] == "EQUILIBRIUM"
+    assert analysis.institutional["bos"] is None
+    assert analysis.pivots == {}
+    assert analysis.vwap["vwap"] == 0.0
+
+
 def test_build_chart_analysis_mtf():
     closes = [100 + i * 0.2 for i in range(80)]
     candles_1m = _candles(closes)
