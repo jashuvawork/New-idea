@@ -9,6 +9,20 @@ from app.engines.moneyness import _depth_steps, atm_strike, classify_moneyness
 from app.models.schemas import Side, SymbolSnapshot
 
 
+def _cfg_float(settings: Any, name: str, default: float) -> float:
+    """Read a float setting. Unset mocks and missing values fall back to ``default``.
+
+    ``float(MagicMock())`` is ``1.0``, which would turn a 45s age into one second.
+    """
+    raw = getattr(settings, name, default)
+    if raw is None or type(raw).__module__ == "unittest.mock":
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _side_val(side: Side | str) -> str:
     return side.value if isinstance(side, Side) else str(side).upper()
 
@@ -995,6 +1009,28 @@ def coil_top_entry_blocked(
     position = (current - low) / (high - low)
     if position <= max_pos:
         return False, ""
+    # The sample that prints the range high is the lift. A coil ceiling is a
+    # high that was already traded. The 1.5s local-base bucket stores the base
+    # until the next sample, so the lifted price shows up about a second later
+    # already sitting at position 1.0.
+    min_age = _cfg_float(
+        settings, "explosion_coil_top_min_ceiling_age_seconds", 45.0,
+    )
+    if min_age > 0:
+        try:
+            from app.engines.explosion_detector import prior_range_ceiling_age_seconds
+
+            ceiling_age = prior_range_ceiling_age_seconds(
+                sym,
+                strike,
+                side,
+                lookback_seconds=lookback,
+                ceiling_position_frac=max_pos,
+            )
+        except Exception:
+            ceiling_age = None
+        if ceiling_age is not None and ceiling_age < min_age:
+            return False, ""
     return True, f"coil_top_{policy.day_type.lower()}_position_{position:.0%}_run_{run:.0%}"
 
 
