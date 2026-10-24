@@ -8,6 +8,9 @@ in that side's half of the session range. CALL and PUT are exact mirrors.
 Active from 09:15 until 09:45, then idle. The first minute stays blocked.
 The first order stays 09:20. The cash open is the broker day open when the
 quote has it; a pre-open tick or a restart tick is not the open.
+
+PR #676 top-moment capture (ATM/ITM base + first lift) may waive the macro index
+move/range bar when structural base + lift evidence is already confirmed.
 """
 
 from __future__ import annotations
@@ -34,11 +37,88 @@ def _side_val(side: Side | str) -> str:
     return side.value if isinstance(side, Side) else str(side).upper()
 
 
+def _candidate_evidence(candidate: Any) -> dict[str, Any]:
+    alert = getattr(candidate, "alert", None)
+    alert_d = dict(alert) if isinstance(alert, dict) else {}
+    pretrade = getattr(candidate, "pretrade_meta", None) or {}
+    ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
+    if not isinstance(ranking, dict):
+        ranking = {}
+    nested = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
+    return {**alert_d, **nested, **ranking}
+
+
+def open_side_top_moment_capture_waived(
+    candidate: Any,
+    snap: Any = None,
+    *,
+    state: Any = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """True when PR #676-style base + lift capture should not wait on macro index move."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "open_side_top_moment_capture_waive_enabled", True)):
+        return False, ""
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, ""
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    side_v = _side_val(getattr(candidate, "side", ""))
+    snap = snap or getattr(candidate, "snap", None)
+    if not sym or side_v not in ("CALL", "PUT"):
+        return False, ""
+
+    if side_v == "CALL":
+        from app.engines.best_trade_policy import call_atm_itm_base_capture_eligible
+
+        ok, _meta = call_atm_itm_base_capture_eligible(
+            candidate, snap, state=state, settings=settings,
+        )
+        if ok:
+            return True, "call_atm_itm_base_capture"
+
+    evidence = _candidate_evidence(candidate)
+    pretrade = getattr(candidate, "pretrade_meta", None) or {}
+    ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
+    if not isinstance(ranking, dict):
+        ranking = {}
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return False, ""
+
+    from app.engines.best_trade_policy import (
+        _call_atm_itm_launch_ok,
+        symmetric_structural_base_evidence,
+    )
+
+    if not symmetric_structural_base_evidence(evidence, settings=settings):
+        return False, ""
+    if not _call_atm_itm_launch_ok(evidence, settings=settings):
+        return False, ""
+
+    if side_v == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_entry_unlock_fingerprint
+
+        if put_slide_entry_unlock_fingerprint(
+            evidence,
+            ranking,
+            None,
+            state=state,
+            snap=snap,
+            symbol=sym,
+            settings=settings,
+        ):
+            return True, "put_slide_top_moment_capture"
+
+    return True, "first_lift_structural_base"
+
+
 def open_side_confirmation(
     symbol: str,
     side: Side | str,
     snap: Any = None,
     *,
+    candidate: Any = None,
+    state: Any = None,
     now: Optional[datetime] = None,
     settings: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
@@ -62,7 +142,11 @@ def open_side_confirmation(
             "minutesSinceOpen": round(minutes - MARKET_OPEN_MINUTES, 2),
         }
 
-    from app.engines.index_tick_helpers import broker_day_ohlc, resolve_index_session
+    from app.engines.index_tick_helpers import (
+        broker_day_ohlc,
+        index_session_extremes,
+        resolve_index_session,
+    )
 
     ext = resolve_index_session(symbol, snap)
     session_open = float(ext.get("open") or 0)
@@ -78,11 +162,14 @@ def open_side_confirmation(
     if minutes >= entry_earliest_min:
         broker_open, _, _ = broker_day_ohlc(snap)
         if broker_open <= 0:
-            return True, "open_side_broker_day_open_required", {
-                "sessionOpen": round(session_open, 2),
-                "spot": round(spot, 2),
-                "tapeOpenOnly": True,
-            }
+            tape = index_session_extremes(symbol)
+            tape_ok = bool(tape.get("fromCashOpen")) and float(tape.get("open") or 0) > 0
+            if not tape_ok:
+                return True, "open_side_broker_day_open_required", {
+                    "sessionOpen": round(session_open, 2),
+                    "spot": round(spot, 2),
+                    "tapeOpenOnly": True,
+                }
     hi, lo = max(hi, spot), min(lo, spot)
 
     move_pct = (spot - session_open) / session_open * 100.0
@@ -99,16 +186,28 @@ def open_side_confirmation(
 
     min_move = _cfg_float(settings, "open_side_confirmation_min_index_move_pct", 0.10)
     min_pos = _cfg_float(settings, "open_side_confirmation_min_range_position", 0.6)
+    side_reason = ""
+    blocked_side = False
     if side_v == "CALL":
         if move_pct < min_move:
-            return True, "open_side_call_index_not_above_open", meta
-        if range_pos < min_pos:
-            return True, "open_side_call_not_in_upper_range", meta
+            blocked_side, side_reason = True, "open_side_call_index_not_above_open"
+        elif range_pos < min_pos:
+            blocked_side, side_reason = True, "open_side_call_not_in_upper_range"
     elif side_v == "PUT":
         if move_pct > -min_move:
-            return True, "open_side_put_index_not_below_open", meta
-        if range_pos > 1.0 - min_pos:
-            return True, "open_side_put_not_in_lower_range", meta
+            blocked_side, side_reason = True, "open_side_put_index_not_below_open"
+        elif range_pos > 1.0 - min_pos:
+            blocked_side, side_reason = True, "open_side_put_not_in_lower_range"
+
+    if blocked_side and candidate is not None:
+        waived, waive_reason = open_side_top_moment_capture_waived(
+            candidate, snap, state=state, settings=settings,
+        )
+        if waived:
+            meta["openSideCaptureWaived"] = waive_reason
+            return False, "", meta
+    if blocked_side:
+        return True, side_reason, meta
     return False, "", meta
 
 

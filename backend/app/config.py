@@ -3050,6 +3050,8 @@ class Settings(BaseSettings):
     open_side_confirmation_min_minutes: float = 1.0
     open_side_confirmation_min_index_move_pct: float = 0.10
     open_side_confirmation_min_range_position: float = 0.6
+    # PR #676 agenda: ATM/ITM base + first-lift may enter before index +0.10% / range half.
+    open_side_top_moment_capture_waive_enabled: bool = True
     # Off. On 19 mornings (25 Sep–23 Oct) this veto never changed the side the
     # index check had already chosen, and by the close it cut winners as often
     # as it saved losers. The index check already refuses a call that is not

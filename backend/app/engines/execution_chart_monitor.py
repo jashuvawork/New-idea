@@ -476,15 +476,55 @@ async def monitor_trade_chart_before_execution(
             "padLaneChartBypass": pad_lane_chart_bypass,
         }
         in_open = open_caution_window_active(decision_now, settings)
-        reason = (
-            "exec_live_chart_required_open_window"
-            if in_open
-            else "exec_live_chart_fetch_failed"
+        if in_open:
+            fallback["openCautionWindow"] = True
+            fallback["passed"] = False
+            fallback["blockReason"] = "exec_live_chart_required_open_window"
+            return False, "exec_live_chart_required_open_window", fallback
+
+        from types import SimpleNamespace
+
+        from app.engines.best_trade_policy import call_atm_itm_base_capture_eligible
+
+        lift_lane = bool(
+            strict_first_lift_bypass
+            or pad_lane_chart_bypass
+            or premium_fade_pad_lane
         )
-        fallback["openCautionWindow"] = in_open
+        if not lift_lane:
+            cand_probe = SimpleNamespace(
+                mode=mode or "explosion",
+                symbol=symbol,
+                side=side,
+                strike=strike,
+                alert=alert if isinstance(alert, dict) else {},
+                pretrade_meta={},
+                snap=snap,
+            )
+            atm_ok, _ = call_atm_itm_base_capture_eligible(
+                cand_probe, snap, state=state, settings=settings,
+            )
+            lift_lane = atm_ok
+
+        if lift_lane:
+            blocked, chart_reason = chart_blocks_side(
+                side, snap.spotChart, trade_score=trade_score,
+                breadth_aligned_bypass=breadth_bypass,
+                premium_led_bypass=structure_chart_bypass,
+                expiry_explosion_bypass=expiry_chart_bypass,
+                strict_first_lift_bypass=strict_chart_bypass,
+                index_trough_bypass=index_trough_bypass,
+            )
+            if blocked:
+                return False, f"exec_{chart_reason}", fallback
+            fallback["passed"] = True
+            fallback["liftCaptureSnapshotFallback"] = True
+            return True, "ok", fallback
+
+        fallback["openCautionWindow"] = False
         fallback["passed"] = False
-        fallback["blockReason"] = reason
-        return False, reason, fallback
+        fallback["blockReason"] = "exec_live_chart_fetch_failed"
+        return False, "exec_live_chart_fetch_failed", fallback
 
     index_chart = SpotChart(**meta["indexChartFull"])
     from app.engines.index_candle_rollover import index_candle_rollover_blocked

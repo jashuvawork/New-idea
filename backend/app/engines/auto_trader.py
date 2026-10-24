@@ -4841,7 +4841,12 @@ async def process(
                 from app.engines.open_side_confirmation import open_side_confirmation
 
                 open_blocked, open_reason, open_meta = open_side_confirmation(
-                    best.symbol, best.side, snapshots.get(best.symbol), settings=settings,
+                    best.symbol,
+                    best.side,
+                    snapshots.get(best.symbol),
+                    candidate=best,
+                    state=state,
+                    settings=settings,
                 )
                 if open_blocked:
                     skipped.append(
