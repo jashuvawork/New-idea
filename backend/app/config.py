@@ -922,6 +922,9 @@ class Settings(BaseSettings):
     explosion_coil_top_max_position_frac: float = 0.50
     explosion_coil_top_tiers_csv: str = "WATCH,BUILDING"
     explosion_coil_top_breakout_min_velocity_3s: float = 2.0
+    # The print that makes the range high is the lift. Block the ceiling only
+    # after price has already traded there. A one-second-old high was a coil top.
+    explosion_coil_top_min_ceiling_age_seconds: float = 45.0
     # Day-adaptive entry floors (coil-top, cold-base probe, BUILDING min velocity).
     entry_day_adaptive_enabled: bool = True
     entry_day_worst_coil_top_max_position_frac: float = 0.35
@@ -3750,6 +3753,8 @@ class Settings(BaseSettings):
     ict_good_day_force_max_lots: bool = True
     # Late fade-chase: skip new entries when peak already extended and live velocity cooling.
     # Was 120% — too late (24250-style +91% chases still passed).
+    # A high that has not yet aged (explosion_post_peak_chase_min_peak_age_seconds)
+    # is the lift, not a fade — cold or not-yet-measured velocity must not block it.
     ict_late_chase_block_enabled: bool = True
     ict_late_chase_min_peak_pct: float = 75.0
     ict_late_chase_max_live_velocity_3s: float = 1.0

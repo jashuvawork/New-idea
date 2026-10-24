@@ -164,6 +164,84 @@ def test_late_fade_chase_blocked(mock_settings, _elite):
     assert "late_fade" in reason
 
 
+def _seed_premium_tape(symbol, strike, side, prems, *, step_s=1.0):
+    import app.engines.explosion_detector as ed
+    from app.engines.explosion_detector import _open_key
+    from collections import deque
+
+    key = _open_key(symbol, strike, side)
+    t0 = datetime(2026, 10, 24, 10, 0, tzinfo=IST)
+    ed._local_base_hist[key] = deque(
+        (t0 + timedelta(seconds=step_s * i), float(p)) for i, p in enumerate(prems)
+    )
+    return key
+
+
+def _clear_premium_tape():
+    from app.engines.explosion_detector import reset_detector_state_for_tests
+
+    reset_detector_state_for_tests()
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_fresh_high_with_cold_velocity_is_not_a_late_fade(mock_settings):
+    """Day move is already extended, but this print just made the high."""
+    mock_settings.return_value = _settings()
+    _clear_premium_tape()
+    try:
+        _seed_premium_tape("NIFTY", 24400, Side.CALL, [100.0] * 12 + [180.0])
+        event = ExplosionEvent(
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=24400,
+            premium=180.0,
+            velocity_3s=0.0,
+            velocity_9s=0.0,
+            velocity_15s=0.0,
+            volume_surge=1.0,
+            explosion_score=70.0,
+            tier="ELITE",
+            reason="lift",
+            daily_move_pct=80.0,
+            peak_move_pct=80.0,
+        )
+        blocked, reason = late_fade_chase_blocked(event)
+    finally:
+        _clear_premium_tape()
+    assert blocked is False
+    assert reason == ""
+
+
+@patch("app.engines.ict_breakout_monitor.get_settings")
+def test_aged_high_with_cold_velocity_is_still_a_late_fade(mock_settings):
+    mock_settings.return_value = _settings()
+    _clear_premium_tape()
+    try:
+        _seed_premium_tape(
+            "NIFTY", 24400, Side.CALL, [100.0] * 8 + [180.0] * 5, step_s=20.0,
+        )
+        event = ExplosionEvent(
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=24400,
+            premium=180.0,
+            velocity_3s=0.2,
+            velocity_9s=0.1,
+            velocity_15s=0.0,
+            volume_surge=1.0,
+            explosion_score=70.0,
+            tier="ELITE",
+            reason="faded",
+            daily_move_pct=80.0,
+            peak_move_pct=80.0,
+        )
+        blocked, reason = late_fade_chase_blocked(event)
+    finally:
+        _clear_premium_tape()
+    assert blocked is True
+    assert "late_fade" in reason
+
+
 @patch("app.engines.ict_breakout_monitor.get_settings")
 def test_building_early_break_tradeable(mock_settings):
     mock_settings.return_value = _settings()

@@ -3858,8 +3858,59 @@ def late_fade_chase_blocked(
     ):
         return False, ""
     if move >= min_peak and v3 <= max_v3:
+        # Cold velocity on a high that was just printed is the lift, not a fade.
+        # Velocity looks back 3s and is still 0 a second after the print. No tape
+        # keeps the block: an extended move we have not measured stays a fade.
+        if _fresh_premium_high(event, settings):
+            return False, ""
         return True, f"ict_late_fade_chase_peak_{move:.0f}%_v3_{v3:.1f}"
     return False, ""
+
+
+def _cfg_float(settings: Any, name: str, default: float) -> float:
+    raw = getattr(settings, name, default)
+    # float(MagicMock()) is 1.0 — an unset mock is not a configured age or band.
+    if raw is None or type(raw).__module__ == "unittest.mock":
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _fresh_premium_high(event: Any, settings: Any) -> bool:
+    """True when the live premium is a high the tape has not traded yet."""
+    prem = float(getattr(event, "premium", 0) or 0)
+    sym = str(getattr(event, "symbol", "") or "")
+    side = getattr(event, "side", None)
+    strike = float(getattr(event, "strike", 0) or 0)
+    if prem <= 0 or not sym or side is None or strike <= 0:
+        return False
+    min_age = _cfg_float(
+        settings, "explosion_post_peak_chase_min_peak_age_seconds", 45.0,
+    )
+    if min_age <= 0:
+        return False
+    lookback = _cfg_float(
+        settings, "explosion_post_peak_chase_lookback_seconds", 900.0,
+    )
+    near = _cfg_float(
+        settings, "explosion_post_peak_chase_near_top_frac", 0.12,
+    )
+    try:
+        from app.engines.explosion_detector import prior_near_level_age_seconds
+
+        age = prior_near_level_age_seconds(
+            sym,
+            strike,
+            side,
+            prem,
+            lookback_seconds=lookback,
+            near_frac=near,
+        )
+    except Exception:
+        return False
+    return age is not None and age < min_age
 
 
 def _expiry_worst_session(
