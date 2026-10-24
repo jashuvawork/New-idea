@@ -447,7 +447,7 @@ def test_open_window_chart_fetch_failure_blocks_instead_of_snapshot_fallback():
     assert meta["openCautionWindow"] is True
 
 
-def test_after_open_window_chart_fetch_failure_may_use_snapshot_fallback():
+def test_after_open_window_chart_fetch_failure_blocks_not_snapshot_fallback():
     chart = SpotChart(
         direction="BULLISH",
         momentum5Pct=0.12,
@@ -483,9 +483,10 @@ def test_after_open_window_chart_fetch_failure_may_use_snapshot_fallback():
             )
         )
 
-    assert passed is True
-    assert reason == "ok"
+    assert passed is False
+    assert reason == "exec_live_chart_fetch_failed"
     assert meta["source"] == "snapshot_fallback"
+    assert meta["openCautionWindow"] is False
 
 
 def test_fetch_live_trade_charts_includes_quote_context():

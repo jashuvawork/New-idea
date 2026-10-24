@@ -44,7 +44,7 @@ def open_side_confirmation(
 ) -> tuple[bool, str, dict[str, Any]]:
     """Return (blocked, reason, meta) for an entry on ``side`` during the open window."""
     settings = settings or get_settings()
-    if getattr(settings, "open_side_confirmation_enabled", False) is not True:
+    if getattr(settings, "open_side_confirmation_enabled", True) is not True:
         return False, "", {}
     now = (now or datetime.now(IST)).astimezone(IST)
     minutes = now.hour * 60 + now.minute + now.second / 60.0
@@ -62,7 +62,7 @@ def open_side_confirmation(
             "minutesSinceOpen": round(minutes - MARKET_OPEN_MINUTES, 2),
         }
 
-    from app.engines.index_tick_helpers import resolve_index_session
+    from app.engines.index_tick_helpers import broker_day_ohlc, resolve_index_session
 
     ext = resolve_index_session(symbol, snap)
     session_open = float(ext.get("open") or 0)
@@ -71,6 +71,18 @@ def open_side_confirmation(
     spot = float(ext.get("last") or 0) or float(getattr(snap, "spot", 0) or 0)
     if session_open <= 0 or spot <= 0 or hi <= 0 or lo <= 0:
         return True, "open_side_no_session_tape", {}
+    entry_earliest_min = (
+        int(_cfg_float(settings, "entry_earliest_hour", 9)) * 60
+        + int(_cfg_float(settings, "entry_earliest_minute", 20))
+    )
+    if minutes >= entry_earliest_min:
+        broker_open, _, _ = broker_day_ohlc(snap)
+        if broker_open <= 0:
+            return True, "open_side_broker_day_open_required", {
+                "sessionOpen": round(session_open, 2),
+                "spot": round(spot, 2),
+                "tapeOpenOnly": True,
+            }
     hi, lo = max(hi, spot), min(lo, spot)
 
     move_pct = (spot - session_open) / session_open * 100.0
@@ -104,7 +116,7 @@ def open_side_confirmation_summary(snapshots: dict[str, Any], *, settings: Any =
     """HUD: whether CE / PE would pass open confirmation right now, per symbol."""
     settings = settings or get_settings()
     out: dict[str, Any] = {
-        "enabled": getattr(settings, "open_side_confirmation_enabled", False) is True,
+        "enabled": getattr(settings, "open_side_confirmation_enabled", True) is True,
         "symbols": {},
     }
     for sym, snap in (snapshots or {}).items():

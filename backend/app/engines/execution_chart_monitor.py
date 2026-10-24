@@ -475,22 +475,16 @@ async def monitor_trade_chart_before_execution(
             "firstLiftBypass": first_lift_bypass,
             "padLaneChartBypass": pad_lane_chart_bypass,
         }
-        if open_caution_window_active(decision_now, settings):
-            fallback["openCautionWindow"] = True
-            fallback["passed"] = False
-            fallback["blockReason"] = "exec_live_chart_required_open_window"
-            return False, "exec_live_chart_required_open_window", fallback
-        blocked, reason = chart_blocks_side(
-            side, snap.spotChart, trade_score=trade_score,
-            breadth_aligned_bypass=breadth_bypass,
-            premium_led_bypass=structure_chart_bypass,
-            expiry_explosion_bypass=expiry_chart_bypass,
-            strict_first_lift_bypass=strict_chart_bypass,
-            index_trough_bypass=index_trough_bypass,
+        in_open = open_caution_window_active(decision_now, settings)
+        reason = (
+            "exec_live_chart_required_open_window"
+            if in_open
+            else "exec_live_chart_fetch_failed"
         )
-        if blocked:
-            return False, f"exec_{reason}", fallback
-        return True, "ok", fallback
+        fallback["openCautionWindow"] = in_open
+        fallback["passed"] = False
+        fallback["blockReason"] = reason
+        return False, reason, fallback
 
     index_chart = SpotChart(**meta["indexChartFull"])
     from app.engines.index_candle_rollover import index_candle_rollover_blocked

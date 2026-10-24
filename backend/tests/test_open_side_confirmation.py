@@ -31,11 +31,22 @@ def _reset_tape():
     index_tick_helpers.reset_index_tick_helpers_for_tests()
 
 
-def _tape(symbol: str, *, open_: float, hi: float, lo: float, last: float):
+def _tape(symbol: str, *, open_: float, hi: float, lo: float, last: float, broker_day: bool = True):
     index_tick_helpers._session_extremes[symbol] = {
         "date": _at(9, 15).date(), "open": open_, "hi": hi, "lo": lo, "last": last,
     }
-    return SimpleNamespace(spot=last)
+    snap = SimpleNamespace(spot=last)
+    if broker_day:
+        from app.models.schemas import ChartAnalysis
+
+        snap.chartAnalysis = ChartAnalysis(
+            institutional={
+                "dayOpen": open_,
+                "dayHigh": hi,
+                "dayLow": lo,
+            }
+        )
+    return snap
 
 
 @pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
@@ -94,6 +105,18 @@ def test_after_open_window_not_applied_ce_pe(side):
     snap = _tape("NIFTY", open_=22300.0, hi=22410.0, lo=22285.0, last=22300.0)
     blocked, _, _ = open_side_confirmation("NIFTY", side, snap, now=_at(9, 45), settings=_settings())
     assert blocked is False
+
+
+def test_after_first_order_time_requires_broker_day_open():
+    """Restart tick tape without broker dayOpen must not confirm sides after 09:20."""
+    snap = _tape(
+        "NIFTY", open_=22700.0, hi=22750.0, lo=22690.0, last=22740.0, broker_day=False,
+    )
+    blocked, reason, meta = open_side_confirmation(
+        "NIFTY", Side.CALL, snap, now=_at(9, 25), settings=_settings(),
+    )
+    assert blocked and reason == "open_side_broker_day_open_required"
+    assert meta.get("tapeOpenOnly") is True
 
 
 def test_broker_day_open_beats_a_preopen_tick_open():
