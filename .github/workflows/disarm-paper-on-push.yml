@@ -2,6 +2,7 @@ name: Disarm to paper on push
 
 # Runs when a push to main includes [disarm-paper] in the commit message.
 # Flips ENABLE_LIVE_TRADING=false + PAPER_TRADING=true and restarts backend.
+# Manual operator action only — never tie this to daily loss stop or capital loss.
 
 on:
   push:

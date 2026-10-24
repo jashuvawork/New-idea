@@ -548,11 +548,9 @@ def _exit_plan_for_trade(
 
 
 def _execution_mode(settings) -> str:
-    if settings.enable_live_trading and settings.auto_trading_enabled:
-        return "LIVE"
-    if settings.paper_live_parity_enabled:
-        return "PAPER_LIVE_PARITY"
-    return "PAPER"
+    from app.engines.execution_mode import execution_mode_label
+
+    return execution_mode_label(settings)
 
 
 def _uses_paper_live_parity(settings) -> bool:
@@ -3282,9 +3280,6 @@ def get_state() -> AutoTraderState:
     if _auto_trader_state is None:
         settings = get_settings()
         _auto_trader_state = AutoTraderState(
-            paperTrading=settings.paper_trading,
-            liveTradingEnabled=settings.enable_live_trading,
-            autoTradingEnabled=settings.auto_trading_enabled,
             running=True,
             tradeMastermind=TradeMastermind(
                 simpleProfitMode=settings.paper_simple_profit_mode,
@@ -3298,6 +3293,9 @@ def get_state() -> AutoTraderState:
                 adaptiveTargets=settings.adaptive_target_enabled,
             ),
         )
+        from app.engines.execution_mode import sync_autotrader_execution_flags
+
+        sync_autotrader_execution_flags(_auto_trader_state, settings)
     _ensure_state_loaded()
     from app.engines.session_trade_integrity import prune_prior_session_closed_trades
 
@@ -3364,9 +3362,6 @@ def reset_session(*, preserve_open_trades: bool = True) -> None:
     reset_session_calibration()
     settings = get_settings()
     _auto_trader_state = AutoTraderState(
-        paperTrading=settings.paper_trading,
-        liveTradingEnabled=settings.enable_live_trading,
-        autoTradingEnabled=settings.auto_trading_enabled,
         running=True,
         tradeMastermind=TradeMastermind(
             simpleProfitMode=settings.paper_simple_profit_mode,
@@ -3381,6 +3376,9 @@ def reset_session(*, preserve_open_trades: bool = True) -> None:
         ),
         openPaperTrades=preserved,
     )
+    from app.engines.execution_mode import sync_autotrader_execution_flags
+
+    sync_autotrader_execution_flags(_auto_trader_state, settings)
     _state_loaded = True
 
 
@@ -3944,9 +3942,9 @@ async def process_exits_only(
     state = get_state()
     settings = get_settings()
     state.calibrationBlocks = _calibration.get_blocks()
-    state.autoTradingEnabled = settings.auto_trading_enabled
-    state.liveTradingEnabled = settings.enable_live_trading
-    state.paperTrading = settings.paper_trading
+    from app.engines.execution_mode import sync_autotrader_execution_flags
+
+    sync_autotrader_execution_flags(state, settings)
 
     exit_skipped = await _process_open_trades(state, snapshots, client)
     profit_gate = update_daily_profit_gate(state, snapshots)
@@ -4524,9 +4522,9 @@ async def process(
     cycle_id = uuid.uuid4().hex[:12]
 
     state.calibrationBlocks = _calibration.get_blocks()
-    state.autoTradingEnabled = settings.auto_trading_enabled
-    state.liveTradingEnabled = settings.enable_live_trading
-    state.paperTrading = settings.paper_trading
+    from app.engines.execution_mode import sync_autotrader_execution_flags
+
+    sync_autotrader_execution_flags(state, settings)
 
     skipped.extend(await _process_open_trades(state, snapshots, client))
 
@@ -5174,6 +5172,8 @@ def get_performance_analysis() -> dict[str, Any]:
 
 
 def get_readiness(symbol: str, snapshots: dict[str, SymbolSnapshot]) -> dict[str, Any]:
+    from app.engines.execution_mode import paper_execution_active
+
     settings = get_settings()
     snap = snapshots.get(symbol)
     checks = {
@@ -5181,7 +5181,7 @@ def get_readiness(symbol: str, snapshots: dict[str, SymbolSnapshot]) -> dict[str
         "marketLive": snap.marketPhase.value == "LIVE_MARKET" if snap else False,
         "tqsAboveThreshold": (snap.tradeQualityScore or 0) >= settings.enhanced_tqs_entry if snap else False,
         "liveTradingEnabled": settings.enable_live_trading,
-        "paperTradingActive": settings.paper_trading,
+        "paperTradingActive": paper_execution_active(settings),
         "riskEngineOk": not _risk_engine.safe_mode,
         "calibrationClear": not any(get_state().calibrationBlocks.values()),
     }

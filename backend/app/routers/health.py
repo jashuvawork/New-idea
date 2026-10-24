@@ -8,6 +8,7 @@ from app.engines.capital_allocator import (
     effective_daily_loss_stop_inr,
     get_lot_sizes_meta,
 )
+from app.engines.execution_mode import execution_mode_label, paper_execution_active
 from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.engines.sep917_legacy_profile import sep917_legacy_profile_summary as _sep917_legacy_profile_summary
 from app.engines.structural_guard_settings import structural_guard_summary
@@ -74,7 +75,7 @@ async def deployment_status():
             "symbols": settings.symbols,
             "enableLiveTrading": settings.enable_live_trading,
             "autoTradingEnabled": settings.auto_trading_enabled,
-            "paperTrading": settings.paper_trading,
+            "paperTrading": paper_execution_active(settings),
             "simpleProfitMode": settings.paper_simple_profit_mode,
             "dualStrategyEnabled": settings.paper_dual_strategy_enabled,
             "explosionCaptureMode": settings.explosion_capture_mode,
@@ -249,7 +250,7 @@ async def deployment_readiness():
         "riskEngineOk": not risk.safe_mode,
         "calibrationClear": not any(state.calibrationBlocks.values()),
         "liveTradingFlagSet": settings.enable_live_trading,
-        "paperTradingActive": settings.paper_trading,
+        "paperTradingActive": paper_execution_active(settings),
         "eventLoopHealthy": bool(loop_healthy),
         "upstoxRateLimitClear": not rate_limit_active(),
         "websocketHealthy": bool(
@@ -327,11 +328,7 @@ async def deployment_readiness():
             live_ready
             and checks.get("worstDayClear", True)
         ),
-        "executionMode": (
-            "LIVE"
-            if settings.enable_live_trading and settings.auto_trading_enabled
-            else "PAPER"
-        ),
+        "executionMode": execution_mode_label(settings),
         "tradingPolicy": {
             "ftvEliteTopOnlyEnabled": bool(
                 getattr(settings, "ftv_elite_top_only_enabled", True)
