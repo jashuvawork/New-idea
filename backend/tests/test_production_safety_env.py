@@ -89,6 +89,13 @@ def test_deploy_leaves_the_day_capital_in_place():
     assert (ROOT / ".github/workflows/set-day-capital-ec2.yml").is_file()
 
 
+def test_deploy_does_not_overwrite_live_vs_paper_flags():
+    workflow = (ROOT / ".github/workflows/deploy-ec2.yml").read_text()
+    sync_keys = workflow.split("for k in", 1)[1].split("; do", 1)[0]
+    assert "ENABLE_LIVE_TRADING" not in sync_keys
+    assert "PAPER_TRADING" not in sync_keys
+
+
 def test_deploy_paths_sync_every_bounded_loss_setting():
     workflow = (ROOT / ".github/workflows/deploy-ec2.yml").read_text()
     updater = (ROOT / "deploy/ec2-update.sh").read_text()
