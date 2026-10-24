@@ -849,10 +849,14 @@ class Settings(BaseSettings):
     # low at 10:47 as the down-move exhausted, V-reversed, stopped). Near-base entries are
     # exempt by construction (current sits at the window low, not its peak), so this never
     # blocks a genuine base entry — only the late/mid-rip chase.
+    # The live print of a new high is the lift. The top has to have been traded for
+    # min_peak_age_seconds before buying it counts as exhaustion. A one-second-old
+    # high was being blocked as a chase the moment the next sample arrived.
     explosion_post_peak_chase_guard_enabled: bool = True
     explosion_post_peak_chase_lookback_seconds: float = 900.0
     explosion_post_peak_chase_min_run_pct: float = 0.25
     explosion_post_peak_chase_near_top_frac: float = 0.12
+    explosion_post_peak_chase_min_peak_age_seconds: float = 45.0
     # Sep 24 post-spike dump (#639) — off for Sep 9–17 production profile.
     premium_post_spike_dump_guard_enabled: bool = False
     premium_post_spike_dump_min_drawdown_pct: float = 12.0
