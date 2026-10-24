@@ -3385,8 +3385,8 @@ class Settings(BaseSettings):
 
     # Capital / risk — ranked FTV allocation keeps cash reserved and fills the
     # strongest approved contracts first instead of spending the whole book on one leg.
-    fallback_capital_inr: float = 275_000
-    max_sizing_capital_inr: float = 275_000
+    fallback_capital_inr: float = 200_000
+    max_sizing_capital_inr: float = 200_000
     per_trade_capital_pct: float = 0.90
     ftv_ranked_allocation_enabled: bool = True
     ftv_allocation_weights_csv: str = "0.60,0.25,0.10"

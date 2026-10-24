@@ -1,4 +1,4 @@
-"""ELITE full-lot uses the 90% sleeve of the ₹2.75L book with a proper SL floor."""
+"""ELITE full-lot uses the 90% sleeve of the ₹2L book with a proper SL floor."""
 
 from unittest.mock import MagicMock, patch
 
@@ -7,15 +7,15 @@ from app.engines.capital_allocator import max_lots_for_capital
 
 
 def test_full_capital_lots_fill_the_live_sleeve():
-    """Cash-affordable lots at ₹66 fill the 90% sleeve of the ₹2.75L book."""
+    """Cash-affordable lots at ₹66 fill the 90% sleeve of the ₹2L book."""
     settings = get_settings()
     ep = 66.2
     lot_mult = 20
     sleeve = float(settings.max_sizing_capital_inr) * float(settings.per_trade_capital_pct)
     lots = max_lots_for_capital("SENSEX", ep)
     notional = lots * ep * lot_mult
-    assert settings.max_sizing_capital_inr == 275_000
-    assert lots >= 180
+    assert settings.max_sizing_capital_inr == 200_000
+    assert lots >= 130
     assert notional <= sleeve
     assert sleeve - notional < ep * lot_mult
 
