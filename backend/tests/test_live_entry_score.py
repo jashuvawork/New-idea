@@ -232,6 +232,51 @@ def _hot_spike_alert(**extra):
 
 
 @patch("app.engines.live_entry_score.get_settings")
+def test_fresh_lift_skips_chase_range_penalty(mock_settings):
+    """Cold v3 at session high is normal on the lift tick — not a range chase."""
+    import app.engines.explosion_detector as ed
+
+    s = MagicMock()
+    s.live_execution_trade_score_enabled = True
+    s.live_execution_trade_score_dump_penalty = 45.0
+    s.live_execution_trade_score_mom_factor = 8.0
+    s.live_entry_score_negative_v3_penalty_per_point = 3.0
+    s.live_entry_score_negative_v3_deadband = 0.55
+    s.live_entry_score_dump_cap = 42.0
+    s.live_entry_score_chase_max_range_position = 0.45
+    s.live_entry_score_chase_max_velocity_3s = 1.0
+    s.live_entry_score_chase_range_penalty_scale = 90.0
+    s.live_entry_score_chase_hot_v3_extended_spike_enabled = False
+    s.explosion_post_peak_chase_min_peak_age_seconds = 45.0
+    s.explosion_post_peak_chase_lookback_seconds = 900.0
+    s.explosion_post_peak_chase_near_top_frac = 0.12
+    s.premium_post_spike_dump_min_drawdown_pct = 12.0
+    s.premium_post_spike_dump_min_spike_run_pct = 35.0
+    s.premium_post_spike_dump_near_low_frac = 0.18
+    s.premium_post_spike_dump_min_velocity_3s = -0.15
+    s.premium_post_spike_dump_min_velocity_9s = -0.25
+    mock_settings.return_value = s
+    ed._local_base_hist.clear()
+    try:
+        _seed_score_tape([100.0] * 20 + [140.0], step_s=1.0)
+        alert = {
+            "symbol": "NIFTY",
+            "side": "CALL",
+            "strike": 24500,
+            "explosionScore": 95.0,
+            "premium": 140.0,
+            "sessionPeakPremium": 140.0,
+            "sessionLowPremium": 100.0,
+            "velocity3s": 0.3,
+        }
+        live, meta = compute_live_entry_score(alert, radar_score=95.0, settings=s)
+    finally:
+        ed._local_base_hist.clear()
+    assert meta.get("chaseRangePenalty", 0) == 0
+    assert live > 80.0
+
+
+@patch("app.engines.live_entry_score.get_settings")
 def test_fresh_session_high_skips_hot_v3_chase_penalty(mock_settings):
     """The print that just became the high is the lift, not an extended chase."""
     import app.engines.explosion_detector as ed

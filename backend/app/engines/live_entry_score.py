@@ -162,7 +162,11 @@ def compute_live_entry_score(
         max_v3_chase = float(
             getattr(settings, "live_entry_score_chase_max_velocity_3s", 1.0) or 1.0
         )
-        if pos > max_pos and v3 < max_v3_chase:
+        if (
+            pos > max_pos
+            and v3 < max_v3_chase
+            and not _session_high_is_fresh_lift(alert, settings)
+        ):
             chase_pen = min(
                 55.0,
                 (pos - max_pos)

@@ -1634,6 +1634,29 @@ def _local_base_rows(
     ]
 
 
+def prior_near_level_age_on_rows(
+    rows: list[tuple[datetime, float]],
+    level: float,
+    near_frac: float,
+) -> Optional[float]:
+    """Peak-age on an ordered (time, premium) series ending at the current sample."""
+    if float(level or 0) <= 0 or len(rows) < 2:
+        return None
+    bar = float(level) * (1.0 - max(0.0, float(near_frac)))
+    last_ts = rows[-1][0]
+    first_at_level = None
+    for ts, price in rows[:-1]:
+        if price >= bar:
+            first_at_level = ts
+            break
+    if first_at_level is None:
+        return 0.0
+    try:
+        return max(0.0, (last_ts - first_at_level).total_seconds())
+    except (AttributeError, TypeError):
+        return None
+
+
 def prior_near_level_age_seconds(
     symbol: str,
     strike: float,
@@ -1654,21 +1677,7 @@ def prior_near_level_age_seconds(
     rows = _local_base_rows(
         symbol, strike, side, lookback_seconds=lookback_seconds,
     )
-    if len(rows) < 2:
-        return None
-    bar = float(level) * (1.0 - max(0.0, float(near_frac)))
-    last_ts = rows[-1][0]
-    first_at_level = None
-    for ts, price in rows[:-1]:
-        if price >= bar:
-            first_at_level = ts
-            break
-    if first_at_level is None:
-        return 0.0
-    try:
-        return max(0.0, (last_ts - first_at_level).total_seconds())
-    except (AttributeError, TypeError):
-        return None
+    return prior_near_level_age_on_rows(rows, level, near_frac)
 
 
 def premium_near_high_age_seconds(

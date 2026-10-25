@@ -952,6 +952,30 @@ def session_peak_late_reentry_blocked(
     except Exception:
         pass
 
+    min_peak_age = float(
+        getattr(settings, "explosion_post_peak_chase_min_peak_age_seconds", 45.0) or 45.0
+    )
+    if min_peak_age > 0:
+        try:
+            from app.engines.explosion_detector import prior_near_level_age_seconds
+
+            near_frac = max(0.0, near_peak_pct / 100.0)
+            age = prior_near_level_age_seconds(
+                symbol,
+                strike,
+                side,
+                sess_peak,
+                lookback_seconds=float(
+                    getattr(settings, "explosion_post_peak_chase_lookback_seconds", 900.0)
+                    or 900.0
+                ),
+                near_frac=near_frac,
+            )
+            if age is not None and age < min_peak_age:
+                return False, ""
+        except Exception:
+            pass
+
     return True, (
         f"late_reentry_near_session_peak_{sess_peak:.1f}"
         f"_pullback_{pullback_pct:.1f}pct_v3_{v3:.1f}"
