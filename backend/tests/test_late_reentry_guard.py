@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.config import Settings
+import app.engines.explosion_detector as ed
 from app.engines.explosion_detector import (
     _open_key,
     _session_low,
@@ -260,6 +261,42 @@ def test_session_peak_late_reentry_blocks_sep28_shallow_pullback_hot_v3_ce_mirro
         )
     assert blocked is True
     assert "late_reentry_near_session_peak" in reason
+
+
+def test_session_peak_late_reentry_allows_unaged_tape_at_new_high():
+    """Session peak just printed — cold v3 is the lift, not a late re-entry chase."""
+    from collections import deque
+
+    key = _seed_session_peak(
+        symbol="NIFTY", strike=24100.0, side=Side.CALL, low=100.0, peak=140.0,
+    )
+    t0 = datetime(2026, 6, 15, 10, 0, 0, tzinfo=IST)
+    ed._local_base_hist[key] = deque(
+        (t0 + timedelta(seconds=i), p) for i, p in enumerate([100.0] * 15 + [140.0])
+    )
+    settings = Settings(
+        explosion_late_reentry_block_enabled=True,
+        explosion_late_reentry_min_peak_points=15.0,
+        explosion_late_reentry_near_peak_pct=12.0,
+        explosion_late_reentry_min_velocity_3s=1.2,
+        explosion_post_peak_chase_min_peak_age_seconds=45.0,
+    )
+    try:
+        with patch(
+            "app.engines.session_mode_feedback.get_settings",
+            return_value=settings,
+        ):
+            blocked, reason = session_peak_late_reentry_blocked(
+                symbol="NIFTY",
+                side=Side.CALL,
+                strike=24100.0,
+                premium=140.0,
+                velocity_3s=0.2,
+                alert={"tier": "BUILDING"},
+            )
+    finally:
+        ed._local_base_hist.pop(key, None)
+    assert blocked is False, reason
 
 
 def test_session_peak_late_reentry_allows_fresh_first_lift():
