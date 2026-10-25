@@ -22,6 +22,7 @@ from app.engines.pe_win_ce_mirror import (
     pe_win_ce_mirror_put_chase_blocked,
     session_put_win_meta,
 )
+from app.engines.put_slide_ce_mirror import ce_win_pe_mirror_call_chase_blocked
 from app.engines.winner_entry_guards import premium_fading_blocks_entry
 from app.models.schemas import (
     Breadth,
@@ -282,7 +283,7 @@ def test_put_chase_blocked_after_put_win_on_other_index(mock_trades, _mock_bo):
 
 @patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={"breakout": True})
 @patch("app.engines.pe_win_ce_mirror._collect_session_trades")
-def test_other_index_breakout_does_not_waive_the_put_chase(mock_trades, _mock_bo):
+def test_other_index_breakout_continues_the_put(mock_trades, _mock_bo):
     from datetime import timedelta
 
     closed = datetime.now(IST) - timedelta(minutes=2)
@@ -294,14 +295,38 @@ def test_other_index_breakout_does_not_waive_the_put_chase(mock_trades, _mock_bo
     candidate = SimpleNamespace(
         mode="explosion", side=Side.PUT, symbol="SENSEX", snap=sensex_snap,
     )
-    blocked, reason, _ = pe_win_ce_mirror_put_chase_blocked(
+    blocked, reason, meta = pe_win_ce_mirror_put_chase_blocked(
         candidate,
         SimpleNamespace(),
         {"SENSEX": sensex_snap, "NIFTY": _rally_snap("NIFTY")},
         settings=Settings(),
     )
-    assert blocked is True
-    assert reason == "pe_win_ce_mirror_block_cross_index_put"
+    assert blocked is False
+    assert reason == "ok"
+    assert meta.get("putSlideBreakout") is True
+
+
+@patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_armed", return_value=(False, "", {}))
+@patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={})
+@patch("app.engines.pe_win_ce_mirror._collect_session_trades")
+def test_same_index_put_continues_without_a_fresh_breakout(mock_trades, _mock_bo, _mock_arm):
+    from datetime import timedelta
+
+    closed = datetime.now(IST) - timedelta(minutes=2)
+    win = _put_win_trade(8042.0)
+    win.closed_at = closed
+    win.symbol = "NIFTY"
+    mock_trades.return_value = [win]
+    snap = _rally_snap("NIFTY")
+    candidate = SimpleNamespace(
+        mode="explosion", side=Side.PUT, symbol="NIFTY", snap=snap,
+    )
+    blocked, reason, meta = pe_win_ce_mirror_put_chase_blocked(
+        candidate, SimpleNamespace(), {"NIFTY": snap}, settings=Settings(),
+    )
+    assert blocked is False
+    assert reason == "ok"
+    assert meta.get("putSlideBreakout") is not True
 
 
 @patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_armed", return_value=(False, "", {}))
@@ -325,3 +350,82 @@ def test_same_index_put_breakout_can_continue(mock_trades, _mock_bo, _mock_arm):
     assert blocked is False
     assert reason == "ok"
     assert meta.get("putSlideBreakout") is True
+
+
+def _call_win_trade(pnl: float = 8042.0) -> SimpleNamespace:
+    return SimpleNamespace(
+        status="CLOSED",
+        side="CALL",
+        symbol="NIFTY",
+        pnl_inr=pnl,
+        exit_reason="explosion_peak_keep_trail",
+    )
+
+
+@patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={})
+@patch("app.engines.put_slide_ce_mirror._collect_session_trades")
+def test_call_chase_blocked_on_other_index_without_breakout(mock_trades, _mock_bo):
+    from datetime import timedelta
+
+    closed = datetime.now(IST) - timedelta(minutes=2)
+    win = _call_win_trade()
+    win.closed_at = closed
+    mock_trades.return_value = [win]
+    sensex_snap = _rally_snap("SENSEX")
+    candidate = SimpleNamespace(
+        mode="explosion", side=Side.CALL, symbol="SENSEX", snap=sensex_snap,
+    )
+    blocked, reason, _ = ce_win_pe_mirror_call_chase_blocked(
+        candidate,
+        SimpleNamespace(),
+        {"SENSEX": sensex_snap, "NIFTY": _rally_snap("NIFTY")},
+        settings=Settings(),
+    )
+    assert blocked is True
+    assert reason == "ce_win_pe_mirror_block_cross_index_call"
+
+
+@patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={"breakout": True})
+@patch("app.engines.put_slide_ce_mirror._collect_session_trades")
+def test_other_index_breakout_continues_the_call(mock_trades, _mock_bo):
+    from datetime import timedelta
+
+    closed = datetime.now(IST) - timedelta(minutes=2)
+    win = _call_win_trade()
+    win.closed_at = closed
+    mock_trades.return_value = [win]
+    sensex_snap = _rally_snap("SENSEX")
+    candidate = SimpleNamespace(
+        mode="explosion", side=Side.CALL, symbol="SENSEX", snap=sensex_snap,
+    )
+    blocked, reason, meta = ce_win_pe_mirror_call_chase_blocked(
+        candidate,
+        SimpleNamespace(),
+        {"SENSEX": sensex_snap},
+        settings=Settings(),
+    )
+    assert blocked is False
+    assert reason == "ok"
+    assert meta.get("callRallyBreakout") is True
+
+
+@patch("app.engines.put_slide_ce_mirror.put_slide_entry_unlock_armed", return_value=(False, "", {}))
+@patch("app.engines.index_tick_helpers.index_trend_breakout", return_value={})
+@patch("app.engines.put_slide_ce_mirror._collect_session_trades")
+def test_same_index_call_continues_without_a_fresh_breakout(mock_trades, _mock_bo, _mock_arm):
+    from datetime import timedelta
+
+    closed = datetime.now(IST) - timedelta(minutes=2)
+    win = _call_win_trade()
+    win.closed_at = closed
+    mock_trades.return_value = [win]
+    snap = _rally_snap("NIFTY")
+    candidate = SimpleNamespace(
+        mode="explosion", side=Side.CALL, symbol="NIFTY", snap=snap,
+    )
+    blocked, reason, meta = ce_win_pe_mirror_call_chase_blocked(
+        candidate, SimpleNamespace(), {"NIFTY": snap}, settings=Settings(),
+    )
+    assert blocked is False
+    assert reason == "ok"
+    assert meta.get("callRallyBreakout") is not True
