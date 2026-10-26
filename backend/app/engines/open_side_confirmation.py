@@ -102,11 +102,11 @@ def open_side_top_moment_capture_waived(
     if side_v == "CALL":
         from app.engines.best_trade_policy import call_atm_itm_base_rank_armed
 
-        armed, arm_mode = call_atm_itm_base_rank_armed(
+        armed, _arm_mode = call_atm_itm_base_rank_armed(
             candidate, snap, state=state, settings=settings,
         )
         if armed:
-            return True, "call_atm_itm_base_capture" if arm_mode == "eligible" else "call_atm_itm_near_base_pad"
+            return True, "call_atm_itm_base_capture"
 
     evidence = _candidate_evidence(candidate)
     pretrade = getattr(candidate, "pretrade_meta", None) or {}

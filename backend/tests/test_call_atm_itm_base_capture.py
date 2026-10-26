@@ -109,7 +109,8 @@ def test_chop_deep_waived_for_atm_itm_call_at_base():
     assert reason == ""
 
 
-def test_call_rank_bonus_when_near_base_pad_without_full_eligible():
+def test_near_base_pad_without_full_eligible_does_not_take_the_rank():
+    """#676 +44 waits for full eligibility. The lighter pad alone does not score."""
     s = settings_mock()
     snap = _nifty_snap()
     snapshots = {"NIFTY": snap}
@@ -131,11 +132,11 @@ def test_call_rank_bonus_when_near_base_pad_without_full_eligible():
         delta = call_atm_itm_base_selector_rank_delta(
             call_c, MagicMock(), snapshots, settings=s,
         )
-    assert delta == 44.0
+    assert delta == 0.0
 
 
-def test_symbols_ready_when_near_base_pad_without_full_eligible():
-    """#676 PUT −36 must arm when CE passes the lighter near-base pad bar only."""
+def test_symbols_ready_requires_full_eligible_call():
+    """PUT −36 arms only when a call on that index is fully eligible."""
     s = settings_mock()
     snap = _nifty_snap()
     snapshots = {"NIFTY": snap}
@@ -166,11 +167,11 @@ def test_symbols_ready_when_near_base_pad_without_full_eligible():
         syms = symbols_with_call_atm_itm_base_ready(
             [call_c, put_c], MagicMock(), snapshots, settings=s,
         )
-    assert "NIFTY" in syms
+    assert "NIFTY" not in syms
     put_delta = call_atm_itm_base_selector_rank_delta(
         put_c, MagicMock(), snapshots, symbols_call_atm_itm_base=syms, settings=s,
     )
-    assert put_delta == -36.0
+    assert put_delta == 0.0
 
 
 def test_put_rank_penalty_when_call_atm_itm_base_ready():
@@ -315,6 +316,13 @@ def test_oct23_v_rip_at_the_low_is_the_same_base():
     assert ok is True
     assert meta["moneyness"] in ("ATM", "ITM")
     assert meta.get("nearBasePad") is True
+    snapshots = {"NIFTY": snap}
+    assert call_atm_itm_base_selector_rank_delta(
+        cand, MagicMock(), snapshots, settings=s,
+    ) == 44.0
+    assert "NIFTY" in symbols_with_call_atm_itm_base_ready(
+        [cand], MagicMock(), snapshots, settings=s,
+    )
 
 
 def test_extended_or_otm_call_stays_a_chop_chase():
@@ -360,6 +368,24 @@ def test_extended_or_otm_call_stays_a_chop_chase():
     ok, meta = call_atm_itm_base_capture_eligible(otm, snap, settings=s)
     assert ok is False
     assert meta.get("moneyness") == "OTM"
+    stamped = SimpleNamespace(
+        mode="explosion",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22650.0,
+        premium=120.35,
+        tier="ELITE",
+        alert=_oct23_base_alert(strike=22650.0, tier="ELITE", moneyness="ATM"),
+        pretrade_meta={},
+        snap=snap,
+    )
+    assert call_atm_itm_near_base_pad(stamped.alert, snap, settings=s) is True
+    assert call_atm_itm_base_selector_rank_delta(
+        stamped, MagicMock(), {"NIFTY": snap}, settings=s,
+    ) == 0.0
+    assert "NIFTY" not in symbols_with_call_atm_itm_base_ready(
+        [stamped], MagicMock(), {"NIFTY": snap}, settings=s,
+    )
     blocked, reason = best_trade_chop_deep_chase_blocked(
         otm,
         {},
