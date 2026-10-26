@@ -2045,6 +2045,27 @@ def first_lift_entry_readiness(
                 row=row,
                 symbol=_sym,
             )
+        if not structure_bypass and _side == "CALL":
+            from app.engines.best_trade_policy import call_atm_itm_near_base_pad
+
+            shape_evidence = {
+                **(row if isinstance(row, dict) else {}),
+                "side": _side,
+                "tier": _tier,
+                "strike": float(
+                    getattr(event, "strike", 0) or row.get("strike") or 0
+                ),
+                "localBaseMovePct": _base_move or row.get("localBaseMovePct") or 0,
+                "ictBaseRelativeMovePct": row.get("ictBaseRelativeMovePct") or _base_move,
+                "offLowMovePct": row.get("offLowMovePct") or 0,
+                "armedBaseLaunch": bool(armed_launch or row.get("armedBaseLaunch")),
+                "vRipReady": bool(v_rip_ready or row.get("vRipReady")),
+                "ictVRipReady": bool(v_rip_ready or row.get("ictVRipReady")),
+                "momentType": row.get("momentType"),
+            }
+            structure_bypass = call_atm_itm_near_base_pad(
+                shape_evidence, snap, settings=settings,
+            )
         if not structure_bypass:
             return False, "first_lift_structure_not_confirmed"
 

@@ -11,8 +11,10 @@ from app.engines.best_trade_policy import (
     best_trade_chop_deep_chase_blocked,
     call_atm_itm_base_capture_eligible,
     call_atm_itm_base_selector_rank_delta,
+    call_atm_itm_near_base_pad,
     symbols_with_call_atm_itm_base_ready,
 )
+from app.engines.rally_capture import explosion_near_miss_waive
 from app.engines.ict_breakout_monitor import first_lift_entry_readiness
 from app.engines.trade_ranking import rank_trade_evidence
 from app.models.schemas import (
@@ -318,6 +320,64 @@ def test_cold_velocity_on_the_atm_base_is_not_a_reject():
         )
     )
     assert extended["grade"] == "REJECT"
+
+
+def test_oct23_index_led_off_low_18pct_still_on_structural_pad():
+    """13:34 tape: offLow ~16–19% while local base ~8–11% and v-rip at session low."""
+    s = settings_mock()
+    snap = _nifty_snap()
+    alert = _oct23_base_alert(
+        momentType="v_rip_session_low",
+        localBaseMovePct=10.0,
+        ictBaseRelativeMovePct=10.0,
+        offLowMovePct=18.0,
+        ictVRipReady=True,
+        vRipReady=True,
+    )
+    assert call_atm_itm_near_base_pad(alert, snap, settings=s) is True
+    cand = SimpleNamespace(
+        mode="explosion",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22400.0,
+        premium=200.0,
+        tier="EXPLODING",
+        alert=alert,
+        pretrade_meta={},
+        snap=snap,
+    )
+    ok, meta = call_atm_itm_base_capture_eligible(cand, snap, settings=s)
+    assert ok is True
+    assert meta.get("indexLedPad") is True
+
+
+def test_index_led_does_not_widen_structural_pad():
+    s = settings_mock()
+    snap = _nifty_snap()
+    alert = _oct23_base_alert(
+        momentType="v_rip_session_low",
+        localBaseMovePct=28.0,
+        ictBaseRelativeMovePct=28.0,
+        offLowMovePct=18.0,
+    )
+    assert call_atm_itm_near_base_pad(alert, snap, settings=s) is False
+
+
+def test_near_base_call_waives_structure_near_miss():
+    s = settings_mock()
+    snap = _nifty_snap()
+    alert = _oct23_base_alert(
+        momentType="v_rip_session_low",
+        offLowMovePct=17.0,
+        localBaseMovePct=9.0,
+        ictBaseRelativeMovePct=9.0,
+    )
+    assert explosion_near_miss_waive(
+        alert,
+        snap=snap,
+        readiness_reason="first_lift_structure_not_confirmed",
+        settings=s,
+    )
 
 
 def test_cold_armed_base_call_clears_first_lift_velocity_and_tqs():

@@ -54,13 +54,75 @@ def _evidence_local_move_pct(evidence: Mapping[str, Any]) -> float:
     )
 
 
-def _call_base_pad_pct(evidence: Mapping[str, Any]) -> float:
-    """Distance off the option low. A morning high does not make the afternoon base a chase."""
+def _call_structural_pad_pct(evidence: Mapping[str, Any]) -> float:
+    """Local-base pad only — not session off-low (index can lead option by a few points)."""
     return max(
         _number(evidence.get("localBaseMovePct")),
         _number(evidence.get("ictBaseRelativeMovePct")),
+    )
+
+
+def _call_base_pad_pct(evidence: Mapping[str, Any]) -> float:
+    """Distance off the option low. A morning high does not make the afternoon base a chase."""
+    return max(
+        _call_structural_pad_pct(evidence),
         _number(evidence.get("offLowMovePct")),
     )
+
+
+def _call_atm_itm_index_led(
+    evidence: Mapping[str, Any],
+    snap: Any = None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Index trough turn / v-rip off session low — Oct 23 13:34 index V shape."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    if bool(
+        evidence.get("indexConfirmedLocalBase")
+        or evidence.get("ictIndexConfirmedLocalBase")
+        or evidence.get("indexTroughSlowV")
+        or evidence.get("ictIndexTroughSlowV")
+    ):
+        return True
+    moment = str(evidence.get("momentType") or evidence.get("reason") or "").lower()
+    if "v_rip_session_low" in moment:
+        return True
+    if bool(evidence.get("vRipReady") or evidence.get("ictVRipReady")):
+        if snap is not None and getattr(snap, "spotChart", None) is not None:
+            from app.engines.spot_direction import index_trough_momentum_turn
+            from app.models.schemas import Side
+
+            if index_trough_momentum_turn(Side.CALL, snap.spotChart, settings=settings):
+                return True
+    return False
+
+
+def _call_pad_within_atm_itm_ceiling(
+    evidence: Mapping[str, Any],
+    snap: Any = None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """Sep917 15% pad, or index-led: structural ≤ tight band and off-low ≤ index-confirmed cap."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    tight = effective_near_base_max_local_pct(settings)
+    structural = _call_structural_pad_pct(evidence)
+    full = _call_base_pad_pct(evidence)
+    if _call_atm_itm_index_led(evidence, snap, settings=settings):
+        wide = float(
+            getattr(settings, "index_confirmed_local_base_max_off_low_pct", 22.0) or 22.0
+        )
+        return (
+            structural <= tight + 1e-6
+            and full <= wide + 1e-6
+        )
+    return full <= tight + 1e-6
 
 
 def _atm_itm_base_moment(evidence: Mapping[str, Any]) -> bool:
@@ -107,8 +169,7 @@ def call_atm_itm_near_base_pad(
         return False
     if not _atm_itm_base_moment(evidence):
         return False
-    pad = _call_base_pad_pct(evidence)
-    if pad > effective_near_base_max_local_pct(settings) + 1e-6:
+    if not _call_pad_within_atm_itm_ceiling(evidence, snap, settings=settings):
         return False
 
     money = str(evidence.get("moneyness") or "").upper()
@@ -782,6 +843,7 @@ def call_at_base_best_trade_from_candidate(
 def _call_atm_itm_launch_ok(
     evidence: Mapping[str, Any],
     *,
+    snap: Any = None,
     readiness_reason: str = "",
     settings: Any = None,
 ) -> bool:
@@ -802,8 +864,7 @@ def _call_atm_itm_launch_ok(
     if (
         tier in ("ELITE", "EXPLODING")
         and _atm_itm_base_moment(evidence)
-        and _call_base_pad_pct(evidence)
-        <= effective_near_base_max_local_pct(settings) + 1e-6
+        and _call_pad_within_atm_itm_ceiling(evidence, snap, settings=settings)
     ):
         return True
     from app.engines.pe_win_ce_mirror import _building_rip_launch_ok
@@ -859,15 +920,15 @@ def call_atm_itm_base_capture_eligible(
     evidence.setdefault("side", _side_value(getattr(candidate, "side", "")))
 
     structural = symmetric_structural_base_evidence(evidence, settings=settings)
-    pad = _call_base_pad_pct(evidence)
-    max_local = effective_near_base_max_local_pct(settings)
     if (
         not structural
         and _atm_itm_base_moment(evidence)
-        and pad <= max_local + 1e-6
+        and _call_pad_within_atm_itm_ceiling(evidence, snap, settings=settings)
     ):
         structural = True
         meta["nearBasePad"] = True
+        if _call_atm_itm_index_led(evidence, snap, settings=settings):
+            meta["indexLedPad"] = True
     if not structural:
         return False, meta
 
@@ -877,7 +938,10 @@ def call_atm_itm_base_capture_eligible(
         return False, meta
 
     if not _call_atm_itm_launch_ok(
-        evidence, readiness_reason=readiness_reason, settings=settings,
+        evidence,
+        snap=snap,
+        readiness_reason=readiness_reason,
+        settings=settings,
     ):
         return False, {**meta, "reason": "launch_not_confirmed"}
 
