@@ -3529,6 +3529,11 @@ class Settings(BaseSettings):
     explosion_reentry_ml_win_prob_gate_enabled: bool = True
     explosion_reentry_ml_win_prob_min: float = 0.52
     explosion_reentry_ml_win_prob_same_strike_min: float = 0.55
+    # 26 Oct NIFTY 22500 CE: after the morning win the same call rebuilt a base
+    # and the premium was lifting. That print is a new entry, so the reentry
+    # ML floor does not apply. A call chase with no new base, and every put
+    # reentry, stays on the floor.
+    ce_new_base_fresh_entry_enabled: bool = True
     # FTV / V / explosive structural moments waive post-win ML re-entry floor (not after losses).
     quality_moment_passport_enabled: bool = True
     quality_moment_waive_reentry_ml_after_win: bool = True

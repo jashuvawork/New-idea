@@ -495,6 +495,12 @@ def evaluate_replay_structural_gates(
                     or 0
                 ),
                 alert=alert_row,
+                velocity_3s=float(
+                    alert_row.get("velocity3s")
+                    or alert_row.get("velocity_3s")
+                    or getattr(getattr(candidate, "explosion_event", None), "velocity_3s", 0)
+                    or 0
+                ),
             )
             if ml_blocked:
                 return False, str(ml_meta.get("reason") or "reentry_ml_win_prob_low")

@@ -1736,6 +1736,94 @@ def _coil_armed_low_score_readiness(
     return True, "coil_armed_low_score_base_entry"
 
 
+def _tape_float(value: Any) -> Optional[float]:
+    """Parse a real velocity or pad number. Mocks and blanks are missing, not zero."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if type(value).__name__ == "MagicMock":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _raw_tape_velocity(
+    event: Any,
+    alert: Optional[dict[str, Any]],
+) -> tuple[float, float]:
+    """Live 3s/9s tape before persisted armed evidence overwrites a smaller print.
+
+    A later poll often carries the causal arm-window velocity in ``ictArmedEvidence``.
+    That fill is for a missing print. An explicit live reading, including a negative
+    one, is the tape the entry has to confirm.
+    """
+    raw = alert if isinstance(alert, dict) else {}
+
+    def pick(attr: str, *keys: str) -> float:
+        event_val = (
+            _tape_float(getattr(event, attr, None)) if event is not None else None
+        )
+        alert_val: Optional[float] = None
+        for key in keys:
+            if key not in raw:
+                continue
+            parsed = _tape_float(raw.get(key))
+            if parsed is not None:
+                alert_val = parsed
+                break
+        if event_val is not None and event_val != 0:
+            return event_val
+        if alert_val is not None:
+            return alert_val
+        return float(event_val or 0.0)
+
+    return (
+        pick("velocity_3s", "velocity3s", "velocity_3s", "liveVelocity3s"),
+        pick("velocity_9s", "velocity9s", "velocity_9s", "liveVelocity9s"),
+    )
+
+
+def _stamp_base_pad_pct(row: Mapping[str, Any], ict: Any, base_move: float) -> float:
+    """Widest local pad. A small ICT reading must not hide a premium that left the base."""
+    vals: list[float] = []
+    for item in (
+        base_move,
+        getattr(ict, "base_relative_move_pct", 0) if ict is not None else 0,
+        row.get("ictBaseRelativeMovePct"),
+        row.get("localBaseMovePct"),
+        row.get("offLowMovePct"),
+        row.get("offHighMovePct"),
+    ):
+        parsed = _tape_float(item)
+        if parsed is not None:
+            vals.append(parsed)
+    return max(vals) if vals else 0.0
+
+
+def _preauthorized_stamp_is_confirmed_base_lift(
+    *,
+    base_move_pct: float,
+    live_v3: float,
+    live_v9: float,
+    settings: Any,
+) -> bool:
+    """The elite stamp is an entry only at the base with a live lift.
+
+    ``eliteBaseReady`` persisted from the arm window is not that lift. The premium
+    has to still be inside the near-base pad, and the live 3s and 9s tape both
+    have to be rising. A stale faster print does not count.
+    """
+    from app.engines.best_trade_policy import effective_near_base_max_local_pct
+
+    ceiling = effective_near_base_max_local_pct(settings)
+    if float(base_move_pct or 0) > ceiling + 1e-6:
+        return False
+    return float(live_v3) > 0.0 and float(live_v9) > 0.0
+
+
 def first_lift_entry_readiness(
     *,
     snap: Optional[SymbolSnapshot],
@@ -2433,7 +2521,7 @@ def first_lift_entry_readiness(
         or row.get("ictVolumeAwakening")
         or row.get("volumeAwaken")
     )
-    live_v3 = v3
+    live_v3, live_v9 = _raw_tape_velocity(event, alert if isinstance(alert, dict) else None)
     v3 = max(v3, float(persisted.get("velocity3s") or 0))
     v9 = max(v9, float(persisted.get("velocity9s") or 0))
     from app.engines.best_trade_policy import call_atm_itm_near_base_pad
@@ -2469,6 +2557,8 @@ def first_lift_entry_readiness(
     )
     if live_v3 < 0 and not atm_itm_base_pad:
         return False, "first_lift_live_velocity_negative"
+    if live_v9 < 0 and not atm_itm_base_pad:
+        return False, "first_lift_live_velocity9s_negative"
     if v_rip_lane:
         min_v3 = float(
             getattr(settings, "ict_v_rip_min_velocity_3s", 1.2) or 1.2
@@ -2766,10 +2856,12 @@ def first_lift_entry_readiness(
         armed_min_tqs = float(
             getattr(settings, "ict_armed_base_launch_min_tqs", 50.0) or 50.0
         )
-        use_v_rip_reason = (
+        # A real armed moment keeps its own reason. The preauthorized stamp is
+        # only the entry when that moment is absent, the premium is still at the
+        # base, and the live tape — not the stored arm-window print — is lifting.
+        moment_is_v_rip = (
             v_rip_lane
             and armed_launch
-            and not elite_base_ready
             and aligned_tqs < armed_min_tqs
         )
         from app.engines.explosion_entry_guards import post_impulse_consolidation_entry_blocked
@@ -2782,15 +2874,20 @@ def first_lift_entry_readiness(
         )
         if pi_blocked:
             return False, pi_reason
-        return True, (
-            "elite_base_ready_s_preauthorized"
-            if elite_base_ready
-            else (
+        if armed_launch:
+            return True, (
                 "v_rip_session_low_ready"
-                if use_v_rip_reason
+                if moment_is_v_rip
                 else "armed_base_option_led_ready"
             )
-        )
+        if not _preauthorized_stamp_is_confirmed_base_lift(
+            base_move_pct=_stamp_base_pad_pct(row, ict, base_move),
+            live_v3=live_v3,
+            live_v9=live_v9,
+            settings=settings,
+        ):
+            return False, "preauthorized_stamp_needs_confirmed_base_lift"
+        return True, "elite_base_ready_s_preauthorized"
 
     # A confirmed ATM/ITM option can lead the slower 5m spot chart. This path is
     # deliberately stronger than normal first-lift readiness: it requires an A/B+

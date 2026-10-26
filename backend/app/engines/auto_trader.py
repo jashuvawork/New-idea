@@ -656,8 +656,11 @@ async def _open_from_candidate(
             reason = _session_loss_meta.get("reason") or "session_same_side_loss_reentry_cooldown"
             return False, reason
 
+        reentry_velocity = float(
+            getattr(getattr(candidate, "explosion_event", None), "velocity_3s", 0) or 0
+        )
         alert_d = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
-        ml_blocked, _ml_meta = reentry_ml_win_prob_blocked(
+        ml_blocked, ml_meta = reentry_ml_win_prob_blocked(
             state,
             symbol=symbol,
             side=candidate.side,
@@ -665,13 +668,13 @@ async def _open_from_candidate(
             snap=snap,
             confidence=float(candidate.score or 0),
             alert=alert_d,
+            velocity_3s=reentry_velocity,
         )
+        if ml_meta.get("freshEntry"):
+            candidate.pretrade_meta = {**(candidate.pretrade_meta or {}), **ml_meta}
         if ml_blocked:
             return False, "reentry_ml_win_prob_low"
 
-        reentry_velocity = float(
-            getattr(candidate.explosion_event, "velocity_3s", 0) or 0
-        )
         win_blocked, win_reason = win_reentry_velocity_blocked(
             state,
             symbol=symbol,

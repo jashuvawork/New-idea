@@ -320,6 +320,14 @@ def _explosion_candidates(
             alert=alert,
             state=state,
         )
+        # A preauthorized stamp off the base, or a live 9s tape that is falling,
+        # is not a near-miss. Stored arm velocity and structural waivers must not
+        # turn that refusal into an order.
+        if first_lift_readiness_reason in (
+            "preauthorized_stamp_needs_confirmed_base_lift",
+            "first_lift_live_velocity9s_negative",
+        ):
+            continue
         early_pad = alert_has_early_radar_pad_ready(alert)
         coil_pad = alert_has_building_coil_pad(alert)
         from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive
@@ -1963,7 +1971,7 @@ def find_best_entry(
                 _record_selector_gate_rejection(c, reason)
                 continue
 
-            alert_d = c.alert if isinstance(getattr(c, "alert", None), dict) else {}
+            ml_alert = c.alert if isinstance(getattr(c, "alert", None), dict) else {}
             ml_blocked, ml_meta = reentry_ml_win_prob_blocked(
                 state,
                 symbol=c.symbol,
@@ -1971,8 +1979,13 @@ def find_best_entry(
                 strike=float(c.strike or 0),
                 snap=c.snap,
                 confidence=float(c.score or 0),
-                alert=alert_d,
+                alert=ml_alert,
+                velocity_3s=float(
+                    getattr(getattr(c, "explosion_event", None), "velocity_3s", 0) or 0
+                ),
             )
+            if ml_meta.get("freshEntry"):
+                c.pretrade_meta = {**(c.pretrade_meta or {}), **ml_meta}
             if ml_blocked:
                 c.pretrade_meta = {
                     **(c.pretrade_meta or {}),
