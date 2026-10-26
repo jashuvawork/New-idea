@@ -943,11 +943,16 @@ def analyze_premium_chart(candles: list, ltp: float) -> "PremiumChart":
     if post_dump:
         live_mom = min(live_mom, -1.0)
 
+    from app.engines.winner_entry_guards import FADE_OFF_LOW_BARS, premium_off_low_pct
+
+    off_low = premium_off_low_pct(lows, ltp, bars=FADE_OFF_LOW_BARS["1m"])
+
     return PremiumChart(
         direction=direction,
         lastPremium=round(ltp, 2),
         momentum3Pct=round(mom3, 3),
         momentum5Pct=round(mom5, 3),
+        offLowPct=round(off_low, 2),
         volumeSurge=round(vol_surge, 2),
         vwap=round(vwap, 2),
         aboveVwap=ltp > vwap * 1.001,
@@ -992,6 +997,7 @@ def premium_blocks_entry(
         premium_momentum_3s=float(premium.momentum3Pct or 0),
         premium_momentum_5s=float(premium.momentum5Pct or 0),
         premium_direction=str(premium.direction or ""),
+        premium_off_low_pct=float(getattr(premium, "offLowPct", 0) or 0),
         explosion_event=explosion_event,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
         pad_lane_bypass=pad_lane_bypass,

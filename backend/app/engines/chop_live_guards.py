@@ -310,6 +310,8 @@ def _premium_5m_fading(
 
     premium_chart = (chart_meta or {}).get("premiumChart")
     mom5 = 0.0
+    mom3 = 0.0
+    off_low = 0.0
     direction = "NEUTRAL"
     if premium_chart is None:
         premium_mtf = (chart_meta or {}).get("premiumMtf") or {}
@@ -317,26 +319,38 @@ def _premium_5m_fading(
         if pt is None:
             return False, "", meta
         mom5 = float(getattr(pt, "momentumPct", 0) or 0)
+        mom3 = float(getattr(pt, "momentum3Pct", 0) or 0)
+        off_low = float(getattr(pt, "offLowPct", 0) or 0)
         direction = str(getattr(pt, "direction", "") or "").upper()
     elif isinstance(premium_chart, dict):
         mom5 = float(premium_chart.get("momentum5Pct") or 0)
+        mom3 = float(premium_chart.get("momentum3Pct") or 0)
+        off_low = float(premium_chart.get("offLowPct") or 0)
         direction = str(premium_chart.get("direction") or "").upper()
     else:
         mom5 = float(getattr(premium_chart, "momentum5Pct", 0) or 0)
+        mom3 = float(getattr(premium_chart, "momentum3Pct", 0) or 0)
+        off_low = float(getattr(premium_chart, "offLowPct", 0) or 0)
         direction = str(getattr(premium_chart, "direction", "") or "").upper()
 
     meta["premiumMom5Pct"] = round(mom5, 3)
     meta["premiumDirection5m"] = direction
+    meta["premiumOffLowPct"] = round(off_low, 2)
 
     min_mom = float(
         getattr(settings, "chop_live_premium_5m_fade_min_mom_pct", -0.12) or -0.12
     )
-    side_v = _side_val(side)
-    if side_v == "PUT" and direction == "BEARISH" and mom5 < min_mom:
-        return True, "chop_live_premium_5m_fade", meta
-    if side_v == "CALL" and direction == "BEARISH" and mom5 < min_mom:
-        return True, "chop_live_premium_5m_fade", meta
-    if mom5 < min_mom and direction == "BEARISH":
+    if direction == "BEARISH" and mom5 < min_mom:
+        from app.engines.winner_entry_guards import premium_lift_clears_fade
+
+        fresh = mom3 if premium_chart is None else mom5
+        if premium_lift_clears_fade(
+            settings,
+            off_low_pct=off_low,
+            momentum_pct=fresh,
+            momentum_3_pct=mom3,
+        ):
+            return False, "", meta
         return True, "chop_live_premium_5m_fade", meta
     return False, "", meta
 

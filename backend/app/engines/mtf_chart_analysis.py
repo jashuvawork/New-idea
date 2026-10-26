@@ -85,13 +85,17 @@ def resample_candles(candles_1m: list, period: int) -> list[list[float]]:
 
 def analyze_timeframe(candles: list, price: float, label: str) -> TimeframeChartRead:
     """Direction + momentum read for one timeframe."""
-    opens, _, _, closes = _candle_rows(candles)
+    opens, _, lows, closes = _candle_rows(candles)
     if not closes or price <= 0:
         return TimeframeChartRead(label=label, price=round(price, 2))
 
     from app.engines.spot_direction import _patch_live_close
+    from app.engines.winner_entry_guards import FADE_OFF_LOW_BARS, premium_off_low_pct
 
     closes = _patch_live_close(closes, price)
+    off_low = premium_off_low_pct(
+        lows, price, bars=FADE_OFF_LOW_BARS.get(label, 20),
+    )
 
     lookback = min(5, len(closes) - 1) if len(closes) > 1 else 1
     mom = _pct_change(closes, lookback)
@@ -166,6 +170,7 @@ def analyze_timeframe(candles: list, price: float, label: str) -> TimeframeChart
         direction=direction,
         momentumPct=round(mom, 3),
         momentum3Pct=round(mom3, 3),
+        offLowPct=round(off_low, 2),
         trendStrength=round(strength, 1),
         emaBias=ema_bias,
         price=round(price, 2),
@@ -185,6 +190,7 @@ def _tf_dict(read: TimeframeChartRead) -> dict[str, Any]:
         "direction": read.direction,
         "momentumPct": read.momentumPct,
         "momentum3Pct": read.momentum3Pct,
+        "offLowPct": read.offLowPct,
         "trendStrength": read.trendStrength,
         "emaBias": read.emaBias,
         "barCount": read.barCount,
@@ -282,6 +288,39 @@ async def fetch_mtf_charts(
     return reads
 
 
+def _premium_mtf_fading(
+    pt: TimeframeChartRead | None,
+    settings: Any,
+    *,
+    shallow_floor: float | None = None,
+) -> bool:
+    """Premium 1m/5m fade. A reclaim off the recent low is not the open flush.
+
+    5m momentumPct is five bars (25 minutes) and still contains the 09:20 drop
+    after price has turned. The collapse check on 5m uses the 3-bar change
+    (15 minutes). The 1-minute execution gate still blocks a fresh -4% dump.
+    """
+    if pt is None or pt.direction != "BEARISH":
+        return False
+    mom = float(pt.momentumPct or 0)
+    min_mom = float(getattr(settings, "execution_chart_min_premium_momentum_pct", -0.15) or -0.15)
+    if mom >= min_mom:
+        return False
+    if shallow_floor is not None and mom >= shallow_floor:
+        return False
+    from app.engines.winner_entry_guards import premium_lift_clears_fade
+
+    fresh = float(pt.momentum3Pct or 0) if pt.label == "5m" else mom
+    if premium_lift_clears_fade(
+        settings,
+        off_low_pct=float(pt.offLowPct or 0),
+        momentum_pct=fresh,
+        momentum_3_pct=float(pt.momentum3Pct or 0),
+    ):
+        return False
+    return True
+
+
 def validate_mtf_scalp(
     side: Side,
     index_mtf: dict[str, TimeframeChartRead],
@@ -325,8 +364,7 @@ def validate_mtf_scalp(
             and not first_lift_bypass
         ):
             for req in ("1m", "5m"):
-                pt = premium_mtf.get(req)
-                if pt and pt.direction == "BEARISH" and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct:
+                if _premium_mtf_fading(premium_mtf.get(req), settings):
                     meta["passed"] = False
                     return False, f"exec_mtf_premium_{req}_fading", meta
         if premium_mtf and settings.execution_chart_premium_check_enabled and (
@@ -337,12 +375,8 @@ def validate_mtf_scalp(
                 or -1.2
             )
             for req in ("1m", "5m"):
-                pt = premium_mtf.get(req)
-                if (
-                    pt
-                    and pt.direction == "BEARISH"
-                    and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct
-                    and pt.momentumPct < shallow_floor
+                if _premium_mtf_fading(
+                    premium_mtf.get(req), settings, shallow_floor=shallow_floor,
                 ):
                     meta["passed"] = False
                     return False, f"exec_mtf_premium_{req}_fading", meta
@@ -404,8 +438,7 @@ def validate_mtf_scalp(
 
     if premium_mtf and settings.execution_chart_premium_check_enabled:
         for req in ("1m", "5m"):
-            pt = premium_mtf.get(req)
-            if pt and pt.direction == "BEARISH" and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct:
+            if _premium_mtf_fading(premium_mtf.get(req), settings):
                 meta["passed"] = False
                 return False, f"exec_mtf_premium_{req}_fading", meta
 
