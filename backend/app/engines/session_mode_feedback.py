@@ -736,6 +736,7 @@ def reentry_ml_win_prob_blocked(
     strike: float,
     snap: Any,
     confidence: float = 70.0,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Block session / same-strike re-entries when ML win probability is too low.
 
@@ -776,6 +777,36 @@ def reentry_ml_win_prob_blocked(
         required = session_min
         reentry_kind = "session"
         prior = prior_closes[-1]
+
+    prior_pnl = float(
+        getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0
+    )
+    alert_d = alert if isinstance(alert, dict) else {}
+    if alert_d or bool(getattr(settings, "quality_moment_passport_enabled", True)):
+        from app.engines.best_trade_policy import quality_moment_passport_active
+
+        passport_ok, passport_mode = quality_moment_passport_active(
+            alert_d, settings=settings, snap=snap,
+        )
+        if passport_ok:
+            waive_after_win = bool(
+                getattr(settings, "quality_moment_waive_reentry_ml_after_win", True)
+            )
+            waive_after_loss = bool(
+                getattr(settings, "quality_moment_waive_reentry_ml_after_loss", False)
+            )
+            if (prior_pnl > 0 and waive_after_win) or (prior_pnl <= 0 and waive_after_loss):
+                meta.update(
+                    {
+                        "applied": True,
+                        "reentryKind": reentry_kind,
+                        "qualityMomentPassport": True,
+                        "qualityMomentPassportMode": passport_mode,
+                        "priorPnlInr": round(prior_pnl, 2),
+                        "reason": "quality_moment_passport_waive_reentry_ml",
+                    }
+                )
+                return False, meta
 
     side_val = side.value if hasattr(side, "value") else str(side or "PUT").upper()
     from app.engines.adaptive_exits import predict_entry_ml_win_prob

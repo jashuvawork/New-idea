@@ -355,6 +355,45 @@ def symmetric_structural_base_evidence(
     )
 
 
+def quality_moment_passport_active(
+    alert: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+    snap: Any = None,
+) -> tuple[bool, str]:
+    """FTV / V-rip / explosive launch with ICT structure — safe to waive post-win FOMO layers."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "quality_moment_passport_enabled", True)):
+        return False, "disabled"
+    alert_d = alert if isinstance(alert, Mapping) else {}
+    from app.engines.top_moment_gate import explosion_alert_is_top_moment
+
+    tier = str(alert_d.get("tier") or "").upper()
+    moment = str(alert_d.get("momentType") or alert_d.get("moment_type") or "").lower()
+    top_moment = explosion_alert_is_top_moment(alert_d)
+    tier_ok = tier in ("ELITE", "EXPLODING", "BUILDING") and top_moment
+    moment_ok = moment in {
+        "v",
+        "first_lift_local_base",
+        "armed_base_local_base",
+        "flat_then_vertical",
+        "building_local_base_lift_ready",
+    }
+    v_rip = bool(alert_d.get("ictVRipReady") or alert_d.get("vRipReady"))
+    structural = bool(
+        symmetric_chop_ftv_launch_evidence(alert_d, settings=settings)
+        or v_rip
+        or alert_d.get("ictBaseArmed")
+        or alert_d.get("buildingRipReady")
+        or alert_d.get("ictBuildingRipReady")
+    )
+    if not structural:
+        return False, "no_structure"
+    if top_moment or tier_ok or moment_ok or v_rip:
+        return True, "quality_moment_passport"
+    return False, "not_top_moment"
+
+
 def symmetric_chop_ftv_launch_evidence(
     evidence: Mapping[str, Any] | None,
     assessment: Mapping[str, Any] | None = None,
