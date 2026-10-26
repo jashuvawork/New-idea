@@ -66,21 +66,25 @@ PIN_KEYS=(
 
 MODE=""
 DRY_RUN=0
+NO_LOSS_STOPS=0
 for arg in "$@"; do
   case "$arg" in
     --live) MODE=live ;;
     --paper) MODE=paper ;;
     --dry-run) DRY_RUN=1 ;;
+    --no-loss-stops)
+      NO_LOSS_STOPS=1
+      ;;
     *)
       echo "Unknown option: $arg" >&2
-      echo "Usage: $0 --live | --paper [--dry-run]" >&2
+      echo "Usage: $0 --live | --paper [--no-loss-stops] [--dry-run]" >&2
       exit 1
       ;;
   esac
 done
 
 if [ -z "$MODE" ]; then
-  echo "Usage: $0 --live | --paper [--dry-run]" >&2
+  echo "Usage: $0 --live | --paper [--no-loss-stops] [--dry-run]" >&2
   exit 1
 fi
 
@@ -150,6 +154,16 @@ else
   _set_env_key PAPER_SLIPPAGE_ENABLED true
   _set_env_key PAPER_SIMULATE_BROKER_ORDERS true
   _set_env_key SHADOW_TRADE_ALL_SIGNALS true
+fi
+
+if [ "$NO_LOSS_STOPS" -eq 1 ]; then
+  echo "Disabling daily loss stop and emergency stop for this session (entries keep running in the red)..."
+  _set_env_key DAILY_LOSS_STOP_FROM_CAPITAL false
+  _set_env_key DAILY_LOSS_STOP_INR 0
+  _set_env_key EMERGENCY_STOP_ENABLED false
+  _set_env_key EMERGENCY_STOP_INR 0
+  _set_env_key SESSION_LARGE_LOSS_PAUSE_INR 0
+  _set_env_key LOSS_STREAK_PAUSE_COUNT 999
 fi
 
 if [ "$DRY_RUN" -eq 1 ] || [ "${SKIP_RESTART:-0}" = "1" ]; then
