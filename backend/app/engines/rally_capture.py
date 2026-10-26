@@ -523,6 +523,7 @@ def explosion_near_miss_waive(
             "first_lift_live_velocity_negative",
             "first_lift_velocity3s",
             "armed_base_tqs",
+            "first_lift_structure_not_confirmed",
         )
     ):
         return True
