@@ -100,13 +100,13 @@ def open_side_top_moment_capture_waived(
         return False, ""
 
     if side_v == "CALL":
-        from app.engines.best_trade_policy import call_atm_itm_base_capture_eligible
+        from app.engines.best_trade_policy import call_atm_itm_base_rank_armed
 
-        ok, _meta = call_atm_itm_base_capture_eligible(
+        armed, arm_mode = call_atm_itm_base_rank_armed(
             candidate, snap, state=state, settings=settings,
         )
-        if ok:
-            return True, "call_atm_itm_base_capture"
+        if armed:
+            return True, "call_atm_itm_base_capture" if arm_mode == "eligible" else "call_atm_itm_near_base_pad"
 
     evidence = _candidate_evidence(candidate)
     pretrade = getattr(candidate, "pretrade_meta", None) or {}
@@ -124,7 +124,7 @@ def open_side_top_moment_capture_waived(
 
     if not symmetric_structural_base_evidence(evidence, settings=settings):
         return False, ""
-    if not _call_atm_itm_launch_ok(evidence, settings=settings):
+    if not _call_atm_itm_launch_ok(evidence, snap=snap, settings=settings):
         return False, ""
 
     if side_v == "PUT":
