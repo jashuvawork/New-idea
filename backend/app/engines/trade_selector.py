@@ -1963,6 +1963,7 @@ def find_best_entry(
                 _record_selector_gate_rejection(c, reason)
                 continue
 
+            ml_alert = c.alert if isinstance(getattr(c, "alert", None), dict) else {}
             ml_blocked, ml_meta = reentry_ml_win_prob_blocked(
                 state,
                 symbol=c.symbol,
@@ -1970,7 +1971,13 @@ def find_best_entry(
                 strike=float(c.strike or 0),
                 snap=c.snap,
                 confidence=float(c.score or 0),
+                alert=ml_alert,
+                velocity_3s=float(
+                    getattr(getattr(c, "explosion_event", None), "velocity_3s", 0) or 0
+                ),
             )
+            if ml_meta.get("freshEntry"):
+                c.pretrade_meta = {**(c.pretrade_meta or {}), **ml_meta}
             if ml_blocked:
                 c.pretrade_meta = {
                     **(c.pretrade_meta or {}),
