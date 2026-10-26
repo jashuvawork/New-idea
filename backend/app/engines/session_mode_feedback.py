@@ -728,6 +728,93 @@ def _prior_session_explosion_closes(
     return closes
 
 
+def _ce_momentum_reading(
+    alert: dict[str, Any],
+    *,
+    velocity_3s: float,
+    premium_momentum_pct: float,
+) -> tuple[float, float]:
+    """Live call momentum: 3s tape velocity, or premium momentum when the tape is flat."""
+    try:
+        v3 = float(velocity_3s or 0)
+    except (TypeError, ValueError):
+        v3 = 0.0
+    if v3 <= 0:
+        try:
+            v3 = float(
+                alert.get("velocity3s")
+                or alert.get("velocity_3s")
+                or alert.get("liveVelocity3s")
+                or 0
+            )
+        except (TypeError, ValueError):
+            v3 = 0.0
+    try:
+        mom = float(premium_momentum_pct or 0)
+    except (TypeError, ValueError):
+        mom = 0.0
+    if mom <= 0:
+        prem = alert.get("premiumChart") or alert.get("premium_chart") or {}
+        raw = (
+            alert.get("momentum5Pct")
+            or alert.get("premiumMomentum5Pct")
+            or alert.get("premiumMomentumPct")
+            or (prem.get("momentum5Pct") if isinstance(prem, dict) else 0)
+            or (prem.get("momentum3Pct") if isinstance(prem, dict) else 0)
+            or 0
+        )
+        try:
+            mom = float(raw or 0)
+        except (TypeError, ValueError):
+            mom = 0.0
+    return v3, mom
+
+
+def ce_momentum_new_base_is_fresh_entry(
+    *,
+    side: Any,
+    alert: Optional[dict[str, Any]] = None,
+    velocity_3s: float = 0.0,
+    premium_momentum_pct: float = 0.0,
+    settings: Any = None,
+) -> bool:
+    """CALL lifting off a newly formed base is a fresh entry, not a reentry.
+
+    26 Oct NIFTY 22500 CE rebuilt a base after the morning win and the premium
+    was already moving. The reentry ML floor does not apply to that print.
+    A call chase with no new base, and every put reentry, stays a reentry.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "ce_new_base_fresh_entry_enabled", True)):
+        return False
+    side_v = side.value if hasattr(side, "value") else str(side or "").upper()
+    if side_v != "CALL":
+        return False
+    alert_d = alert if isinstance(alert, dict) else {}
+    v3, mom = _ce_momentum_reading(
+        alert_d,
+        velocity_3s=velocity_3s,
+        premium_momentum_pct=premium_momentum_pct,
+    )
+    if v3 <= 0 and mom <= 0:
+        return False
+    try:
+        if _alert_post_win_new_local_base(alert_d, settings=settings):
+            return True
+        from app.engines.best_trade_policy import (
+            symmetric_new_base_moment_evidence,
+            symmetric_structural_base_evidence,
+        )
+
+        if symmetric_structural_base_evidence(alert_d, settings=settings):
+            return True
+        if symmetric_new_base_moment_evidence(alert_d, alert_d, settings=settings):
+            return True
+    except (TypeError, ValueError):
+        return False
+    return False
+
+
 def reentry_ml_win_prob_blocked(
     state: AutoTraderState,
     *,
@@ -736,11 +823,15 @@ def reentry_ml_win_prob_blocked(
     strike: float,
     snap: Any,
     confidence: float = 70.0,
+    alert: Optional[dict[str, Any]] = None,
+    velocity_3s: float = 0.0,
+    premium_momentum_pct: float = 0.0,
 ) -> tuple[bool, dict[str, Any]]:
     """Block session / same-strike re-entries when ML win probability is too low.
 
     Aug28: winners ~56% ML, 24050 post-win/post-loss re-entries ~41-43%.
     First entries (no prior closes on symbol+side) are not gated.
+    A call with momentum off a newly formed base is a new entry, not a reentry.
     """
     settings = get_settings()
     meta: dict[str, Any] = {"applied": False}
@@ -755,6 +846,22 @@ def reentry_ml_win_prob_blocked(
         strike=strike,
     )
     if not prior_closes and same_strike_prior is None:
+        return False, meta
+
+    if ce_momentum_new_base_is_fresh_entry(
+        side=side,
+        alert=alert,
+        velocity_3s=velocity_3s,
+        premium_momentum_pct=premium_momentum_pct,
+        settings=settings,
+    ):
+        meta.update(
+            {
+                "applied": False,
+                "freshEntry": True,
+                "reason": "ce_new_base_fresh_entry",
+            }
+        )
         return False, meta
 
     session_min = float(
