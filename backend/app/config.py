@@ -3649,9 +3649,6 @@ class Settings(BaseSettings):
     index_trend_opposite_side_legacy_profile_only: bool = True
     index_trend_opposite_side_symbols_csv: str = "SENSEX,NIFTY"
     index_trend_opposite_side_flip_margin_pts: float = 20.0
-    # Trough V / peak turn: break NEUTRAL tie and block blind opposite leg (Oct 23 v-rip fix).
-    index_trend_trough_flip_rally_fraction: float = 0.35
-    index_trend_peak_flip_slide_fraction: float = 0.35
     index_session_dominant_trend_enabled: bool = True
     index_trend_rank_bonus_aligned: float = 8.0
     index_trend_rank_penalty_opposite: float = 6.0

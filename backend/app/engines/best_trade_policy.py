@@ -957,6 +957,134 @@ def call_atm_itm_base_capture_eligible(
     return True, meta
 
 
+def _call_atm_itm_evidence_for_candidate(
+    candidate: Any,
+    snap: Any,
+) -> dict[str, Any]:
+    alert = _alert_for_candidate(candidate)
+    pretrade = getattr(candidate, "pretrade_meta", None) or {}
+    ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
+    if not isinstance(ranking, dict):
+        ranking = {}
+    nested = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
+    evidence = {**alert, **nested, **ranking}
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    if snap is not None:
+        evidence.setdefault("spot", getattr(snap, "spot", 0))
+        evidence.setdefault("atmStrike", getattr(snap, "atmStrike", 0))
+        evidence.setdefault("symbol", getattr(snap, "symbol", sym) or sym)
+    evidence.setdefault("strike", getattr(candidate, "strike", 0))
+    evidence.setdefault("side", _side_value(getattr(candidate, "side", "")))
+    return evidence
+
+
+def call_atm_itm_base_rank_armed(
+    candidate: Any,
+    snap: Any,
+    *,
+    state: Any = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """Single #676 rank arm: full capture eligible or near-base pad (#834/#835)."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    ok, _ = call_atm_itm_base_capture_eligible(
+        candidate, snap, state=state, settings=settings,
+    )
+    if ok:
+        return True, "eligible"
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, ""
+    if _side_value(getattr(candidate, "side", "")) != "CALL":
+        return False, ""
+    evidence = _call_atm_itm_evidence_for_candidate(candidate, snap)
+    if call_atm_itm_near_base_pad(
+        evidence,
+        snap,
+        side="CALL",
+        strike=float(getattr(candidate, "strike", 0) or 0),
+        settings=settings,
+    ):
+        return True, "near_base_pad"
+    return False, ""
+
+
+def call_atm_itm_index_call_leg_active(
+    symbol: str,
+    snap: Any,
+    *,
+    state: Any = None,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Index-level #676 side: trough V + soft rally bar (pe_win mirror, not a new pts knob)."""
+    from app.config import get_settings
+    from app.models.schemas import Side, SymbolSnapshot
+
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "call_atm_itm_base_capture_enabled", True)):
+        return False, meta
+    if not isinstance(snap, SymbolSnapshot):
+        return False, meta
+    chart = snap.spotChart
+    if chart is None:
+        return False, meta
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    if not index_trough_momentum_turn(Side.CALL, chart, settings=settings):
+        return False, meta
+    stub = {
+        "momentType": "v_rip_session_low",
+        "side": "CALL",
+        "symbol": str(symbol or "").upper(),
+    }
+    if not _call_atm_itm_index_led(stub, snap, settings=settings):
+        return False, meta
+    from app.engines.pe_win_ce_mirror import _soft_index_rally_ok
+
+    ok, reason, rally_meta = _soft_index_rally_ok(symbol, snap, settings=settings)
+    if not ok:
+        return False, {**meta, **rally_meta}
+    meta["callAtmItm676IndexCallLeg"] = reason
+    meta.update(rally_meta)
+    return True, meta
+
+
+def call_atm_itm_index_put_leg_active(
+    symbol: str,
+    snap: Any,
+    *,
+    state: Any = None,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """PE mirror of call_atm_itm_index_call_leg_active — slide off high + soft pts bar."""
+    from app.config import get_settings
+    from app.models.schemas import Side, SymbolSnapshot
+
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "call_atm_itm_base_capture_enabled", True)):
+        return False, meta
+    if not isinstance(snap, SymbolSnapshot):
+        return False, meta
+    chart = snap.spotChart
+    if chart is None:
+        return False, meta
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    if not index_trough_momentum_turn(Side.PUT, chart, settings=settings):
+        return False, meta
+    from app.engines.put_slide_ce_mirror import _soft_index_slide_ok
+
+    ok, reason, slide_meta = _soft_index_slide_ok(symbol, snap, settings=settings)
+    if not ok:
+        return False, {**meta, **slide_meta}
+    meta["callAtmItm676IndexPutLeg"] = reason
+    meta.update(slide_meta)
+    return True, meta
+
+
 def call_atm_itm_base_capture_from_evidence(
     evidence: Mapping[str, Any],
     snap: Any,
@@ -989,13 +1117,12 @@ def call_atm_itm_base_capture_from_evidence(
         pretrade_meta={},
         snap=snap,
     )
-    ok, _ = call_atm_itm_base_capture_eligible(
+    armed, _ = call_atm_itm_base_rank_armed(
         cand,
         snap,
-        readiness_reason=readiness_reason,
         settings=settings,
     )
-    return ok
+    return armed
 
 
 def call_atm_itm_base_selector_rank_delta(
@@ -1015,10 +1142,10 @@ def call_atm_itm_base_selector_rank_delta(
     snap = snapshots.get(sym) or getattr(candidate, "snap", None)
 
     if side == "CALL":
-        ok, _ = call_atm_itm_base_capture_eligible(
+        armed, _ = call_atm_itm_base_rank_armed(
             candidate, snap, state=state, settings=settings,
         )
-        if ok:
+        if armed:
             return float(
                 getattr(settings, "call_atm_itm_base_rank_bonus", 44.0) or 44.0
             )
@@ -1051,32 +1178,10 @@ def symbols_with_call_atm_itm_base_ready(
         if _side_value(getattr(cand, "side", "")) != "CALL":
             continue
         snap = snapshots.get(sym) or getattr(cand, "snap", None)
-        ok, _ = call_atm_itm_base_capture_eligible(
+        armed, _ = call_atm_itm_base_rank_armed(
             cand, snap, state=state, settings=settings,
         )
-        if ok:
-            out.add(sym)
-            continue
-        alert = _alert_for_candidate(cand)
-        pretrade = getattr(cand, "pretrade_meta", None) or {}
-        ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
-        if not isinstance(ranking, dict):
-            ranking = {}
-        nested = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
-        evidence = {**alert, **nested, **ranking}
-        if snap is not None:
-            evidence.setdefault("spot", getattr(snap, "spot", 0))
-            evidence.setdefault("atmStrike", getattr(snap, "atmStrike", 0))
-            evidence.setdefault("symbol", getattr(snap, "symbol", sym))
-        evidence.setdefault("strike", getattr(cand, "strike", 0))
-        evidence.setdefault("side", "CALL")
-        if call_atm_itm_near_base_pad(
-            evidence,
-            snap,
-            side="CALL",
-            strike=float(getattr(cand, "strike", 0) or 0),
-            settings=settings,
-        ):
+        if armed:
             out.add(sym)
     return out
 
@@ -1500,10 +1605,10 @@ def best_trade_chop_deep_chase_blocked(
         and _side_value(getattr(candidate, "side", "")) == "CALL"
     ):
         snap = getattr(candidate, "snap", None)
-        ok, _ = call_atm_itm_base_capture_eligible(
+        armed, _ = call_atm_itm_base_rank_armed(
             candidate, snap, settings=settings,
         )
-        if ok:
+        if armed:
             return False, ""
 
     mode_u = str(day_mode or (elite_assessment or {}).get("dayMode") or "").upper()

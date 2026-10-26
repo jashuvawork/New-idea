@@ -88,7 +88,6 @@ def test_slide_leg_dominant_slide_only_put_aligned():
 
 def test_both_armed_neutral_tie_breaks_to_rally_on_trough_turn():
     settings = _symmetric_settings()
-    settings.index_trend_trough_flip_rally_fraction = 0.35
     snap = _snap(mom5=0.0)
     with patch(
         "app.engines.pe_win_ce_mirror.call_rally_unlock_armed",
@@ -99,6 +98,9 @@ def test_both_armed_neutral_tie_breaks_to_rally_on_trough_turn():
     ), patch(
         "app.engines.index_rally_side_flip.index_rally_metrics",
         return_value={"rallyPoints": 50.0, "slidePoints": 48.0, "minMovePoints": 45.0},
+    ), patch(
+        "app.engines.pe_win_ce_mirror._soft_index_rally_ok",
+        return_value=(True, "pe_win_ce_mirror_soft_rally", {"rallyPoints": 50.0}),
     ), patch(
         "app.engines.spot_direction.index_trough_momentum_turn",
         side_effect=lambda side, chart, **_: str(getattr(side, "value", side)) == "CALL",

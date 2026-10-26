@@ -29,15 +29,6 @@ def index_trend_features_active(settings: Any = None) -> bool:
     )
 
 
-def _trough_flip_fraction(settings: Any, *, slide: bool = False) -> float:
-    key = (
-        "index_trend_peak_flip_slide_fraction"
-        if slide
-        else "index_trend_trough_flip_rally_fraction"
-    )
-    return float(getattr(settings, key, 0.35) or 0.35)
-
-
 def index_trough_rally_context_active(
     symbol: str,
     snap: SymbolSnapshot,
@@ -45,31 +36,18 @@ def index_trough_rally_context_active(
     *,
     settings: Any = None,
 ) -> tuple[bool, dict[str, Any]]:
-    """Index slow-V off session low — block blind PUT when dominant trend is still NEUTRAL."""
+    """#676 index call-leg preference — delegates to best_trade_policy + pe_win soft rally."""
     settings = settings or get_settings()
-    meta: dict[str, Any] = {}
     if not index_trend_features_active(settings):
-        return False, meta
-    from app.engines.index_rally_side_flip import index_rally_metrics
-    from app.engines.spot_direction import index_trough_momentum_turn
-    from app.models.schemas import Side
+        return False, {}
+    from app.engines.best_trade_policy import call_atm_itm_index_call_leg_active
 
-    chart = snap.spotChart if snap is not None else None
-    if chart is None or not index_trough_momentum_turn(Side.CALL, chart, settings=settings):
-        return False, meta
-    metrics = index_rally_metrics(symbol, snap, settings=settings)
-    rally_pts = float(metrics.get("rallyPoints") or 0)
-    min_pts = float(metrics.get("minMovePoints") or 0)
-    frac = _trough_flip_fraction(settings, slide=False)
-    soft_min = min_pts * max(0.05, min(1.0, frac))
-    if rally_pts < soft_min - 1e-6:
-        return False, meta
-    meta["indexTroughRallyContext"] = {
-        **metrics,
-        "troughFlipFraction": frac,
-        "softMinRallyPts": round(soft_min, 1),
-    }
-    return True, meta
+    ok, meta = call_atm_itm_index_call_leg_active(
+        symbol, snap, state=state, settings=settings,
+    )
+    if ok:
+        meta.setdefault("indexTroughRallyContext", meta.get("callAtmItm676IndexCallLeg"))
+    return ok, meta
 
 
 def index_peak_slide_context_active(
@@ -79,31 +57,18 @@ def index_peak_slide_context_active(
     *,
     settings: Any = None,
 ) -> tuple[bool, dict[str, Any]]:
-    """Mirror: index turn off session high — block blind CALL when trend is NEUTRAL."""
+    """PE mirror — put_slide soft slide bar when index turns off session high."""
     settings = settings or get_settings()
-    meta: dict[str, Any] = {}
     if not index_trend_features_active(settings):
-        return False, meta
-    from app.engines.index_rally_side_flip import index_rally_metrics
-    from app.engines.spot_direction import index_trough_momentum_turn
-    from app.models.schemas import Side
+        return False, {}
+    from app.engines.best_trade_policy import call_atm_itm_index_put_leg_active
 
-    chart = snap.spotChart if snap is not None else None
-    if chart is None or not index_trough_momentum_turn(Side.PUT, chart, settings=settings):
-        return False, meta
-    metrics = index_rally_metrics(symbol, snap, settings=settings)
-    slide_pts = float(metrics.get("slidePoints") or 0)
-    min_pts = float(metrics.get("minMovePoints") or 0)
-    frac = _trough_flip_fraction(settings, slide=True)
-    soft_min = min_pts * max(0.05, min(1.0, frac))
-    if slide_pts < soft_min - 1e-6:
-        return False, meta
-    meta["indexPeakSlideContext"] = {
-        **metrics,
-        "peakFlipFraction": frac,
-        "softMinSlidePts": round(soft_min, 1),
-    }
-    return True, meta
+    ok, meta = call_atm_itm_index_put_leg_active(
+        symbol, snap, state=state, settings=settings,
+    )
+    if ok:
+        meta.setdefault("indexPeakSlideContext", meta.get("callAtmItm676IndexPutLeg"))
+    return ok, meta
 
 
 def _resolve_trend_arms(

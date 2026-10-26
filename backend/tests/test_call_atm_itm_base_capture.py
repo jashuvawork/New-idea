@@ -109,6 +109,31 @@ def test_chop_deep_waived_for_atm_itm_call_at_base():
     assert reason == ""
 
 
+def test_call_rank_bonus_when_near_base_pad_without_full_eligible():
+    s = settings_mock()
+    snap = _nifty_snap()
+    snapshots = {"NIFTY": snap}
+    alert = _oct23_base_alert(
+        momentType="v_rip_session_low",
+        offLowMovePct=17.0,
+        localBaseMovePct=9.0,
+        ictBaseRelativeMovePct=9.0,
+        vRipReady=True,
+        ictVRipReady=True,
+    )
+    call_c = _call(strike=22400.0, alert=alert)
+    call_c.symbol = "NIFTY"
+    call_c.snap = snap
+    with patch(
+        "app.engines.best_trade_policy.call_atm_itm_base_capture_eligible",
+        return_value=(False, {"reason": "launch_not_confirmed"}),
+    ):
+        delta = call_atm_itm_base_selector_rank_delta(
+            call_c, MagicMock(), snapshots, settings=s,
+        )
+    assert delta == 44.0
+
+
 def test_symbols_ready_when_near_base_pad_without_full_eligible():
     """#676 PUT −36 must arm when CE passes the lighter near-base pad bar only."""
     s = settings_mock()
