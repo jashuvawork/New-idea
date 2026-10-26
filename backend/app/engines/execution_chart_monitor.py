@@ -86,7 +86,17 @@ async def fetch_live_trade_charts(
     index_key = INDEX_KEYS.get(sym)
     candles_5m, index_candles = await fetch_index_chart_candles(client, sym, force_refresh=force)
     if not index_candles:
-        index_candles = await client.get_candles(sym, count=count, force_refresh=force)
+        warmup = int(
+            getattr(settings, "spot_chart_indicator_warmup_1m_bars", 400) or 400
+        )
+        bar_count = max(
+            int(getattr(settings, "spot_chart_1m_bars", 300) or 300),
+            warmup,
+            count,
+        )
+        index_candles = await client.get_candles(
+            sym, count=bar_count, force_refresh=force,
+        )
     profile = _build_profile(index_candles, spot)
     index_chart = build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=index_candles)
     breadth_bias = snap.breadth.bias if snap.breadth else "NEUTRAL"
@@ -161,6 +171,13 @@ async def fetch_live_trade_charts(
         "spot": round(spot, 2),
         "indexChart": chart_summary_dict(index_chart),
         "indexChartFull": index_chart.model_dump(),
+        "indicatorReadiness": {
+            "indicatorBarCount": index_chart.indicatorBarCount,
+            "rsiReady": index_chart.rsiReady,
+            "macdReady": index_chart.macdReady,
+            "ema21Ready": index_chart.ema21Ready,
+            "indicatorsWarm": index_chart.indicatorsWarm,
+        },
         "quoteContext": quote_ctx,
         "premiumChart": _premium_chart_dict(premium_chart),
         "indexMtf": index_mtf,

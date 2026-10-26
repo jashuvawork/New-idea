@@ -88,6 +88,12 @@ class SpotChart(BaseModel):
     macdSignal: float = 0.0
     macdHistogram: float = 0.0
     macdBias: str = "NEUTRAL"  # BULLISH | BEARISH | NEUTRAL
+    # Extended 1m/resampled series used for RSI/MACD/EMA (may exceed session 5m barCount).
+    indicatorBarCount: int = 0
+    rsiReady: bool = False
+    macdReady: bool = False
+    ema21Ready: bool = False
+    indicatorsWarm: bool = False
 
 
 class PremiumChart(BaseModel):

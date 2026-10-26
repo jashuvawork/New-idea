@@ -34,13 +34,6 @@ def _pct_change(closes: list[float], bars: int) -> float:
 def _ema(closes: list[float], period: int) -> float:
     if not closes:
         return 0.0
-    window = closes[-period:] if len(closes) >= period else closes
-    return sum(window) / len(window)
-
-
-def _ema(closes: list[float], period: int) -> float:
-    if not closes:
-        return 0.0
     series = _ema_series(closes, period)
     return series[-1] if series else 0.0
 
@@ -72,14 +65,18 @@ def _indicator_closes(candles_5m: list, candles_1m: list | None) -> list[float]:
         ext_5m = _candle_rows(
             resample_candles(candles_1m, settings.spot_chart_timeframe_minutes)
         )[3]
+    from app.engines.indicator_readiness import MACD_MIN_CLOSES, RSI_MIN_CLOSES
+
     best_5m = ext_5m if len(ext_5m) >= len(native_5m) else native_5m
-    min_bars = int(getattr(settings, "spot_chart_min_5m_indicator_bars", 20) or 20)
-    if len(best_5m) >= min_bars:
+    min_panel = int(getattr(settings, "spot_chart_min_5m_indicator_bars", 20) or 20)
+    if len(best_5m) >= min_panel:
         return best_5m
-    # Session still too thin for a meaningful 5m RSI — 1m as a last resort.
+    # Prior-session 1m seed when 5m is still session-thin (open).
     if candles_1m:
         closes_1m = _candle_rows(candles_1m)[3]
-        if len(closes_1m) >= 15:
+        if len(closes_1m) >= MACD_MIN_CLOSES:
+            return closes_1m
+        if len(closes_1m) >= RSI_MIN_CLOSES + 1:
             return closes_1m
     return best_5m
 
@@ -109,13 +106,20 @@ def build_spot_chart(
     mom15 = _pct_change(closes, 3) if len(closes) > 3 else mom10
     mom30 = _pct_change(closes, 6) if len(closes) > 6 else mom15
 
-    ema9 = _ema(closes, min(9, len(closes)))
-    ema21 = _ema(closes, min(21, len(closes)))
-    if ema9 > ema21 * 1.00015:
-        ema_bias = "BULLISH"
-    elif ema9 < ema21 * 0.99985:
-        ema_bias = "BEARISH"
+    from app.engines.indicator_readiness import readiness_from_closes
+
+    readiness = readiness_from_closes(ind_closes)
+    ema9 = _ema(ind_closes, 9) if len(ind_closes) >= 1 else _ema(closes, min(9, len(closes)))
+    if readiness.ema21_ready:
+        ema21 = _ema(ind_closes, 21)
+        if ema9 > ema21 * 1.00015:
+            ema_bias = "BULLISH"
+        elif ema9 < ema21 * 0.99985:
+            ema_bias = "BEARISH"
+        else:
+            ema_bias = "NEUTRAL"
     else:
+        ema21 = ema9
         ema_bias = "NEUTRAL"
 
     green = red = 0
@@ -183,10 +187,11 @@ def build_spot_chart(
         bullish += 1
     elif rsi_read.value < 45:
         bearish += 1
-    if macd_read.bias == "BULLISH":
-        bullish += 2
-    elif macd_read.bias == "BEARISH":
-        bearish += 2
+    if readiness.macd_ready:
+        if macd_read.bias == "BULLISH":
+            bullish += 2
+        elif macd_read.bias == "BEARISH":
+            bearish += 2
 
     if bullish >= bearish + 3:
         direction = "BULLISH"
@@ -201,14 +206,16 @@ def build_spot_chart(
     elif mom5 < -0.02 and mom15 < -0.05 and mom30 < 0:
         direction = "BEARISH"
     elif (
-        mom5 > 0.01
+        readiness.macd_ready
+        and mom5 > 0.01
         and mom15 >= 0
         and rsi_read.value >= 50
         and macd_read.bias == "BULLISH"
     ):
         direction = "BULLISH"
     elif (
-        mom5 < -0.01
+        readiness.macd_ready
+        and mom5 < -0.01
         and mom15 <= 0
         and rsi_read.value <= 50
         and macd_read.bias == "BEARISH"
@@ -218,22 +225,34 @@ def build_spot_chart(
         direction = "BEARISH"
     elif mom15 > 0 and mom30 > 0:
         direction = "BULLISH"
-    elif mom5 > 0.015 and rsi_read.value >= 58 and macd_read.bias != "BEARISH":
+    elif (
+        mom5 > 0.015
+        and rsi_read.value >= 58
+        and (not readiness.macd_ready or macd_read.bias != "BEARISH")
+    ):
         direction = "BULLISH"
     else:
         direction = "NEUTRAL"
 
+    macd_hist_contrib = abs(macd_read.histogram) * 2 if readiness.macd_ready else 0.0
     trend_strength = min(
         100.0,
         abs(mom15) * 15 + abs(mom5) * 25 + abs(bullish - bearish) * 8
-        + abs(rsi_read.value - 50) * 0.15 + abs(macd_read.histogram) * 2,
+        + abs(rsi_read.value - 50) * 0.15 + macd_hist_contrib,
     )
+
+    macd_out = macd_read if readiness.macd_ready else type(macd_read)()
 
     return SpotChart(
         direction=direction,
         spot=round(spot, 2),
         timeframe="5m",
         barCount=len(closes),
+        indicatorBarCount=readiness.indicator_bar_count,
+        rsiReady=readiness.rsi_ready,
+        macdReady=readiness.macd_ready,
+        ema21Ready=readiness.ema21_ready,
+        indicatorsWarm=readiness.indicators_warm,
         momentum5Pct=round(mom5, 3),
         momentum10Pct=round(mom10, 3),
         momentum15Pct=round(mom15, 3),
@@ -249,10 +268,10 @@ def build_spot_chart(
         poc=round(poc, 2),
         rsi=rsi_read.value,
         rsiBias=rsi_read.bias,
-        macd=macd_read.line,
-        macdSignal=macd_read.signal,
-        macdHistogram=macd_read.histogram,
-        macdBias=macd_read.bias,
+        macd=macd_out.line,
+        macdSignal=macd_out.signal,
+        macdHistogram=macd_out.histogram,
+        macdBias=macd_out.bias,
     )
 
 

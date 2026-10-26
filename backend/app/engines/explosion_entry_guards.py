@@ -554,6 +554,27 @@ def explosion_entry_window_blocked(
     return False, ""
 
 
+def spot_chart_indicators_cold_blocked(
+    snap: SymbolSnapshot | Any | None,
+) -> tuple[bool, str]:
+    """Block explosion entries when RSI/MACD/EMA21 lack prior-session seed bars."""
+    settings = get_settings()
+    if not getattr(settings, "spot_chart_block_explosion_when_indicators_cold", True):
+        return False, ""
+    if snap is None:
+        return False, ""
+    chart = getattr(snap, "spotChart", None)
+    if chart is None:
+        return False, ""
+    if bool(getattr(chart, "indicatorsWarm", False)):
+        return False, ""
+    n = int(getattr(chart, "indicatorBarCount", 0) or 0)
+    # Legacy mocks / snapshots without readiness fields — do not block.
+    if n <= 0:
+        return False, ""
+    return True, f"spot_chart_indicators_cold_{n}bars"
+
+
 def immature_explosion_blocked(
     explosion_event: Any,
     *,

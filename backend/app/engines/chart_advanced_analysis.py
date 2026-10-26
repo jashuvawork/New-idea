@@ -143,10 +143,17 @@ def _compute_classic_ichimoku(
 ) -> dict[str, Any]:
     """Classic Donchian-mid Ichimoku (pre-#266) — levels for SL/TP."""
 
+    from app.engines.indicator_readiness import ICHIMOKU_SENKOU_B_MIN
+
+    n = min(len(highs), len(lows), len(closes))
+    ichimoku_ready = n >= ICHIMOKU_SENKOU_B_MIN
+
     def _mid(h: list[float], l: list[float], period: int) -> float:
         if not h or not l:
             return spot
-        p = min(period, len(h))
+        if len(h) < period or len(l) < period:
+            return spot
+        p = period
         return (max(h[-p:]) + min(l[-p:])) / 2
 
     tenkan = _mid(highs, lows, 9)
@@ -156,14 +163,23 @@ def _compute_classic_ichimoku(
     cloud_top = max(senkou_a, senkou_b)
     cloud_bottom = min(senkou_a, senkou_b)
 
-    if spot > cloud_top:
+    if not ichimoku_ready:
+        cloud_bias = "NEUTRAL"
+        price_vs = "INSIDE"
+        tk_cross = "NEUTRAL"
+    elif spot > cloud_top:
         cloud_bias = "BULLISH"
+        price_vs = "ABOVE"
+        tk_cross = "BULLISH" if tenkan > kijun else "BEARISH" if tenkan < kijun else "NEUTRAL"
     elif spot < cloud_bottom:
         cloud_bias = "BEARISH"
+        price_vs = "BELOW"
+        tk_cross = "BULLISH" if tenkan > kijun else "BEARISH" if tenkan < kijun else "NEUTRAL"
     else:
         cloud_bias = "NEUTRAL"
+        price_vs = "INSIDE"
+        tk_cross = "BULLISH" if tenkan > kijun else "BEARISH" if tenkan < kijun else "NEUTRAL"
 
-    tk_cross = "BULLISH" if tenkan > kijun else "BEARISH" if tenkan < kijun else "NEUTRAL"
     return {
         "tenkan": round(tenkan, 2),
         "kijun": round(kijun, 2),
@@ -173,8 +189,9 @@ def _compute_classic_ichimoku(
         "cloudBottom": round(cloud_bottom, 2),
         "cloudBias": cloud_bias,
         "tkCross": tk_cross,
-        "priceVsCloud": "ABOVE" if spot > cloud_top else "BELOW" if spot < cloud_bottom else "INSIDE",
+        "priceVsCloud": price_vs,
         "levelsEngine": "classic",
+        "ichimokuReady": ichimoku_ready,
     }
 
 
@@ -223,6 +240,9 @@ def compute_ichimoku(
     classic = _compute_classic_ichimoku(highs, lows, closes, spot)
     smart = compute_smart_ichimoku(highs, lows, closes, spot)
     out = dict(classic)
+    if not classic.get("ichimokuReady"):
+        out["smartCloudBias"] = "NEUTRAL"
+        out["smartPriceVsCloud"] = "INSIDE"
     for key in _SMART_ICHIMOKU_META_KEYS:
         if key in smart:
             out[key] = smart[key]

@@ -28,12 +28,27 @@ async def fetch_index_chart_candles(
     if not key:
         return [], []
 
+    warmup = int(
+        getattr(settings, "spot_chart_indicator_warmup_1m_bars", 400) or 400
+    )
+    bar_count = max(
+        int(getattr(settings, "spot_chart_1m_bars", 300) or 300),
+        warmup,
+    )
     candles_1m = await client.get_historical_candles(
         key,
         interval="1minute",
-        count=settings.spot_chart_1m_bars,
+        count=bar_count,
         force_refresh=force_refresh,
     )
+    if len(candles_1m) < 80 and not force_refresh:
+        # Open / cache miss: retry once with refresh for prior-session seed.
+        candles_1m = await client.get_historical_candles(
+            key,
+            interval="1minute",
+            count=bar_count,
+            force_refresh=True,
+        )
 
     candles_5m: list[Any] = []
     if settings.execution_mtf_use_v3_native:

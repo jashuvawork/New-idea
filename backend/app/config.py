@@ -2907,6 +2907,9 @@ class Settings(BaseSettings):
     local_base_overrides_bearish_breadth: bool = True
     spot_chart_timeframe_minutes: int = 5
     spot_chart_1m_bars: int = 300  # 1m history for 5m resample + RSI/MACD warmup
+    # Prior-session seed target (~78×5m Ichimoku cloud + MACD 35 on 1m resample).
+    spot_chart_indicator_warmup_1m_bars: int = 400
+    spot_chart_block_explosion_when_indicators_cold: bool = True
     # Historical time-to-FTV advisory. V3 index candles train a time-of-day
     # breakout prior; live premium/orderflow must still confirm every entry.
     ftv_probability_enabled: bool = True
@@ -3026,7 +3029,7 @@ class Settings(BaseSettings):
     execution_chart_force_upstox_refresh: bool = True
     execution_chart_premium_check_enabled: bool = True
     execution_chart_min_premium_momentum_pct: float = -0.15
-    execution_chart_candle_count: int = 60
+    execution_chart_candle_count: int = 60  # legacy; execution uses spot_chart_* warmup bars
     # Confirmed near-base FTV first-lifts may fill THROUGH a shallow premium dip — that dip is
     # the base retest right before the vertical, not a collapse. Without this the execution
     # premium-fading gate blocked every confirmed FTV first-lift (they always ticked back a
