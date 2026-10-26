@@ -890,3 +890,4 @@ def test_late_reentry_guard_off_by_default_without_explicit_enable():
         )
     assert blocked is False
     assert reason == ""
+
