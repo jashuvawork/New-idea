@@ -145,6 +145,8 @@ def pad_lane_ftv_waives_timing_block(evidence: Mapping[str, Any]) -> bool:
 
     if index_confirmed_waives_timing_block(evidence):
         return True
+    if bool(evidence.get("callAtmItmBase676Waive")):
+        return True
     v3 = float(evidence.get("velocity3s") or 0)
     v9 = float(evidence.get("velocity9s") or 0)
     return pad_lane_cold_velocity_ok(evidence, v3, v9)

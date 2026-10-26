@@ -1855,9 +1855,13 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
 
     rejected = False
     if timing == "FAILED_LAUNCH" or timing_action == "block" and v3 < 0:
-        rejected = True
-        penalties.append({"code": "failed_launch", "points": 45.0})
-        score -= 45.0
+        if not (
+            bool(evidence.get("callAtmItmBase676Waive"))
+            or near_base_call
+        ):
+            rejected = True
+            penalties.append({"code": "failed_launch", "points": 45.0})
+            score -= 45.0
     if (
         v3 < 0
         and not micro_pullback

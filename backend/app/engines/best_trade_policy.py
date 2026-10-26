@@ -559,6 +559,12 @@ def timing_allows_best_trade_full_size(
     assessment = str(timing.get("assessment") or "").upper()
     if assessment in ("GOOD", "OK"):
         return True
+    if bool(timing.get("callAtmItmBase676Waive")) and str(
+        timing.get("callAtmItmBase676WaiveMode") or ""
+    ).lower() == "eligible" and bool(
+        getattr(settings, "call_atm_itm_base_failed_launch_full_size_when_eligible", True)
+    ):
+        return True
     if bool(getattr(settings, "entry_timing_structured_cold_max_lots", False)):
         return assessment == "COLD_BASE"
     if assessment == "COLD_BASE" and best_trade_near_base_assessment(
@@ -955,6 +961,128 @@ def call_atm_itm_base_capture_eligible(
         meta["callAtBaseBestTrade"] = True
 
     return True, meta
+
+
+def call_alert_from_timing_context(
+    event: Any,
+    *,
+    ict: Any = None,
+    snap: Any = None,
+) -> dict[str, Any]:
+    """Merge explosion event + ICT into alert-shaped evidence for #676 checks."""
+    alert: dict[str, Any] = {}
+    if ict is not None:
+        if hasattr(ict, "to_dict"):
+            alert.update(ict.to_dict())
+        alert["localBaseMovePct"] = max(
+            _number(alert.get("baseRelativeMovePct")),
+            _number(getattr(ict, "base_relative_move_pct", 0)),
+        )
+        alert["ictBaseRelativeMovePct"] = alert["localBaseMovePct"]
+        alert["ictBaseArmed"] = bool(
+            getattr(ict, "base_armed", False) or alert.get("baseArmed")
+        )
+        alert["armedBaseLaunch"] = bool(
+            getattr(ict, "armed_base_launch", False) or alert.get("armedBaseLaunch")
+        )
+        alert["eliteBaseReady"] = bool(
+            getattr(ict, "elite_base_ready", False) or alert.get("eliteBaseReady")
+        )
+        alert["vRipReady"] = bool(
+            getattr(ict, "v_rip_ready", False) or alert.get("vRipReady")
+        )
+        alert["ictVRipReady"] = alert["vRipReady"]
+        alert["firstLift"] = bool(getattr(ict, "first_lift", False) or alert.get("firstLift"))
+        alert["flatThenVertical"] = bool(
+            getattr(ict, "flat_then_vertical", False) or alert.get("flatThenVertical")
+        )
+        alert["volumeAwaken"] = bool(
+            getattr(ict, "volume_awakening", False) or alert.get("volumeAwakening")
+        )
+        pat = str(getattr(ict, "pattern", "") or alert.get("pattern") or "")
+        if pat and not alert.get("momentType"):
+            alert["momentType"] = pat
+    if event is not None:
+        side_v = getattr(event, "side", "")
+        side = side_v.value if hasattr(side_v, "value") else str(side_v or "")
+        alert.setdefault("symbol", str(getattr(event, "symbol", "") or ""))
+        alert.setdefault("side", side)
+        alert.setdefault("strike", float(getattr(event, "strike", 0) or 0))
+        alert.setdefault("tier", str(getattr(event, "tier", "") or ""))
+        alert.setdefault("velocity3s", _number(getattr(event, "velocity_3s", 0)))
+        alert.setdefault("velocity9s", _number(getattr(event, "velocity_9s", 0)))
+        alert.setdefault(
+            "explosionScore",
+            _number(getattr(event, "explosion_score", 0) or getattr(event, "score", 0)),
+        )
+        alert.setdefault("premium", _number(getattr(event, "premium", 0)))
+    if snap is not None:
+        alert.setdefault("spot", _number(getattr(snap, "spot", 0)))
+        alert.setdefault("atmStrike", _number(getattr(snap, "atmStrike", 0)))
+    return alert
+
+
+def explosion_candidate_from_timing_context(
+    event: Any,
+    *,
+    ict: Any = None,
+    snap: Any = None,
+) -> Any:
+    """Minimal explosion candidate for policy checks from entry_timing inputs."""
+    from types import SimpleNamespace
+
+    alert = call_alert_from_timing_context(event, ict=ict, snap=snap)
+    side_v = alert.get("side") or getattr(event, "side", "")
+    return SimpleNamespace(
+        mode="explosion",
+        symbol=str(alert.get("symbol") or getattr(event, "symbol", "") or ""),
+        side=side_v,
+        strike=float(alert.get("strike") or getattr(event, "strike", 0) or 0),
+        premium=float(alert.get("premium") or getattr(event, "premium", 0) or 0),
+        tier=str(alert.get("tier") or getattr(event, "tier", "") or ""),
+        alert=alert,
+        pretrade_meta={},
+        snap=snap,
+    )
+
+
+def call_atm_itm_base_waives_structured_failed_launch(
+    event: Any,
+    *,
+    ict: Any = None,
+    snap: Any = None,
+    state: Any = None,
+    in_window: bool = True,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """True when #676 rank arm should not hard-block on structured FAILED_LAUNCH."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "call_atm_itm_base_waives_failed_launch_enabled", True)):
+        return False, ""
+    if not in_window or event is None:
+        return False, ""
+    side_v = getattr(event, "side", "")
+    side = side_v.value if hasattr(side_v, "value") else str(side_v or "").upper()
+    if side != "CALL":
+        return False, ""
+    candidate = explosion_candidate_from_timing_context(event, ict=ict, snap=snap)
+    ok, _ = call_atm_itm_base_capture_eligible(
+        candidate, snap, state=state, settings=settings,
+    )
+    if ok:
+        return True, "eligible"
+    alert = call_alert_from_timing_context(event, ict=ict, snap=snap)
+    if call_atm_itm_near_base_pad(
+        alert,
+        snap,
+        side="CALL",
+        strike=float(getattr(candidate, "strike", 0) or 0),
+        settings=settings,
+    ):
+        return True, "near_base_pad"
+    return False, ""
 
 
 def call_atm_itm_base_rank_armed(
