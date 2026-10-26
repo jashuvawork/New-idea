@@ -57,7 +57,9 @@ def live_best_trade_entry_blocked(
     settings = get_settings()
     if not bool(getattr(settings, "live_best_trades_only_enabled", False)):
         return False, "ok", {"liveBestTradeGate": False}
-    if not bool(getattr(settings, "enable_live_trading", False)):
+    from app.engines.execution_mode import live_entry_gates_active
+
+    if not live_entry_gates_active(settings):
         return False, "ok", {"liveBestTradeGate": False}
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         return False, "ok", {"liveBestTradeGate": False}

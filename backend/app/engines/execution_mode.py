@@ -30,6 +30,28 @@ def paper_execution_active(settings=None) -> bool:
     return bool(getattr(s, "paper_trading", True))
 
 
+def paper_live_parity_active(settings=None) -> bool:
+    """Paper book uses simulated broker flow — same entry path as live, not legacy shadow fills."""
+    s = settings if settings is not None else get_settings()
+    if live_broker_armed(s):
+        return False
+    return (
+        bool(getattr(s, "paper_live_parity_enabled", True))
+        and bool(getattr(s, "paper_simulate_broker_orders", True))
+        and bool(getattr(s, "paper_trading", True))
+    )
+
+
+def live_entry_gates_active(settings=None) -> bool:
+    """Entry gates that must match between live and paper-live-parity rehearsal."""
+    s = settings if settings is not None else get_settings()
+    if live_broker_execution_enabled(s):
+        return True
+    if not bool(getattr(s, "paper_mirror_live_entry_gates", True)):
+        return False
+    return paper_live_parity_active(s)
+
+
 def execution_mode_label(settings=None) -> str:
     if live_broker_armed(settings):
         return "LIVE"

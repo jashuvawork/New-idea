@@ -807,6 +807,8 @@ class Settings(BaseSettings):
     # Paper should mirror live execution (broker flow + slippage) before going live
     paper_live_parity_enabled: bool = True
     paper_simulate_broker_orders: bool = True  # resolve instrument + paper order ids in parity mode
+    # When true, paper-live-parity runs the same entry gates as live (e.g. live_best_trades grade bar).
+    paper_mirror_live_entry_gates: bool = True
 
     # Paper slippage — realistic fills for milestone / PnL (ignored on live broker fills)
     paper_slippage_enabled: bool = True
