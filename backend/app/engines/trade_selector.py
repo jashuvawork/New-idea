@@ -320,6 +320,14 @@ def _explosion_candidates(
             alert=alert,
             state=state,
         )
+        # A preauthorized stamp off the base, or a live 9s tape that is falling,
+        # is not a near-miss. Stored arm velocity and structural waivers must not
+        # turn that refusal into an order.
+        if first_lift_readiness_reason in (
+            "preauthorized_stamp_needs_confirmed_base_lift",
+            "first_lift_live_velocity9s_negative",
+        ):
+            continue
         early_pad = alert_has_early_radar_pad_ready(alert)
         coil_pad = alert_has_building_coil_pad(alert)
         from app.engines.pad_lane_capture import pad_lane_early_near_miss_waive

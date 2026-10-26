@@ -530,6 +530,8 @@ def explosion_near_miss_waive(
     if rr.startswith(
         (
             "first_lift_live_velocity_negative",
+            "first_lift_live_velocity9s_negative",
+            "preauthorized_stamp_needs_confirmed_base_lift",
             "mid_rip_armed_coil_rejected",
             "first_lift_base_move_outside",
         )
