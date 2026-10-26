@@ -140,16 +140,28 @@ trades, funnel blockers, scorecard missed count
 ### Misses (≤8 rows)
 
 ### Checklists
-(Same three subsections as OPEN: deployment readiness table, Sep917 4-step on topCandidate, L0–L7 on best near-base miss — emphasize L5–L6, Sep917 sessionContext/postWinChopFomo)
 
-### ACTION LIST
+#### 1) Deployment readiness
+From /api/deployment/readiness: readyForPaper, readyForLive; PASS/FAIL table for all checks.* keys; OPS per FAIL.
+
+#### 2) Sep 9–17 live checklist
+chopGuards.sep917LiveChecklist — flags, per-symbol unlocks, topCandidate lane/ready/steps (4× ok+detail), stepsGuide yes/no. **Focus:** sessionContext + postWinChopFomo if morning win.
+
+#### 3) L0–L7
+Best ATM/ITM near-base miss in 09:45–12:00 window. **Focus:** L5 SELECTOR_POOL, L6 SELECTOR_GATE (reentry_ml, fake_trap, elite).
+
+### ACTION LIST (numbered; OPS | INVESTIGATE | FIX_CANDIDATE | IGNORE_OK)
 - Max ONE FIX_CANDIDATE for entire morning
 - dailyProfitGate block → OPS/INVESTIGATE only, no new gates proposed
 
 End: **Afternoon watch** (2 bullets for 12:01–15:45).
 
 ## Slack
-(same rules as OPEN; use MORNING in 🚨 title)
+- Post full digest to Slack.
+- 🚨 second message if FIX_CANDIDATE, INFRA_RED, readiness token/loop/WS FAIL, or topCandidate not ready with ELITE/EXPLODING.
+  Title: 🚨 NexusQuant inception · MORNING · {DATE}
+  @channel only for INFRA_RED.
+- Else Output title without 🚨.
 ```
 
 ---
