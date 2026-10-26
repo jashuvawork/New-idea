@@ -161,3 +161,76 @@ End with session grade: CAPTURED / MIXED / MISSED_DAY + one sentence why.
 4. First live day: **Tuesday 2026-10-27** — expect digests at **09:45**, **12:00**, **15:45 IST** (~**05:15**, **07:30**, **11:15 Madrid**).
 
 This chat agent does **not** auto-run these unless Automations are enabled; the prompts above are the contract for what each run must deliver.
+
+---
+
+## Cursor UI copy-paste pack
+
+Create **three** automations at [cursor.com/automations](https://cursor.com/automations). For each: attach GitHub repo **`jashuvawork/New-idea`**, branch **`main`**, enable **Shell + network**, connect **Slack** if you want escalations.
+
+### Shared Slack rule (append to every prompt below)
+
+```text
+## Slack
+- Always post the full digest to the connected Slack channel (thread OK).
+- If ANY action item is tagged FIX_CANDIDATE or INFRA_RED, also send a second message:
+  Title: `🚨 NexusQuant inception · {OPEN|MORNING|FULL DAY} · {DATE}`
+  Body: 3–6 lines — what failed, top miss key + blocker, single priority action. @channel only for INFRA_RED (API down, WS stale >45s, live armed unexpectedly).
+- If the run is calm (only IGNORE_OK / INVESTIGATE): Slack title without 🚨 — `Inception …` as in Output title.
+```
+
+---
+
+### Automation A — fields for Cursor UI
+
+| Field | Value |
+|-------|--------|
+| **Name** | `NexusQuant · Inception OPEN 09:45 IST` |
+| **Description** | Read-only open-window close (~09:15–09:45). Funnel + first-lift/#676 misses, infra/auth. Action list only — no PRs. |
+| **Schedule timezone** | `Asia/Kolkata` |
+| **Cron** | `45 9 * * 1-5` |
+| **Repo** | `jashuvawork/New-idea` @ `main` |
+
+**Prompt:** use the “Automation 1” block above + **Shared Slack rule**.
+
+---
+
+### Automation B — fields for Cursor UI
+
+| Field | Value |
+|-------|--------|
+| **Name** | `NexusQuant · Inception MORNING 12:00 IST` |
+| **Description** | Read-only morning close (~09:45–12:00). Base capture, post-win blockers, CE/PE. Max one FIX_CANDIDATE. |
+| **Schedule timezone** | `Asia/Kolkata` |
+| **Cron** | `0 12 * * 1-5` |
+| **Repo** | `jashuvawork/New-idea` @ `main` |
+
+**Prompt:** use the “Automation 2” block above + **Shared Slack rule**.
+
+---
+
+### Automation C — fields for Cursor UI
+
+| Field | Value |
+|-------|--------|
+| **Name** | `NexusQuant · Inception FULL DAY 15:45 IST` |
+| **Description** | Read-only afternoon close + full-day rollup. Re-entry misses, blocker histogram, one PR tomorrow max. |
+| **Schedule timezone** | `Asia/Kolkata` |
+| **Cron** | `45 15 * * 1-5` |
+| **Repo** | `jashuvawork/New-idea` @ `main` |
+
+**Prompt:** use the “Automation 3” block above + **Shared Slack rule**.
+
+---
+
+### Madrid clock (for you)
+
+| IST run | Madrid (UTC+1, Oct–Mar) |
+|---------|-------------------------|
+| 09:45 | 05:15 |
+| 12:00 | 07:30 |
+| 15:45 | 11:15 |
+
+### After you enable
+
+Confirm all three show **Enabled** before **09:40 IST** on the next trading day. Optional: run **Test / Run now** once on Automation A to verify Slack + API access.
