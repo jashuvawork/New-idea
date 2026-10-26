@@ -1206,7 +1206,7 @@ def session_peak_late_reentry_blocked(
     Fresh first-lift launches with real velocity may still pass.
     """
     settings = get_settings()
-    if not bool(getattr(settings, "explosion_late_reentry_block_enabled", True)):
+    if not bool(getattr(settings, "explosion_late_reentry_block_enabled", False)):
         return False, ""
 
     alert_pre = alert if isinstance(alert, dict) else {}
@@ -1417,15 +1417,35 @@ def win_reentry_velocity_blocked(
     side: Any,
     strike: float,
     velocity_3s: float,
+    premium: float = 0.0,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str]:
     """After a winning close, the same CE/PE strike needs live velocity before reentry."""
     settings = get_settings()
     if not bool(getattr(settings, "win_reentry_requires_velocity_enabled", False)):
         return False, ""
-    prior = _latest_same_strike_explosion_close(
-        state, symbol=symbol, side=side, strike=strike,
+    lookback = float(
+        getattr(settings, "post_win_late_reentry_waive_lookback_seconds", 14400) or 14400
+    )
+    prior, _age = _latest_same_strike_win_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        max_age_seconds=lookback,
     )
     if prior is None or getattr(prior, "closedAt", None) is None:
+        return False, ""
+    waived, _mode, _meta = post_win_session_late_reentry_waive(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        premium=float(premium or 0),
+        velocity_3s=float(velocity_3s or 0),
+        alert=alert,
+    )
+    if waived:
         return False, ""
     pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
     if pnl <= 0:
@@ -1450,11 +1470,26 @@ def exhausted_ftv_reentry_blocked(
     strike: float,
     premium: float,
     velocity_3s: float,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Block a spent FTV contract until a new post-close base accelerates."""
     settings = get_settings()
     meta: dict[str, Any] = {"applied": False}
     if not getattr(settings, "explosion_post_peak_reentry_guard_enabled", True):
+        return False, meta
+    lookback = float(
+        getattr(settings, "post_win_late_reentry_waive_lookback_seconds", 14400) or 14400
+    )
+    prior_win, _win_age = _latest_same_strike_win_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        max_age_seconds=lookback,
+    )
+    if prior_win is not None and _alert_post_win_new_local_base(alert, settings=settings):
+        meta["postWinLateReentryWaive"] = True
+        meta["postWinLateReentryWaiveMode"] = "new_local_base"
         return False, meta
     prior = _latest_same_strike_explosion_close(
         state, symbol=symbol, side=side, strike=strike,

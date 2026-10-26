@@ -711,3 +711,145 @@ def test_continuation_leg_cap_survives_always_max_lots(mock_cap_settings, _max):
         )
     assert capped == 4
     assert meta.get("applied") is True
+
+
+def test_post_win_fake_trap_fresh_near_base_respects_policy_waive():
+    """Late-reentry waive must not be undone by fake_explosion fresh-near-base."""
+    from unittest.mock import MagicMock
+
+    from app.engines.explosion_entry_guards import post_win_fresh_near_base_blocked
+
+    settings = Settings(
+        fake_explosion_trap_post_win_fresh_near_base_enabled=True,
+        post_win_late_reentry_waive_enabled=True,
+        post_win_new_local_base_max_pad_pct=22.0,
+        fresh_near_local_base_max_pct=10.0,
+    )
+    state = AutoTraderState(
+        closedPaperTrades=[_nifty_side_win_trade(side=Side.CALL, strike=22500.0)],
+    )
+    cand = MagicMock(
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22500.0,
+        premium=244.0,
+        explosion_event=MagicMock(velocity_3s=0.4),
+    )
+    alert = {
+        "ictBaseArmed": True,
+        "ictFlatThenVertical": True,
+        "localBaseMovePct": 14.0,
+        "tier": "ELITE",
+    }
+    with patch(
+        "app.engines.explosion_entry_guards.get_settings",
+        return_value=settings,
+    ), patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ), patch(
+        "app.engines.explosion_detector.post_close_base_reacceleration",
+        return_value=(False, {}),
+    ):
+        blocked, reason, meta = post_win_fresh_near_base_blocked(
+            cand,
+            local_pad=18.0,
+            ict=None,
+            state=state,
+            alert=alert,
+        )
+    assert blocked is False
+    assert reason == ""
+    assert meta.get("postWinLateReentryWaiveMode") == "new_local_base"
+
+
+def test_post_win_exhausted_ftv_skipped_when_new_local_base_waives():
+    settings = Settings(
+        explosion_post_peak_reentry_guard_enabled=True,
+        post_win_new_local_base_max_pad_pct=22.0,
+    )
+    state = AutoTraderState(
+        closedPaperTrades=[_nifty_side_win_trade(side=Side.CALL, strike=22500.0)],
+    )
+    alert = {
+        "ictBaseArmed": True,
+        "ictFlatThenVertical": True,
+        "localBaseMovePct": 14.0,
+        "tier": "ELITE",
+    }
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ), patch(
+        "app.engines.explosion_detector.post_close_base_reacceleration",
+        return_value=(False, {}),
+    ):
+        blocked, meta = exhausted_ftv_reentry_blocked(
+            state,
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=22500.0,
+            premium=244.0,
+            velocity_3s=0.4,
+            alert=alert,
+        )
+    assert blocked is False
+    assert meta.get("postWinLateReentryWaiveMode") == "new_local_base"
+
+
+def test_post_win_exhausted_ftv_still_blocks_continuation_without_rebase():
+    settings = Settings(
+        explosion_post_peak_reentry_guard_enabled=True,
+        explosion_post_peak_reentry_lookback_seconds=14400,
+        post_win_continuation_leg_min_velocity_3s=2.0,
+    )
+    prior = _nifty_side_win_trade(side=Side.CALL, strike=22500.0, minutes_ago=20)
+    prior.entryContext = {
+        "selectionMode": "explosion",
+        "ictFlatThenVertical": True,
+    }
+    prior.entryPremium = 197.6
+    prior.maxLtp = 225.7
+    prior.bestPnlPoints = 28.0
+    prior.exitReason = "explosion_peak_keep_trail"
+    state = AutoTraderState(closedPaperTrades=[prior])
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ), patch(
+        "app.engines.explosion_detector.post_close_base_reacceleration",
+        return_value=(False, {}),
+    ):
+        blocked, meta = exhausted_ftv_reentry_blocked(
+            state,
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=22500.0,
+            premium=244.0,
+            velocity_3s=2.5,
+            alert={"tier": "BUILDING"},
+        )
+    assert blocked is True
+    assert meta.get("applied") is True
+
+
+def test_late_reentry_guard_off_by_default_without_explicit_enable():
+    _seed_session_peak(
+        symbol="NIFTY", strike=22500.0, side=Side.CALL, low=167.0, peak=225.7,
+    )
+    settings = Settings()
+    assert settings.explosion_late_reentry_block_enabled is False
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ):
+        blocked, reason = session_peak_late_reentry_blocked(
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=22500.0,
+            premium=244.0,
+            velocity_3s=0.2,
+            alert={},
+        )
+    assert blocked is False
+    assert reason == ""

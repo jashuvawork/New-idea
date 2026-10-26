@@ -670,12 +670,15 @@ async def _open_from_candidate(
         reentry_velocity = float(
             getattr(candidate.explosion_event, "velocity_3s", 0) or 0
         )
+        alert_d = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
         win_blocked, win_reason = win_reentry_velocity_blocked(
             state,
             symbol=symbol,
             side=candidate.side,
             strike=float(candidate.strike or 0),
             velocity_3s=reentry_velocity,
+            premium=float(candidate.premium or 0),
+            alert=alert_d,
         )
         if win_blocked:
             return False, win_reason or "win_reentry_velocity_required"
@@ -686,11 +689,10 @@ async def _open_from_candidate(
             strike=float(candidate.strike or 0),
             premium=float(candidate.premium or 0),
             velocity_3s=reentry_velocity,
+            alert=alert_d,
         )
         if reentry_blocked:
             return False, "exhausted_ftv_requires_new_base_reacceleration"
-
-        alert_d = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
         late_peak_blocked, late_peak_reason = session_peak_late_reentry_blocked(
             symbol=symbol,
             side=candidate.side,

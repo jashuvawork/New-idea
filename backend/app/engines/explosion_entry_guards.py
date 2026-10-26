@@ -2054,6 +2054,31 @@ def post_win_fresh_near_base_blocked(
     if not post_session_win:
         return False, "", meta
 
+    try:
+        from app.engines.session_mode_feedback import post_win_session_late_reentry_waive
+
+        prem = float(getattr(candidate, "premium", 0) or 0)
+        sym = str(getattr(candidate, "symbol", "") or "")
+        v3 = float(getattr(getattr(candidate, "explosion_event", None), "velocity_3s", 0) or 0)
+        alert_d = alert if isinstance(alert, dict) else {}
+        waived, mode, wmeta = post_win_session_late_reentry_waive(
+            state,
+            symbol=sym,
+            side=getattr(candidate, "side", ""),
+            strike=float(getattr(candidate, "strike", 0) or 0),
+            premium=prem,
+            velocity_3s=v3,
+            alert=alert_d,
+        )
+        if waived:
+            meta["postWinLateReentryWaive"] = True
+            meta["postWinLateReentryWaiveMode"] = mode
+            meta.update(wmeta)
+            meta["postWinFreshNearBasePass"] = True
+            return False, "", meta
+    except Exception:
+        pass
+
     fresh, fresh_meta = fresh_near_local_base(
         local_pad=local_pad, ict=ict, alert=alert, settings=settings,
     )
@@ -2108,17 +2133,18 @@ def _post_win_extended_chase_blocked(
             velocity_3s=v3,
             alert=alert_d if isinstance(alert_d, dict) else {},
         )
-        if waived and mode == "new_local_base":
-            return False, "", meta
-        if waived and mode == "continuation_leg":
-            strict_v3 = float(
-                getattr(
-                    settings, "fake_explosion_trap_post_win_extended_min_velocity_3s", 3.0
-                )
-                or 3.0
-            )
-            if v3 + 1e-9 >= strict_v3:
+        if waived:
+            meta["postWinLateReentryWaive"] = True
+            meta["postWinLateReentryWaiveMode"] = mode
+            if mode == "new_local_base":
                 return False, "", meta
+            if mode == "continuation_leg":
+                min_cont = float(
+                    getattr(settings, "post_win_continuation_leg_min_velocity_3s", 2.0)
+                    or 2.0
+                )
+                if v3 + 1e-9 >= min_cont:
+                    return False, "", meta
     except Exception:
         pass
 
