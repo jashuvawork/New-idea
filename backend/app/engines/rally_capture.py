@@ -513,6 +513,19 @@ def explosion_near_miss_waive(
 ) -> bool:
     """Unified near-miss waiver for explosion first-lift / quality / tier lag."""
     rr = str(readiness_reason or "").lower()
+    near_base_call = False
+    if isinstance(alert, dict):
+        from app.engines.best_trade_policy import call_atm_itm_near_base_pad
+
+        near_base_call = call_atm_itm_near_base_pad(alert, snap, settings=settings)
+    if near_base_call and rr.startswith(
+        (
+            "first_lift_live_velocity_negative",
+            "first_lift_velocity3s",
+            "armed_base_tqs",
+        )
+    ):
+        return True
     if rr.startswith(
         (
             "first_lift_live_velocity_negative",

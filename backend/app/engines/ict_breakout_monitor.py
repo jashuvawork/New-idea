@@ -2415,7 +2415,38 @@ def first_lift_entry_readiness(
     live_v3 = v3
     v3 = max(v3, float(persisted.get("velocity3s") or 0))
     v9 = max(v9, float(persisted.get("velocity9s") or 0))
-    if live_v3 < 0:
+    from app.engines.best_trade_policy import call_atm_itm_near_base_pad
+
+    shape_side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    atm_itm_base_pad = call_atm_itm_near_base_pad(
+        {
+            **row,
+            "side": shape_side,
+            "tier": str(getattr(event, "tier", "") or row.get("tier") or ""),
+            "strike": float(getattr(event, "strike", 0) or row.get("strike") or 0),
+            "localBaseMovePct": base_move
+            or row.get("localBaseMovePct")
+            or row.get("ictBaseRelativeMovePct")
+            or 0,
+            "armedBaseLaunch": bool(armed_launch or row.get("armedBaseLaunch")),
+            "ictArmedBaseLaunch": bool(armed_launch or row.get("ictArmedBaseLaunch")),
+            "vRipReady": bool(v_rip_ready or row.get("vRipReady")),
+            "ictVRipReady": bool(v_rip_ready or row.get("ictVRipReady")),
+            "eliteBaseReady": bool(elite_base_ready or row.get("eliteBaseReady")),
+            "ictEliteBaseReady": bool(elite_base_ready or row.get("ictEliteBaseReady")),
+            "firstLift": bool(first_lift or row.get("firstLift")),
+            "ictFirstLift": bool(first_lift or row.get("ictFirstLift")),
+            "ictBaseArmed": row.get("ictBaseArmed"),
+            "momentType": row.get("momentType"),
+        },
+        snap,
+        settings=settings,
+    )
+    if live_v3 < 0 and not atm_itm_base_pad:
         return False, "first_lift_live_velocity_negative"
     if v_rip_lane:
         min_v3 = float(
@@ -2539,9 +2570,13 @@ def first_lift_entry_readiness(
         if _entry_policy.consolidation_cold_v3_at_base:
             min_v3 = 0.0
             min_v9 = 0.0
-    if not sustained_lift and v3 < min_v3:
+    if atm_itm_base_pad:
+        # Cold velocity at the low is the base, not a failed lift.
+        min_v3 = 0.0
+        min_v9 = 0.0
+    if not atm_itm_base_pad and not sustained_lift and v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"
-    if not sustained_lift and v9 < min_v9:
+    if not atm_itm_base_pad and not sustained_lift and v9 < min_v9:
         return False, f"first_lift_velocity9s<{min_v9:g}"
 
     min_volume = float(
@@ -2663,7 +2698,7 @@ def first_lift_entry_readiness(
             float(getattr(snap, "tradeQualityScore", 0) or 0),
             float(persisted.get("tradeQualityScore") or 0),
         )
-        if aligned_tqs < min_tqs:
+        if aligned_tqs < min_tqs and not atm_itm_base_pad:
             return False, f"armed_base_tqs<{min_tqs:g}"
         from app.engines.moneyness import classify_moneyness
         from app.models.schemas import Side

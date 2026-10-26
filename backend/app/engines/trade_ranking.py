@@ -1753,9 +1753,14 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         score += 3.0
         reasons.append("exploding_signal")
 
+    from app.engines.best_trade_policy import call_atm_itm_near_base_pad
+
+    near_base_call = call_atm_itm_near_base_pad(evidence)
     if v3 > 0:
         score += min(10.0, v3 * 3.0)
         reasons.append(f"positive_v3_{v3:.2f}")
+    elif v3 < 0 and near_base_call:
+        penalties.append({"code": "atm_itm_base_cold_velocity", "points": 0.0, "value": round(v3, 2)})
     elif v3 < 0:
         pad_flat = _pad_lane_cold_velocity_ok(evidence, v3, v9)
         if micro_pullback or pad_flat:
@@ -1853,8 +1858,11 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         rejected = True
         penalties.append({"code": "failed_launch", "points": 45.0})
         score -= 45.0
-    if v3 < 0 and not micro_pullback and not _pad_lane_cold_velocity_ok(
-        evidence, v3, v9
+    if (
+        v3 < 0
+        and not micro_pullback
+        and not _pad_lane_cold_velocity_ok(evidence, v3, v9)
+        and not near_base_call
     ):
         rejected = True
     if exhausted:
@@ -1935,6 +1943,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         )
         and (
             v3 > 0
+            or near_base_call
             or flat_velocity_lag
             or _pad_lane_cold_velocity_ok(evidence, v3, v9)
             or (fast_bullish_local_base and v3 >= 0)
@@ -2154,6 +2163,14 @@ def rank_entry_candidate(
             alert.get("flatVerticalGrade") or alert.get("ictFlatVerticalGrade") or ""
         ),
         "symbol": str(getattr(candidate, "symbol", "") or alert.get("symbol") or ""),
+        "strike": float(getattr(candidate, "strike", 0) or alert.get("strike") or 0),
+        "spot": float(getattr(live_snapshot, "spot", 0) or alert.get("spot") or 0),
+        "atmStrike": float(
+            getattr(live_snapshot, "atmStrike", 0) or alert.get("atmStrike") or 0
+        ),
+        "momentType": alert.get("momentType") or "",
+        "ictBaseArmed": bool(alert.get("ictBaseArmed")),
+        "ictVRipReady": bool(alert.get("ictVRipReady")),
         "bullishLocalBaseActive": bool(alert.get("bullishLocalBaseActive")),
         "chartConfidence": chart_confidence,
         "velocity3s": getattr(event, "velocity_3s", 0) if event else alert.get("velocity3s"),

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from zoneinfo import ZoneInfo
 
 from app.engines.best_trade_policy import (
     best_trade_chop_deep_chase_blocked,
@@ -11,8 +13,19 @@ from app.engines.best_trade_policy import (
     call_atm_itm_base_selector_rank_delta,
     symbols_with_call_atm_itm_base_ready,
 )
-from app.models.schemas import Side, SymbolSnapshot
+from app.engines.ict_breakout_monitor import first_lift_entry_readiness
+from app.engines.trade_ranking import rank_trade_evidence
+from app.models.schemas import (
+    Breadth,
+    MarketPhase,
+    Regime,
+    Side,
+    SpotChart,
+    SymbolSnapshot,
+)
 from tests.mock_defaults import settings_mock
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def _snap(*, spot: float = 74050.0, atm: float = 74000.0) -> SymbolSnapshot:
@@ -126,3 +139,199 @@ def test_put_rank_penalty_when_call_atm_itm_base_ready():
     )
     assert call_delta == 44.0
     assert put_delta == -36.0
+
+
+def _nifty_snap(*, spot: float = 22429.0, atm: float = 22400.0, tqs: float = 28.0) -> SymbolSnapshot:
+    return SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime(2026, 10, 23, 13, 34, tzinfo=IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        spot=spot,
+        atmStrike=atm,
+        dataAvailable=True,
+        tradeQualityScore=tqs,
+        regime=Regime.RANGE_BOUND,
+        breadth=Breadth(bias="NEUTRAL", score=40.0, aligned=False),
+        spotChart=SpotChart(
+            direction="BULLISH",
+            momentum5Pct=0.04,
+            momentum10Pct=0.02,
+            momentum15Pct=0.01,
+        ),
+    )
+
+
+def _oct23_base_alert(**overrides) -> dict:
+    alert = {
+        "symbol": "NIFTY",
+        "side": "CALL",
+        "strike": 22400.0,
+        "tier": "EXPLODING",
+        "momentType": "armed_base_launch",
+        "ictBaseArmed": True,
+        "ictArmedBaseLaunch": True,
+        "armedBaseLaunch": True,
+        "ictFirstLift": False,
+        "firstLift": False,
+        "ictBaseRelativeMovePct": 8.0,
+        "localBaseMovePct": 8.0,
+        "explosionScore": 93.0,
+        "flatVerticalQuality": 70.0,
+        "velocity3s": -0.4,
+        "velocity9s": 0.1,
+        "volumeAwaken": True,
+        "ictVolumeAwakening": True,
+        "volume": 2_000_000,
+        "volumeSurge": 2.5,
+        "ictArmedBaseSamples": 8,
+        "ictArmedBaseSpanSeconds": 20.0,
+        "tradeQualityScore": 28.0,
+    }
+    alert.update(overrides)
+    return alert
+
+
+def test_oct23_atm_call_on_the_base_waives_chop_without_first_lift():
+    """13:34 IST was the low. Armed base without a hot lift is still the #676 call."""
+    s = settings_mock()
+    snap = _nifty_snap()
+    cand = SimpleNamespace(
+        mode="explosion",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22400.0,
+        premium=190.0,
+        tier="EXPLODING",
+        alert=_oct23_base_alert(),
+        pretrade_meta={},
+        snap=snap,
+    )
+    ok, meta = call_atm_itm_base_capture_eligible(cand, snap, settings=s)
+    assert ok is True
+    assert meta["moneyness"] == "ATM"
+    blocked, reason = best_trade_chop_deep_chase_blocked(
+        cand,
+        {"fakeExplosionTrap": True},
+        {"dayMode": "CHOP DAY", "localBasePct": 8.0, "setup": "EXPLOSIVE", "eliteScore": 72.0},
+        day_mode="CHOP DAY",
+        settings=s,
+    )
+    assert blocked is False
+    assert reason == ""
+
+
+def test_oct23_v_rip_at_the_low_is_the_same_base():
+    s = settings_mock()
+    snap = _nifty_snap()
+    alert = _oct23_base_alert(
+        strike=22350.0,
+        momentType="v_rip_session_low",
+        ictBaseArmed=False,
+        ictArmedBaseLaunch=False,
+        armedBaseLaunch=False,
+        ictVRipReady=True,
+        vRipReady=True,
+        ictBaseRelativeMovePct=11.0,
+        localBaseMovePct=11.0,
+    )
+    cand = SimpleNamespace(
+        mode="explosion",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22350.0,
+        premium=220.0,
+        tier="EXPLODING",
+        alert=alert,
+        pretrade_meta={},
+        snap=snap,
+    )
+    ok, meta = call_atm_itm_base_capture_eligible(cand, snap, settings=s)
+    assert ok is True
+    assert meta["moneyness"] in ("ATM", "ITM")
+    assert meta.get("nearBasePad") is True
+
+
+def test_extended_or_otm_call_stays_a_chop_chase():
+    s = settings_mock()
+    snap = _nifty_snap(spot=22522.0, atm=22500.0)
+    extended = SimpleNamespace(
+        mode="explosion",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22400.0,
+        premium=269.0,
+        tier="EXPLODING",
+        alert=_oct23_base_alert(
+            localBaseMovePct=28.0,
+            ictBaseRelativeMovePct=28.0,
+        ),
+        pretrade_meta={},
+        snap=snap,
+    )
+    ok, _ = call_atm_itm_base_capture_eligible(extended, snap, settings=s)
+    assert ok is False
+    blocked, reason = best_trade_chop_deep_chase_blocked(
+        extended,
+        {},
+        {"dayMode": "CHOP DAY", "localBasePct": 28.0, "setup": "EXPLOSIVE"},
+        day_mode="CHOP DAY",
+        settings=s,
+    )
+    assert blocked is True
+    assert reason == "best_trade_block_chop_deep_itm_chase"
+
+    otm = SimpleNamespace(
+        mode="explosion",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22650.0,
+        premium=120.35,
+        tier="ELITE",
+        alert=_oct23_base_alert(strike=22650.0, tier="ELITE"),
+        pretrade_meta={},
+        snap=snap,
+    )
+    ok, meta = call_atm_itm_base_capture_eligible(otm, snap, settings=s)
+    assert ok is False
+    assert meta.get("moneyness") == "OTM"
+    blocked, reason = best_trade_chop_deep_chase_blocked(
+        otm,
+        {},
+        {"dayMode": "CHOP DAY", "localBasePct": 8.0, "setup": "EXPLOSIVE"},
+        day_mode="CHOP DAY",
+        settings=s,
+    )
+    assert blocked is True
+    assert reason == "best_trade_block_chop_deep_itm_chase"
+
+
+def test_cold_velocity_on_the_atm_base_is_not_a_reject():
+    ranking = rank_trade_evidence(_oct23_base_alert(spot=22429.0, atmStrike=22400.0))
+    assert ranking["grade"] != "REJECT"
+    extended = rank_trade_evidence(
+        _oct23_base_alert(
+            spot=22522.0,
+            atmStrike=22500.0,
+            localBaseMovePct=28.0,
+            ictBaseRelativeMovePct=28.0,
+            velocity3s=-0.4,
+        )
+    )
+    assert extended["grade"] == "REJECT"
+
+
+def test_cold_armed_base_call_clears_first_lift_velocity_and_tqs():
+    snap = _nifty_snap()
+    ready, reason = first_lift_entry_readiness(snap=snap, alert=_oct23_base_alert())
+    assert ready is True, reason
+    assert reason != "first_lift_live_velocity_negative"
+    assert not str(reason).startswith("first_lift_velocity3s")
+    assert not str(reason).startswith("armed_base_tqs")
+
+    put_snap = _nifty_snap()
+    put_ready, put_reason = first_lift_entry_readiness(
+        snap=put_snap,
+        alert=_oct23_base_alert(side="PUT", strike=22450.0),
+    )
+    assert put_ready is False
+    assert put_reason == "first_lift_live_velocity_negative"
