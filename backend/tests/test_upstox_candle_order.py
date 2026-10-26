@@ -90,6 +90,102 @@ def test_historical_candles_survive_intraday_failure():
     assert candles[-1][0] == history[0][0]
 
 
+def test_monday_indicator_window_keeps_friday_and_todays_open():
+    """26 Oct 09:40 IST. Two calendar days is Sat–Mon, so Friday never arrives."""
+    from app.engines.index_candle_rollover import (
+        cash_session_candles,
+        prior_close_before_cash_session,
+    )
+    from app.engines.spot_direction import build_spot_chart
+    from app.models.schemas import MarketProfile
+
+    monday = datetime(2026, 10, 26, 9, 40, tzinfo=IST)
+    friday = datetime(2026, 10, 23, tzinfo=IST)
+    friday_bars = _session(friday, 22600.0, -0.5, 375)
+    monday_bars = _session(monday, 22524.4, -0.2, 25)
+    history = list(reversed(friday_bars))
+    today = list(reversed(monday_bars))
+
+    client = UpstoxClient()
+    client._get = AsyncMock(return_value={"candles": history})
+    client._get_v3 = AsyncMock(return_value={"candles": today})
+
+    asyncio.run(
+        client.get_historical_candles(
+            "NSE_INDEX|Nifty 50", count=400, force_refresh=True, as_of=monday,
+        )
+    )
+    assert client._get.call_args[0][0].endswith("/2026-10-26/2026-10-24")
+
+    seeded = asyncio.run(
+        client.get_historical_candles(
+            "NSE_INDEX|Nifty 50",
+            count=400,
+            lookback_days=7,
+            force_refresh=True,
+            as_of=monday,
+        )
+    )
+    assert client._get.call_args[0][0].endswith("/2026-10-26/2026-10-19")
+    assert len(seeded) == 400
+    assert seeded[0][0] == friday_bars[0][0]
+    assert seeded[-1][0] == monday_bars[-1][0]
+
+    session = cash_session_candles(seeded, now=monday)
+    assert session[0][1] == monday_bars[0][1]
+    assert prior_close_before_cash_session(seeded, now=monday) == friday_bars[-1][4]
+
+    chart = build_spot_chart(
+        monday_bars[:5],
+        float(monday_bars[-1][4]),
+        MarketProfile(),
+        indicator_candles_1m=seeded,
+    )
+    assert chart.barCount == 5
+    assert chart.macdReady is True
+    assert chart.indicatorBarCount >= 35
+    assert chart.macd != 0.0
+
+
+def test_index_fetches_pass_the_seed_lookback():
+    from app.engines.index_chart_candles import fetch_index_chart_candles
+    from app.engines.mtf_chart_analysis import fetch_mtf_charts
+
+    monday = datetime(2026, 10, 26, 9, 40, tzinfo=IST)
+    seen: dict[str, int | None] = {}
+
+    async def fake_hist(*_args, **kwargs):
+        seen["lookback"] = kwargs.get("lookback_days")
+        seen["count"] = kwargs.get("count")
+        return _session(monday, 22524.4, -0.2, 40)
+
+    client = UpstoxClient()
+    client.get_historical_candles = fake_hist  # type: ignore[method-assign]
+    client.get_intraday_candles_v3 = AsyncMock(return_value=[])
+
+    asyncio.run(fetch_index_chart_candles(client, "NIFTY", force_refresh=True))
+    assert seen["lookback"] >= 7
+    assert seen["count"] >= 400
+
+    asyncio.run(
+        fetch_mtf_charts(
+            client,
+            "NSE_INDEX|Nifty 50",
+            22520.0,
+            force_refresh=True,
+            lookback_days=7,
+        )
+    )
+    assert seen["lookback"] == 7
+
+    asyncio.run(
+        fetch_mtf_charts(
+            client, "NSE_FO|OPT", 80.0, force_refresh=True,
+        )
+    )
+    assert seen["lookback"] is None
+
+
 def test_intraday_v3_returns_oldest_first():
     now = datetime.now(IST)
     asc = _session(now, 200.0, 1.0, 6)

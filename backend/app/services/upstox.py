@@ -716,13 +716,23 @@ class UpstoxClient:
         return result
 
     async def get_candles(
-        self, symbol: str, interval: str = "1minute", count: int = 60, *, force_refresh: bool = False,
+        self,
+        symbol: str,
+        interval: str = "1minute",
+        count: int = 60,
+        *,
+        force_refresh: bool = False,
+        lookback_days: int | None = None,
     ) -> list[dict[str, Any]]:
         key = INDEX_KEYS.get(symbol)
         if not key:
             raise UpstoxError(f"Unknown symbol: {symbol}")
         return await self.get_historical_candles(
-            key, interval=interval, count=count, force_refresh=force_refresh,
+            key,
+            interval=interval,
+            count=count,
+            force_refresh=force_refresh,
+            lookback_days=lookback_days,
         )
 
     async def get_historical_candles(
@@ -732,21 +742,32 @@ class UpstoxClient:
         count: int = 60,
         *,
         force_refresh: bool = False,
+        lookback_days: int | None = None,
+        as_of: datetime | None = None,
     ) -> list[dict[str, Any]]:
         """OHLCV candles for any Upstox instrument (index or option leg), oldest → newest.
 
         The V2 historical endpoint stops at the previous session, so today's bars are
         merged from the intraday endpoint — otherwise ``closes[-1]`` is days old.
+        ``lookback_days`` widens that V2 window. Index indicators pass a week so a
+        Monday open still contains Friday. The default stays two days for short
+        option-premium reads. ``as_of`` sets the window clock (tests).
         """
-        cache_key = f"candles:{instrument_key}:{interval}:{count}"
+        now = as_of if as_of is not None else datetime.now(IST)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=IST)
+        else:
+            now = now.astimezone(IST)
+        days = 2 if lookback_days is None else max(0, int(lookback_days))
+        to_date = now.strftime("%Y-%m-%d")
+        from_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+        cache_key = f"candles:{instrument_key}:{interval}:{count}:{from_date}"
         if not force_refresh:
             cached = _cache_get(cache_key, self.settings.upstox_candles_cache_seconds)
             if cached is not None:
                 return cached
 
         encoded_key = quote(instrument_key, safe="")
-        to_date = datetime.now(IST).strftime("%Y-%m-%d")
-        from_date = (datetime.now(IST) - timedelta(days=2)).strftime("%Y-%m-%d")
         data = await self._get(
             f"/historical-candle/{encoded_key}/{interval}/{to_date}/{from_date}",
         )

@@ -28,6 +28,8 @@ async def fetch_index_chart_candles(
     if not key:
         return [], []
 
+    from app.engines.indicator_series import indicator_seed_lookback_days
+
     warmup = int(
         getattr(settings, "spot_chart_indicator_warmup_1m_bars", 400) or 400
     )
@@ -35,11 +37,13 @@ async def fetch_index_chart_candles(
         int(getattr(settings, "spot_chart_1m_bars", 300) or 300),
         warmup,
     )
+    lookback_days = indicator_seed_lookback_days(settings)
     candles_1m = await client.get_historical_candles(
         key,
         interval="1minute",
         count=bar_count,
         force_refresh=force_refresh,
+        lookback_days=lookback_days,
     )
     if len(candles_1m) < 80 and not force_refresh:
         # Open / cache miss: retry once with refresh for prior-session seed.
@@ -48,6 +52,7 @@ async def fetch_index_chart_candles(
             interval="1minute",
             count=bar_count,
             force_refresh=True,
+            lookback_days=lookback_days,
         )
 
     candles_5m: list[Any] = []

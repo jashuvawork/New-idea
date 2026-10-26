@@ -94,8 +94,13 @@ async def fetch_live_trade_charts(
             warmup,
             count,
         )
+        from app.engines.indicator_series import indicator_seed_lookback_days
+
         index_candles = await client.get_candles(
-            sym, count=bar_count, force_refresh=force,
+            sym,
+            count=bar_count,
+            force_refresh=force,
+            lookback_days=indicator_seed_lookback_days(settings),
         )
     profile = _build_profile(index_candles, spot)
     index_chart = build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=index_candles)
@@ -114,7 +119,15 @@ async def fetch_live_trade_charts(
     premium_mtf_reads = None
     if settings.execution_mtf_enabled and index_key:
         try:
-            index_mtf_reads = await fetch_mtf_charts(client, index_key, spot, force_refresh=force)
+            from app.engines.indicator_series import indicator_seed_lookback_days
+
+            index_mtf_reads = await fetch_mtf_charts(
+                client,
+                index_key,
+                spot,
+                force_refresh=force,
+                lookback_days=indicator_seed_lookback_days(settings),
+            )
             index_mtf = mtf_summary(index_mtf_reads, side)
         except Exception as exc:
             logger.warning("Index MTF fetch failed for %s: %s", sym, exc)

@@ -91,6 +91,17 @@ def session_ohlc(
     return o, h, l, c
 
 
+def indicator_seed_lookback_days(settings: Any | None = None) -> int:
+    """Calendar days of V2 history so MACD/Ichimoku see the previous session.
+
+    Today's intraday bars are merged on top. Open, high, low, and VWAP do not
+    use this window.
+    """
+    settings = settings or get_settings()
+    days = int(getattr(settings, "spot_chart_indicator_seed_calendar_days", 7) or 7)
+    return max(2, days)
+
+
 def mtf_1m_bar_count(settings: Any | None = None) -> int:
     """1m depth for MTF — at least spot-chart warmup so each TF MACD can settle."""
     settings = settings or get_settings()

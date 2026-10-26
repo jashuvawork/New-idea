@@ -236,8 +236,13 @@ async def fetch_mtf_charts(
     price: float,
     *,
     force_refresh: bool = True,
+    lookback_days: int | None = None,
 ) -> dict[str, TimeframeChartRead]:
-    """Fetch and analyze all scalp timeframes for index or option leg."""
+    """Fetch and analyze all scalp timeframes for index or option leg.
+
+    Index callers pass ``lookback_days`` so MACD on each frame sees the previous
+    cash session plus today. Option premium keeps the short default window.
+    """
     settings = get_settings()
     from app.engines.indicator_series import mtf_1m_bar_count
 
@@ -246,6 +251,7 @@ async def fetch_mtf_charts(
         interval="1minute",
         count=mtf_1m_bar_count(settings),
         force_refresh=force_refresh,
+        lookback_days=lookback_days,
     )
 
     reads: dict[str, TimeframeChartRead] = {}

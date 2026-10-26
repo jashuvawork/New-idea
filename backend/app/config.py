@@ -2909,6 +2909,11 @@ class Settings(BaseSettings):
     spot_chart_1m_bars: int = 300  # 1m history for 5m resample + RSI/MACD warmup
     # Prior-session seed target (~78×5m Ichimoku cloud + MACD 35 on 1m resample).
     spot_chart_indicator_warmup_1m_bars: int = 400
+    # V2 history excludes today. Two calendar days on Monday is Sat–Mon, so
+    # Friday never arrives and MACD sees only this morning. A week reaches the
+    # previous cash session across a weekend or a short holiday. Session open,
+    # high, low, and VWAP stay on today's 09:15 bars.
+    spot_chart_indicator_seed_calendar_days: int = 7
     # Off. A missing MACD seed must not ban the entry. Unready MACD, EMA, and
     # Ichimoku stay quiet; they do not vote and they do not block.
     spot_chart_block_explosion_when_indicators_cold: bool = False
