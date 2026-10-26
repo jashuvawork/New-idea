@@ -16,6 +16,9 @@ def _settings():
     s.explosion_reentry_ml_win_prob_gate_enabled = True
     s.explosion_reentry_ml_win_prob_min = 0.52
     s.explosion_reentry_ml_win_prob_same_strike_min = 0.55
+    s.quality_moment_passport_enabled = True
+    s.quality_moment_waive_reentry_ml_after_win = True
+    s.quality_moment_waive_reentry_ml_after_loss = False
     return s
 
 
@@ -164,6 +167,38 @@ def test_same_strike_reentry_allows_high_ml(mock_settings, mock_ml):
     )
     assert blocked is False
     assert meta["reentryKind"] == "same_strike"
+
+
+@patch("app.engines.adaptive_exits.predict_entry_ml_win_prob")
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_quality_passport_waives_ml_after_session_win_cross_strike_call(
+    mock_settings, mock_ml,
+):
+    """Passport waives session CE re-entry off a different strike; PUT stays on ML (#849)."""
+    mock_settings.return_value = _settings()
+    mock_ml.return_value = 0.41
+    state = AutoTraderState()
+    win = _closed(strike=22500.0, pnl_inr=5089.0, side=Side.CALL)
+    state.closedPaperTrades = [win]
+    snap = MagicMock()
+    alert = {
+        "tier": "ELITE",
+        "ictFirstLift": True,
+        "ictFlatThenVertical": True,
+        "ictBaseArmed": True,
+        "momentType": "first_lift_local_base",
+    }
+    blocked, meta = reentry_ml_win_prob_blocked(
+        state,
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22600.0,
+        snap=snap,
+        confidence=160.0,
+        alert=alert,
+    )
+    assert blocked is False
+    assert meta.get("qualityMomentPassport") is True
 
 
 def _ce_new_base_alert(**extra) -> dict:

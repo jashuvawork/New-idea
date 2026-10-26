@@ -2173,6 +2173,10 @@ class Settings(BaseSettings):
     eod_replay_live_session_gates_enabled: bool = True
     # Mirror live structural entry gates in replay (Sep08 fixes respect Settings knobs).
     eod_replay_structural_gates_enabled: bool = True
+    # Match live selector: reentry ML + velocity + exhausted FTV in replay structural stack.
+    eod_replay_reentry_ml_gate_enabled: bool = True
+    eod_replay_reentry_velocity_gate_enabled: bool = True
+    eod_replay_exhausted_ftv_gate_enabled: bool = True
     # Optional full validate_candidate stack — heavier; default off.
     eod_replay_pretrade_enabled: bool = False
     # Full-tape replay tuning (NOT wired to live auto-trader). Profile A/B showed
@@ -3530,6 +3534,14 @@ class Settings(BaseSettings):
     # ML floor does not apply. A call chase with no new base, and every put
     # reentry, stays on the floor.
     ce_new_base_fresh_entry_enabled: bool = True
+    # FTV / V / explosive structural moments waive post-win ML re-entry floor (not after losses).
+    quality_moment_passport_enabled: bool = True
+    quality_moment_waive_reentry_ml_after_win: bool = True
+    quality_moment_waive_reentry_ml_after_loss: bool = False
+    # First-entry (selector / elite engine) — FTV/V + structure, not flat-extension FOMO.
+    quality_moment_passport_waives_elite_entry: bool = True
+    quality_moment_passport_elite_score_floor: float = 82.0
+    quality_moment_passport_waives_entry_peak_chase: bool = True
     # 2) Legacy INR exit caps — disabled (0). Exits use structural/point SL only.
     explosion_per_trade_max_loss_inr: float = 0.0
     explosion_exceptional_per_trade_max_loss_inr: float = 0.0

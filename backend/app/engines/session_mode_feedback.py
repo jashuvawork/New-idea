@@ -884,7 +884,45 @@ def reentry_ml_win_prob_blocked(
         reentry_kind = "session"
         prior = prior_closes[-1]
 
+    prior_pnl = float(
+        getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0
+    )
     side_val = side.value if hasattr(side, "value") else str(side or "PUT").upper()
+    alert_d = alert if isinstance(alert, dict) else {}
+    # Main #849: same-strike CE uses ce_new_base_fresh_entry + ML; all PUT reentries stay on ML.
+    passport_scope_ok = side_val != "PUT" and not (
+        same_strike_prior is not None
+        and side_val == "CALL"
+        and bool(getattr(settings, "ce_new_base_fresh_entry_enabled", True))
+    )
+    if passport_scope_ok and (
+        alert_d or bool(getattr(settings, "quality_moment_passport_enabled", True))
+    ):
+        from app.engines.best_trade_policy import quality_moment_passport_active
+
+        passport_ok, passport_mode = quality_moment_passport_active(
+            alert_d, settings=settings, snap=snap,
+        )
+        if passport_ok:
+            waive_after_win = bool(
+                getattr(settings, "quality_moment_waive_reentry_ml_after_win", True)
+            )
+            waive_after_loss = bool(
+                getattr(settings, "quality_moment_waive_reentry_ml_after_loss", False)
+            )
+            if (prior_pnl > 0 and waive_after_win) or (prior_pnl <= 0 and waive_after_loss):
+                meta.update(
+                    {
+                        "applied": True,
+                        "reentryKind": reentry_kind,
+                        "qualityMomentPassport": True,
+                        "qualityMomentPassportMode": passport_mode,
+                        "priorPnlInr": round(prior_pnl, 2),
+                        "reason": "quality_moment_passport_waive_reentry_ml",
+                    }
+                )
+                return False, meta
+
     from app.engines.adaptive_exits import predict_entry_ml_win_prob
 
     ml_prob = predict_entry_ml_win_prob(
@@ -1536,6 +1574,22 @@ def session_peak_late_reentry_blocked(
         )
         if waived:
             return False, f"post_win_late_reentry_waive_{waive_mode}"
+
+    if bool(getattr(settings, "quality_moment_passport_waives_entry_peak_chase", True)):
+        from app.engines.best_trade_policy import (
+            quality_moment_passport_active,
+            quality_moment_passport_waives_elite_entry,
+        )
+
+        passport_ok, passport_mode = quality_moment_passport_active(
+            alert_d, settings=settings, snap=snap,
+        )
+        if passport_ok and quality_moment_passport_waives_elite_entry(settings):
+            min_v3_passport = float(
+                getattr(settings, "explosion_late_reentry_min_velocity_3s", 1.2) or 1.2
+            )
+            if v3 + 1e-9 >= min_v3_passport:
+                return False, f"quality_moment_passport_waive_peak_{passport_mode}"
 
     return True, (
         f"late_reentry_near_session_peak_{sess_peak:.1f}"
