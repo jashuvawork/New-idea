@@ -1,6 +1,7 @@
 """Peak velocity bypass on worst-day breakout gate + faded rip caution."""
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -163,3 +164,47 @@ def test_detect_faded_vertical_rip_and_lot_cap(mock_settings):
     assert faded is True
     assert meta.get("fadedRipCaution") is True
     assert cap_faded_rip_lots(15) == 6
+
+
+@patch("app.config.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_faded_vertical_rip_skips_structured_local_base_retest(mock_g1, mock_g2):
+    """High session peak + cold v3 on the pad is base retest, not fade chase."""
+    s = _settings()
+    mock_g1.return_value = s
+    mock_g2.return_value = s
+    _seed_peak_velocity("NIFTY", 22500.0, Side.CALL, 5.4)
+    event = ExplosionEvent(
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22500.0,
+        premium=170.0,
+        velocity_3s=0.2,
+        velocity_9s=0.1,
+        velocity_15s=0.0,
+        volume_surge=2.0,
+        explosion_score=100.0,
+        tier="EXPLODING",
+        reason="base",
+        daily_move_pct=90.0,
+        peak_move_pct=90.0,
+    )
+    ict = SimpleNamespace(
+        flat_then_vertical=True,
+        local_swing_base=True,
+        base_relative_move_pct=18.0,
+        session_move_pct=90.0,
+    )
+    with patch(
+        "app.engines.ict_breakout_monitor.analyze_explosion_event_ict",
+        return_value=ict,
+    ), patch(
+        "app.engines.explosion_entry_guards.entry_window_bounds",
+        return_value=(15.0, 65.0),
+    ), patch(
+        "app.engines.explosion_entry_guards.trustworthy_local_base_move",
+        return_value=18.0,
+    ):
+        faded, meta = detect_faded_vertical_rip(event, _snap())
+    assert faded is False
+    assert meta.get("structuredLocalBaseRetest") is True

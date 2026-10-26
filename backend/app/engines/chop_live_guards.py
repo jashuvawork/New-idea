@@ -191,9 +191,35 @@ def _immature_local_base_hard_block(
     return False, ""
 
 
+def _chop_live_near_base_fade_waive(candidate: Any, snap: SymbolSnapshot) -> bool:
+    """Pad/base capture (#676) — shallow premium dip is not chop fade."""
+    settings = get_settings()
+    if not bool(getattr(settings, "chop_live_near_base_fade_waive_enabled", True)):
+        return False
+    alert = getattr(candidate, "alert", None) or {}
+    event = getattr(candidate, "explosion_event", None)
+    from app.engines.pad_lane_capture import local_base_premium_fade_bypass
+
+    if local_base_premium_fade_bypass(
+        alert if isinstance(alert, dict) else None,
+        event,
+        snap=snap,
+    ):
+        return True
+    side_v = _side_val(getattr(candidate, "side", Side.CALL))
+    if side_v == "CALL":
+        from app.engines.best_trade_policy import call_atm_itm_base_capture_eligible
+
+        ok, _ = call_atm_itm_base_capture_eligible(candidate, snap, settings=settings)
+        return ok
+    return False
+
+
 def _faded_rip_hard_block(candidate: Any, snap: SymbolSnapshot) -> tuple[bool, str]:
     settings = get_settings()
     if not getattr(settings, "chop_live_block_faded_rip", True):
+        return False, ""
+    if _chop_live_near_base_fade_waive(candidate, snap):
         return False, ""
     event = getattr(candidate, "explosion_event", None)
     if event is None:
@@ -302,10 +328,17 @@ def _premium_5m_fading(
     *,
     side: Side | str,
     chart_meta: dict[str, Any] | None,
+    candidate: Any | None = None,
+    snap: SymbolSnapshot | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     settings = get_settings()
     meta: dict[str, Any] = {}
     if not getattr(settings, "chop_live_block_premium_5m_fade", True):
+        return False, "", meta
+    if candidate is not None and snap is not None and _chop_live_near_base_fade_waive(
+        candidate, snap,
+    ):
+        meta["nearBaseFadeWaive"] = True
         return False, "", meta
 
     premium_chart = (chart_meta or {}).get("premiumChart")
@@ -404,6 +437,8 @@ def chop_live_entry_blocked(
     fade_blocked, fade_reason, fade_meta = _premium_5m_fading(
         side=getattr(candidate, "side", Side.CALL),
         chart_meta=chart_meta,
+        candidate=candidate,
+        snap=snap,
     )
     meta.update(fade_meta)
     if fade_blocked:
