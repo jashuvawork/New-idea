@@ -172,6 +172,93 @@ def _side_key(side: Any) -> str:
     return side.value if hasattr(side, "value") else str(side or "").upper()
 
 
+def _parse_ist_datetime(raw: Any) -> datetime | None:
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        dt = raw
+    else:
+        try:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_IST)
+    return dt.astimezone(_IST)
+
+
+def _explosion_on_strike_match(
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    trade_symbol: str,
+    trade_side: Any,
+    trade_strike: float,
+    selection_mode: str,
+    strategy_type: str,
+) -> bool:
+    sym = str(symbol or "").upper()
+    side_u = _side_key(side)
+    strike_f = float(strike or 0)
+    if str(trade_symbol or "").upper() != sym:
+        return False
+    if _side_key(trade_side) != side_u:
+        return False
+    if abs(float(trade_strike or 0) - strike_f) > 0.01:
+        return False
+    mode = str(selection_mode or "").lower()
+    st_u = str(strategy_type or "").upper()
+    return mode == "explosion" or st_u == "EXPLOSIVE"
+
+
+def _archived_session_trade_rows(state: AutoTraderState | None) -> list[dict[str, Any]]:
+    """Today's closed/open rows from trade_store not already in paper closed book."""
+    if state is None:
+        return []
+    seen = {
+        str(getattr(t, "id", "") or "")
+        for t in getattr(state, "closedPaperTrades", None) or []
+        if getattr(t, "id", None)
+    }
+    for t in getattr(state, "openPaperTrades", None) or []:
+        tid = str(getattr(t, "id", "") or "")
+        if tid:
+            seen.add(tid)
+    rows: list[dict[str, Any]] = []
+    try:
+        from app.services import trade_store
+
+        reset_at = trade_store.get_session_reset_at()
+        today = datetime.now(_IST).strftime("%Y-%m-%d")
+        day = trade_store.get_day_detail(today)
+        for row in day.get("trades", []) or []:
+            if not isinstance(row, dict):
+                continue
+            tid = str(row.get("id", "") or "")
+            if tid and tid in seen:
+                continue
+            status = str(row.get("status") or "").upper()
+            if status not in ("CLOSED", "OPEN"):
+                continue
+            exit_reason = str(row.get("exitReason") or "")
+            if exit_reason in ("SESSION_RESET", "manual_reset"):
+                continue
+            closed_raw = row.get("closedAt")
+            if reset_at and closed_raw:
+                closed_at = _parse_ist_datetime(closed_raw)
+                if closed_at is not None and closed_at <= reset_at.astimezone(_IST):
+                    continue
+            from app.engines.session_trade_integrity import is_phantom_trade_row
+
+            if is_phantom_trade_row(row):
+                continue
+            rows.append(row)
+    except Exception:
+        pass
+    return rows
+
+
 def _latest_same_strike_explosion_close(
     state: AutoTraderState,
     *,
@@ -781,6 +868,47 @@ def _latest_same_strike_win_close(
         if prior is None or (latest_ts is None or ts > latest_ts):
             prior = t
             latest_ts = ts
+
+    for row in _archived_session_trade_rows(state):
+        ctx = row.get("entryContext") or {}
+        mode = str(
+            row.get("selectionMode")
+            or (ctx.get("selectionMode") if isinstance(ctx, dict) else "")
+            or ""
+        )
+        if not _explosion_on_strike_match(
+            symbol=sym,
+            side=side_v,
+            strike=strike_f,
+            trade_symbol=str(row.get("symbol", "")),
+            trade_side=row.get("side", ""),
+            trade_strike=float(row.get("strike") or 0),
+            selection_mode=mode,
+            strategy_type=str(row.get("strategyType") or ""),
+        ):
+            continue
+        pnl = float(row.get("pnlInr") or 0)
+        if pnl <= 0:
+            continue
+        ts = _parse_ist_datetime(row.get("closedAt")) or _parse_ist_datetime(
+            row.get("openedAt")
+        )
+        if ts is None:
+            continue
+        if prior is None or (latest_ts is None or ts > latest_ts):
+            from types import SimpleNamespace
+
+            prior = SimpleNamespace(
+                id=row.get("id"),
+                symbol=row.get("symbol"),
+                side=row.get("side"),
+                strike=row.get("strike"),
+                pnlInr=pnl,
+                closedAt=ts,
+                entryContext={"selectionMode": "explosion"},
+            )
+            latest_ts = ts
+
     if prior is None or getattr(prior, "closedAt", None) is None:
         return None, 0.0
     now = datetime.now(_IST)
@@ -841,6 +969,30 @@ def _same_strike_legs_after_close(
     ):
         for trade in bucket:
             _count_trade(trade)
+
+    for row in _archived_session_trade_rows(state):
+        ctx = row.get("entryContext") or {}
+        mode = str(
+            row.get("selectionMode")
+            or (ctx.get("selectionMode") if isinstance(ctx, dict) else "")
+            or ""
+        )
+        if not _explosion_on_strike_match(
+            symbol=sym,
+            side=side_u,
+            strike=strike_f,
+            trade_symbol=str(row.get("symbol", "")),
+            trade_side=row.get("side", ""),
+            trade_strike=float(row.get("strike") or 0),
+            selection_mode=mode,
+            strategy_type=str(row.get("strategyType") or ""),
+        ):
+            continue
+        opened = _parse_ist_datetime(row.get("openedAt"))
+        if opened is None:
+            continue
+        if opened > ref:
+            count += 1
     return count
 
 
@@ -995,7 +1147,12 @@ def cap_post_win_continuation_leg_lots(
         return lots, meta
     cap = int(getattr(settings, "post_win_continuation_leg_lot_cap", 4) or 4)
     capped = min(max(0, lots), max(1, cap))
-    meta["postWinContinuationLegCapApplied"] = capped < lots
+    applied = capped < lots
+    meta["applied"] = applied
+    meta["reentryKind"] = "post_win_continuation_leg"
+    meta["uncappedLots"] = lots
+    meta["lotCap"] = cap
+    meta["postWinContinuationLegCapApplied"] = applied
     meta["postWinContinuationLegCap"] = cap
     meta["cappedLots"] = capped
     return capped, meta

@@ -2063,7 +2063,8 @@ class Settings(BaseSettings):
     explosion_late_reentry_pullback_ok_pct: float = 22.0
     explosion_late_reentry_min_velocity_3s: float = 1.2
     # After a same-strike win: waive near-peak late reentry on a fresh local base, or
-    # one capped continuation leg (hot v3) — not full #676 rank.
+    # one capped continuation leg (hot v3) — not full #676 rank. Tuned for 2026-10-26
+    # NIFTY 22500 CE: post-win ~14:15 blocked at session peak with zero funnel attempts.
     post_win_late_reentry_waive_enabled: bool = True
     post_win_late_reentry_waive_lookback_seconds: int = 14400
     post_win_new_local_base_max_pad_pct: float = 22.0
