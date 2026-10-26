@@ -554,12 +554,9 @@ def _execution_mode(settings) -> str:
 
 
 def _uses_paper_live_parity(settings) -> bool:
-    is_live = settings.enable_live_trading and settings.auto_trading_enabled
-    return (
-        settings.paper_live_parity_enabled
-        and settings.paper_simulate_broker_orders
-        and not is_live
-    )
+    from app.engines.execution_mode import paper_live_parity_active
+
+    return paper_live_parity_active(settings)
 
 
 def _record_deferred_candidate_fallback(
@@ -3040,7 +3037,7 @@ async def _open_from_candidate(
         ctx_extra["ftvAuthorizationReason"] = final_policy.reason
         ctx_extra["ftvMaxCapitalPct"] = final_policy.max_capital_pct
 
-    if is_live and candidate.mode == "explosion":
+    if (is_live or use_parity) and candidate.mode == "explosion":
         from app.engines.live_best_trades import live_best_trade_entry_blocked
 
         live_blocked, live_reason, live_meta = live_best_trade_entry_blocked(
