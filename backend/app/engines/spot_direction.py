@@ -80,13 +80,17 @@ def build_spot_chart(
     profile: MarketProfile,
     *,
     indicator_candles_1m: list | None = None,
+    indicator_closes: list[float] | None = None,
 ) -> SpotChart:
     """
     Index chart read from 5m candles: direction, EMA9/21, RSI, MACD.
     RSI/MACD use extended 5m series resampled from 1m when available (MACD warmup).
     """
     opens, _, _, closes = _candle_rows(candles_5m)
-    ind_closes = _indicator_closes(candles_5m, indicator_candles_1m)
+    if indicator_closes:
+        ind_closes = list(indicator_closes)
+    else:
+        ind_closes = _indicator_closes(candles_5m, indicator_candles_1m)
     closes = _patch_live_close(closes, spot)
     ind_closes = _patch_live_close(ind_closes, spot)
 
@@ -299,7 +303,13 @@ def refresh_spot_chart_live(
         if not recent and isinstance(chart_analysis, dict):
             recent = list(chart_analysis.get("recentCloses") or [])
 
-    if len(recent) < 5:
+    warm_closes: list[float] = []
+    if chart_analysis is not None:
+        warm_closes = list(getattr(chart_analysis, "indicatorWarmCloses", None) or [])
+        if not warm_closes and isinstance(chart_analysis, dict):
+            warm_closes = list(chart_analysis.get("indicatorWarmCloses") or [])
+
+    if len(recent) < 5 and len(warm_closes) < 5:
         updated = spot_chart.model_copy(update={"spot": round(live_spot, 2)})
         if chart_analysis:
             return reconcile_spot_chart_with_mtf(
@@ -307,8 +317,17 @@ def refresh_spot_chart_live(
             )
         return updated
 
-    candles_5m = _closes_to_synthetic_candles(recent)
-    refreshed = build_spot_chart(candles_5m, live_spot, profile)
+    from app.engines.indicator_readiness import MACD_MIN_CLOSES
+
+    session_closes = recent if len(recent) >= 5 else warm_closes[-30:]
+    candles_5m = _closes_to_synthetic_candles(session_closes)
+    ind_seed = warm_closes if len(warm_closes) >= MACD_MIN_CLOSES else None
+    refreshed = build_spot_chart(
+        candles_5m,
+        live_spot,
+        profile,
+        indicator_closes=ind_seed,
+    )
     if chart_analysis:
         return reconcile_spot_chart_with_mtf(
             refreshed, chart_analysis, breadth_bias=breadth_bias, from_open_pct=from_open_pct,

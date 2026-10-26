@@ -128,6 +128,7 @@ def test_build_chart_analysis_mtf():
     assert "5m" in analysis.timeframes
     assert analysis.ichimoku.get("cloudBias")
     assert len(analysis.recentCloses) > 0
+    assert 0 < len(analysis.indicatorWarmCloses) <= 120
 
 
 def test_build_chart_analysis_mtf_fallback_from_5m_only():

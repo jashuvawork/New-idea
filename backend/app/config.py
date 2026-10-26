@@ -2932,6 +2932,8 @@ class Settings(BaseSettings):
     # previous cash session across a weekend or a short holiday. Session open,
     # high, low, and VWAP stay on today's 09:15 bars.
     spot_chart_indicator_seed_calendar_days: int = 7
+    # Carried on chartAnalysis for WS tick refresh (session recentCloses stay short at open).
+    spot_chart_indicator_warm_closes_cap: int = 120
     # Off. A missing MACD seed must not ban the entry. Unready MACD, EMA, and
     # Ichimoku stay quiet; they do not vote and they do not block.
     spot_chart_block_explosion_when_indicators_cold: bool = False

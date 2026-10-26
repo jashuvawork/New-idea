@@ -675,6 +675,13 @@ def build_chart_analysis(
 
     aligned = _mtf_aligned_count(mtf_reads, consensus)
     recent_closes = [round(c, 2) for c in closes[-30:]]
+    from app.config import get_settings as _gs_warm
+
+    _warm_cap = int(
+        getattr(_gs_warm(), "spot_chart_indicator_warm_closes_cap", 120) or 120
+    )
+    warm_source = w_closes if w_closes else closes
+    indicator_warm_closes = [round(c, 2) for c in warm_source[-_warm_cap:]]
 
     # Advanced indicators — squeeze (base->explosion), ADX (trend/chop), Supertrend, VWAP.
     from dataclasses import asdict
@@ -730,6 +737,7 @@ def build_chart_analysis(
         totalTimeframes=len(mtf_reads),
         timeframes={k: v.model_dump() for k, v in mtf_reads.items()},
         recentCloses=recent_closes,
+        indicatorWarmCloses=indicator_warm_closes,
         fibonacci=fib,
         fibExtension=fib.get("extension", {}),
         pivots=pivots,
