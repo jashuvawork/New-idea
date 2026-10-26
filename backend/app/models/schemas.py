@@ -102,6 +102,8 @@ class PremiumChart(BaseModel):
     lastPremium: float = 0
     momentum3Pct: float = 0
     momentum5Pct: float = 0
+    # Live premium vs the low of the recent bars. 0 means price is the low.
+    offLowPct: float = 0
     volumeSurge: float = 1.0
     vwap: float = 0
     aboveVwap: bool = False
@@ -123,6 +125,8 @@ class TimeframeChartRead(BaseModel):
     direction: str = "NEUTRAL"
     momentumPct: float = 0
     momentum3Pct: float = 0
+    # Live price vs the low of the recent bars on this timeframe.
+    offLowPct: float = 0
     trendStrength: float = 0
     emaBias: str = "NEUTRAL"
     price: float = 0

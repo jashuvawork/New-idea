@@ -9,6 +9,53 @@ from app.engines.edge_engine import session_pf_feedback
 from app.engines.pretrade_validator import analyze_last_n_trades, collect_session_trades
 from app.models.schemas import AutoTraderState, SymbolSnapshot
 
+# Recent-low window for the fade reclaim. 20 one-minute bars is the open flush
+# plus the turn (26 Oct 09:20 low still inside the window at 09:39). On 5m,
+# 4 bars is the same 20 minutes so the 25-minute momentum does not keep
+# yesterday's range.
+FADE_OFF_LOW_BARS = {"1m": 20, "5m": 4, "15m": 2, "1h": 2, "4h": 2}
+
+
+def _cfg_float(settings: Any, name: str, default: float) -> float:
+    raw = getattr(settings, name, default)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return default
+    return float(raw)
+
+
+def premium_off_low_pct(lows: list[float], price: float, *, bars: int = 20) -> float:
+    """Percent the live price sits above the recent low. 0 when price is the low."""
+    if price <= 0 or not lows:
+        return 0.0
+    window = [float(x) for x in lows[-max(1, bars):] if float(x or 0) > 0]
+    if not window:
+        return 0.0
+    floor = min(min(window), price)
+    if floor <= 0:
+        return 0.0
+    return (price - floor) / floor * 100.0
+
+
+def premium_lift_clears_fade(
+    settings: Any,
+    *,
+    off_low_pct: float,
+    momentum_pct: float,
+    momentum_3_pct: float,
+) -> bool:
+    """True when a red print is a dip inside a reclaim, not a fade.
+
+    Price still sitting on the recent low does not clear (the 09:20 flush).
+    A fresh collapse through the floor does not clear either.
+    """
+    min_off = _cfg_float(settings, "premium_fade_lift_off_low_min_pct", 8.0)
+    collapse = _cfg_float(settings, "premium_fade_lift_collapse_pct", -4.0)
+    if off_low_pct < min_off:
+        return False
+    if momentum_pct <= collapse or momentum_3_pct <= collapse:
+        return False
+    return True
+
 
 def premium_fading_blocks_entry(
     *,
@@ -22,6 +69,7 @@ def premium_fading_blocks_entry(
     pe_win_mirror_bypass: bool = False,
     symmetric_near_base_bypass: bool = False,
     building_rip_bypass: bool = False,
+    premium_off_low_pct: float = 0.0,
 ) -> tuple[bool, str]:
     """
     Block entries when option premium is fading at execution.
@@ -112,6 +160,15 @@ def premium_fading_blocks_entry(
         )
         if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
             return False, "building_rip_shallow_fade_ok"
+
+    # Reclaim off the recent low: a 0.15% one-minute dip is the lift, not a fade.
+    if premium_lift_clears_fade(
+        settings,
+        off_low_pct=float(premium_off_low_pct or 0),
+        momentum_pct=float(premium_momentum_5s or 0),
+        momentum_3_pct=float(premium_momentum_3s or 0),
+    ):
+        return False, "premium_lift_off_low_ok"
 
     min_mom = settings.execution_chart_min_premium_momentum_pct
     if premium_momentum_5s < min_mom and premium_momentum_3s < 0:

@@ -38,6 +38,7 @@ def _premium_chart_dict(premium: Optional[PremiumChart]) -> dict[str, Any]:
         "lastPremium": premium.lastPremium,
         "momentum3Pct": premium.momentum3Pct,
         "momentum5Pct": premium.momentum5Pct,
+        "offLowPct": premium.offLowPct,
         "volumeSurge": premium.volumeSurge,
         "vwap": premium.vwap,
         "aboveVwap": premium.aboveVwap,

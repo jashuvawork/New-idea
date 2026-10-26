@@ -94,3 +94,63 @@ def test_pad_lane_bypass_allows_shallow_premium_5m_fade_on_put():
         )
     assert blocked is True
     assert reason == "ok"
+
+
+def test_reclaim_off_the_low_clears_5m_fade():
+    """25-minute momentum still holds the open flush. The 15-minute leg is the lift."""
+    from app.models.schemas import TimeframeChartRead
+
+    candles = _rising_candles(steps=300)
+    price = candles[-1][4]
+    reads = _reads_from_1m(candles, price)
+    premium = {
+        "1m": TimeframeChartRead(
+            label="1m", price=149.0, direction="BULLISH", momentumPct=0.4,
+            momentum3Pct=0.2, offLowPct=15.0,
+        ),
+        "5m": TimeframeChartRead(
+            label="5m", price=149.0, direction="BEARISH", momentumPct=-9.0,
+            momentum3Pct=6.0, offLowPct=15.0,
+        ),
+    }
+    passed, reason, _ = validate_mtf_scalp(
+        Side.CALL, reads, premium, trade_score=60,
+    )
+    assert passed
+    assert reason == "ok"
+
+
+def test_fresh_5m_dump_still_fades_off_the_low():
+    from app.models.schemas import TimeframeChartRead
+
+    candles = _rising_candles(steps=300)
+    price = candles[-1][4]
+    reads = _reads_from_1m(candles, price)
+    premium = {
+        "1m": TimeframeChartRead(
+            label="1m", price=200.0, direction="BEARISH", momentumPct=-6.0,
+            momentum3Pct=-5.0, offLowPct=20.0,
+        ),
+        "5m": TimeframeChartRead(
+            label="5m", price=200.0, direction="BEARISH", momentumPct=-12.0,
+            momentum3Pct=-8.0, offLowPct=20.0,
+        ),
+    }
+    passed, reason, _ = validate_mtf_scalp(
+        Side.CALL, reads, premium, trade_score=60,
+    )
+    assert not passed
+    assert reason == "exec_mtf_premium_1m_fading"
+
+
+def test_5m_bars_measure_off_low_on_the_reclaim_window():
+    """Four 5m bars is the 20-minute low, so the 09:20 flush is still in view at 09:39."""
+    # Each bar: [ts, open, high, low, close]
+    bars = [
+        [0, 161, 162, 140, 142],
+        [1, 142, 143, 127, 130],
+        [2, 130, 146, 129, 145],
+        [3, 145, 152, 144, 149],
+    ]
+    read = analyze_timeframe(bars, 149.0, "5m")
+    assert read.offLowPct >= 8.0

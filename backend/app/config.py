@@ -3039,6 +3039,13 @@ class Settings(BaseSettings):
     execution_chart_force_upstox_refresh: bool = True
     execution_chart_premium_check_enabled: bool = True
     execution_chart_min_premium_momentum_pct: float = -0.15
+    # A short red print is not a fade once premium has reclaimed off its recent
+    # low (last 20 one-minute bars, 4 bars on 5m). 26 Oct 09:20 NIFTY 22500 CE
+    # 161→127 stayed a fade because price was that low. At 09:39 the same strike
+    # was ~15% off the low and a 0.15% one-minute dip still blocked the lift.
+    # A fresh collapse through the floor still blocks.
+    premium_fade_lift_off_low_min_pct: float = 8.0
+    premium_fade_lift_collapse_pct: float = -4.0
     execution_chart_candle_count: int = 60  # legacy; execution uses spot_chart_* warmup bars
     # Confirmed near-base FTV first-lifts may fill THROUGH a shallow premium dip — that dip is
     # the base retest right before the vertical, not a collapse. Without this the execution
