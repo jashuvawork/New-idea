@@ -181,6 +181,8 @@ def _summarize_funnel(funnel: dict[str, Any]) -> dict[str, Any]:
                 reasons[reason] += 1
                 stage = str(ev.get("stage") or "unknown")
                 by_stage[stage] += 1
+                if stage == "SELECTOR_POOL":
+                    entry_reasons[reason] += 1
                 if _is_reentry_reason(reason):
                     reentry_reasons[reason] += 1
                 else:

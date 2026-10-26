@@ -3534,6 +3534,12 @@ class Settings(BaseSettings):
     # ML floor does not apply. A call chase with no new base, and every put
     # reentry, stays on the floor.
     ce_new_base_fresh_entry_enabled: bool = True
+    # PUT mirror of CE new-base fresh entry — off by default (reentry ML floor stays on PE).
+    pe_new_base_fresh_entry_enabled: bool = False
+    pe_new_base_fresh_entry_min_velocity_3s: float = 0.0
+    pe_new_base_fresh_entry_min_premium_momentum_pct: float = 0.0
+    # Record selector explosion-pool entry rejects in radar funnel (SELECTOR_POOL stage).
+    selector_pool_entry_funnel_enabled: bool = True
     # FTV / V / explosive structural moments waive post-win ML re-entry floor (not after losses).
     quality_moment_passport_enabled: bool = True
     quality_moment_waive_reentry_ml_after_win: bool = True

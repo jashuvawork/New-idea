@@ -89,6 +89,40 @@ class EntryCandidate:
     pretrade_meta: Optional[dict] = None
 
 
+def _normalize_pool_gate_reason(reason: str | None, fallback: str) -> str:
+    text = str(reason or "").strip()
+    if not text:
+        return fallback
+    return text if len(text) <= 120 else text[:120]
+
+
+def _record_pool_entry_gate(
+    symbol: str,
+    side: Side,
+    strike: float,
+    reason: str,
+    *,
+    stage: str = "SELECTOR_POOL",
+) -> None:
+    """Funnel telemetry for explosion pool entry rejects (pre-candidate list)."""
+    from app.config import get_settings
+
+    if not bool(getattr(get_settings(), "selector_pool_entry_funnel_enabled", True)):
+        return
+    try:
+        from app.services.radar_learning import record_funnel_gate_block
+
+        record_funnel_gate_block(
+            str(symbol or "").upper(),
+            side.value if hasattr(side, "value") else str(side),
+            float(strike or 0),
+            str(reason or "selector_pool_rejected"),
+            stage=stage,
+        )
+    except Exception:
+        pass
+
+
 def _record_selector_gate_rejection(candidate: EntryCandidate, reason: str) -> None:
     """Best-effort funnel telemetry when selector rejects before SELECTED."""
     try:
@@ -706,8 +740,14 @@ def _explosion_candidates(
             tqs=snap.tradeQualityScore,
             tier=event.tier, explosion_event=event, alert=alert,
         )
-        chop_blocked, _ = chop_weak_explosion_blocks_entry(cand_probe, snap)
+        chop_blocked, chop_reason = chop_weak_explosion_blocks_entry(cand_probe, snap)
         if chop_blocked:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(chop_reason, "chop_weak_explosion_blocked"),
+            )
             continue
         suggestion = SuggestedTrade(
             id=alert.get("id", "x"),
@@ -730,18 +770,36 @@ def _explosion_candidates(
             alert=alert if isinstance(alert, dict) else None,
         )
         if not passed:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                "explosion_entry_check_failed",
+            )
             continue
 
         from app.engines.rally_capture import cross_side_chase_blocked
 
-        blocked_x, _ = cross_side_chase_blocked(event, snap)
+        blocked_x, cross_reason = cross_side_chase_blocked(event, snap)
         if blocked_x:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(cross_reason, "cross_side_chase_blocked"),
+            )
             continue
 
         blocked, reason = _reentry_blocked(
             symbol, event.side, event.strike, snap, explosion_event=event, state=state,
         )
         if blocked:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(reason, "reentry_precheck_blocked"),
+            )
             continue
 
         rank = score_val * 0.55 + snap.tradeQualityScore * 0.25
@@ -905,6 +963,12 @@ def _explosion_candidates(
         )
         late_blocked, _late_reason = late_fade_chase_blocked(event, ict, snap=snap)
         if late_blocked and not first_lift_ready:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(_late_reason, "late_fade_chase_blocked"),
+            )
             continue
         from app.engines.session_mode_feedback import session_peak_late_reentry_blocked
 
@@ -919,6 +983,14 @@ def _explosion_candidates(
             snap=snap,
         )
         if late_reentry and not first_lift_ready:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(
+                    _late_reentry_reason, "session_peak_late_entry_blocked",
+                ),
+            )
             continue
         from app.engines.explosion_entry_guards import (
             detect_fake_explosion_trap,
@@ -940,6 +1012,12 @@ def _explosion_candidates(
             bullish_local_base=bool(bullish_base.get("active")),
         )
         if immature_blocked and not must_take and not first_lift_ready:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(_immature_reason, "immature_explosion_blocked"),
+            )
             continue
         chase_blocked, _chase_reason = tier_promotion_pad_chase_blocked(
             event,
@@ -947,6 +1025,12 @@ def _explosion_candidates(
             alert=alert,
         )
         if chase_blocked and not first_lift_ready and not early_pad:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(_chase_reason, "tier_promotion_pad_chase_blocked"),
+            )
             continue
         pi_blocked, _pi_reason = post_impulse_consolidation_entry_blocked(
             event,
@@ -958,6 +1042,12 @@ def _explosion_candidates(
             or alert.get("ictArmedBaseLaunch")
             or alert.get("armedBaseLaunch")
         ):
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(_pi_reason, "post_impulse_consolidation_blocked"),
+            )
             continue
         # Must-take already proved the 10–65% near-base band; pass that so the
         # hard window does not re-raise the unstructured 28% floor.
@@ -969,6 +1059,12 @@ def _explosion_candidates(
             bullish_local_base=bool(bullish_base.get("active")),
         )
         if window_blocked and not first_lift_ready:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(_window_reason, "explosion_entry_window_blocked"),
+            )
             continue
         from app.engines.morning_premium_capture import is_premium_capture_event
 
@@ -980,6 +1076,12 @@ def _explosion_candidates(
             snap=snap,
         )
         if live_blocked and not must_take and not first_lift_ready:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(_live_reason, "live_explosion_confirmation_blocked"),
+            )
             continue
         from app.engines.entry_timing import assess_entry_timing, timing_blocks_entry
 
@@ -1004,6 +1106,12 @@ def _explosion_candidates(
                 )
             )
         ):
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(_timing_reason, "entry_timing_blocked"),
+            )
             continue
         ext_blocked, _ext_reason = extended_session_chase_blocked(
             event, ict=ict, alert=alert,
@@ -1026,12 +1134,24 @@ def _explosion_candidates(
                 readiness_reason=first_lift_readiness_reason,
             )
         ):
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(_ext_reason, "extended_session_chase_blocked"),
+            )
             continue
         # Don't chase the exhaustion of a completed move (symmetric CE/PE). Surgical: a
         # genuine near-base entry is exempt by construction (current sits at the window low),
         # so this only blocks the late/mid-rip chase — even for must-take/first-lift.
         pp_blocked, _pp_reason = post_peak_chase_blocked(event)
         if pp_blocked:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(_pp_reason, "post_peak_chase_blocked"),
+            )
             continue
         from app.engines.rally_capture import infer_alert_causal_grade
 
@@ -1051,6 +1171,12 @@ def _explosion_candidates(
             } if _alert_dict is not None else None,
         )
         if st_blocked:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(_st_reason, "session_trough_late_chase_blocked"),
+            )
             continue
         coil_blocked, _coil_reason = coil_top_entry_blocked(
             event,
@@ -1060,6 +1186,12 @@ def _explosion_candidates(
             state=state,
         )
         if coil_blocked:
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(_coil_reason, "coil_top_entry_blocked"),
+            )
             continue
         trap_block, _trap_reason, trap_meta = detect_fake_explosion_trap(
             cand_probe, snap, state=state, ict=ict,
@@ -1078,6 +1210,13 @@ def _explosion_candidates(
                 snap=snap,
             )
         ):
+            trap_reason = _trap_reason or str(trap_meta.get("action") or "fake_explosion_trap")
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                _normalize_pool_gate_reason(trap_reason, "fake_explosion_trap"),
+            )
             continue
         # Displacement-only without flat base / FVG / real rip — skip (Jul20 noise).
         # Raised floor to early-window min (28%) so ~22% displacement spikes stay out.
@@ -1092,6 +1231,12 @@ def _explosion_candidates(
                 getattr(settings, "explosion_early_window_min_move_pct", 28.0) or 28.0
             )
         ):
+            _record_pool_entry_gate(
+                symbol,
+                event.side,
+                float(event.strike or 0),
+                "explosion_displacement_only_low_move",
+            )
             continue
         rank += ict_explosion_rank_bonus(ict, trading_mode)
         if first_lift_readiness_reason in (

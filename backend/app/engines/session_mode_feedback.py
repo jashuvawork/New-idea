@@ -728,13 +728,13 @@ def _prior_session_explosion_closes(
     return closes
 
 
-def _ce_momentum_reading(
+def _entry_momentum_reading(
     alert: dict[str, Any],
     *,
     velocity_3s: float,
     premium_momentum_pct: float,
 ) -> tuple[float, float]:
-    """Live call momentum: 3s tape velocity, or premium momentum when the tape is flat."""
+    """Live option momentum: 3s tape velocity, or premium momentum when the tape is flat."""
     try:
         v3 = float(velocity_3s or 0)
     except (TypeError, ValueError):
@@ -770,6 +770,34 @@ def _ce_momentum_reading(
     return v3, mom
 
 
+_ce_momentum_reading = _entry_momentum_reading
+
+
+def _new_base_momentum_ok(
+    v3: float,
+    mom: float,
+    *,
+    settings: Any,
+    side_v: str,
+) -> bool:
+    if side_v == "PUT":
+        min_v3 = float(
+            getattr(settings, "pe_new_base_fresh_entry_min_velocity_3s", 0.0) or 0.0
+        )
+        min_mom = float(
+            getattr(settings, "pe_new_base_fresh_entry_min_premium_momentum_pct", 0.0)
+            or 0.0
+        )
+    else:
+        min_v3 = 0.0
+        min_mom = 0.0
+    if min_v3 > 0 and v3 + 1e-9 < min_v3:
+        return False
+    if min_mom > 0 and mom + 1e-9 < min_mom:
+        return False
+    return v3 > 0 or mom > 0
+
+
 def ce_momentum_new_base_is_fresh_entry(
     *,
     side: Any,
@@ -791,13 +819,47 @@ def ce_momentum_new_base_is_fresh_entry(
     if side_v != "CALL":
         return False
     alert_d = alert if isinstance(alert, dict) else {}
-    v3, mom = _ce_momentum_reading(
+    v3, mom = _entry_momentum_reading(
         alert_d,
         velocity_3s=velocity_3s,
         premium_momentum_pct=premium_momentum_pct,
     )
-    if v3 <= 0 and mom <= 0:
+    if not _new_base_momentum_ok(v3, mom, settings=settings, side_v="CALL"):
         return False
+    return _new_base_structural_fresh_entry(alert_d, settings=settings)
+
+
+def pe_momentum_new_base_is_fresh_entry(
+    *,
+    side: Any,
+    alert: Optional[dict[str, Any]] = None,
+    velocity_3s: float = 0.0,
+    premium_momentum_pct: float = 0.0,
+    settings: Any = None,
+) -> bool:
+    """PUT lifting off a newly formed base (mirror CE) — separate config, default off."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "pe_new_base_fresh_entry_enabled", False)):
+        return False
+    side_v = side.value if hasattr(side, "value") else str(side or "").upper()
+    if side_v != "PUT":
+        return False
+    alert_d = alert if isinstance(alert, dict) else {}
+    v3, mom = _entry_momentum_reading(
+        alert_d,
+        velocity_3s=velocity_3s,
+        premium_momentum_pct=premium_momentum_pct,
+    )
+    if not _new_base_momentum_ok(v3, mom, settings=settings, side_v="PUT"):
+        return False
+    return _new_base_structural_fresh_entry(alert_d, settings=settings)
+
+
+def _new_base_structural_fresh_entry(
+    alert_d: dict[str, Any],
+    *,
+    settings: Any,
+) -> bool:
     try:
         if _alert_post_win_new_local_base(alert_d, settings=settings):
             return True
@@ -864,6 +926,22 @@ def reentry_ml_win_prob_blocked(
         )
         return False, meta
 
+    if pe_momentum_new_base_is_fresh_entry(
+        side=side,
+        alert=alert,
+        velocity_3s=velocity_3s,
+        premium_momentum_pct=premium_momentum_pct,
+        settings=settings,
+    ):
+        meta.update(
+            {
+                "applied": False,
+                "freshEntry": True,
+                "reason": "pe_new_base_fresh_entry",
+            }
+        )
+        return False, meta
+
     session_min = float(
         getattr(settings, "explosion_reentry_ml_win_prob_min", 0.52) or 0.52
     )
@@ -889,12 +967,21 @@ def reentry_ml_win_prob_blocked(
     )
     side_val = side.value if hasattr(side, "value") else str(side or "PUT").upper()
     alert_d = alert if isinstance(alert, dict) else {}
-    # Main #849: same-strike CE uses ce_new_base_fresh_entry + ML; all PUT reentries stay on ML.
-    passport_scope_ok = side_val != "PUT" and not (
-        same_strike_prior is not None
-        and side_val == "CALL"
-        and bool(getattr(settings, "ce_new_base_fresh_entry_enabled", True))
-    )
+    # Same-strike fresh-base paths use side-specific rules + ML; PUT passport only if PE fresh entry on.
+    passport_scope_ok = True
+    if side_val == "PUT" and not bool(
+        getattr(settings, "pe_new_base_fresh_entry_enabled", False)
+    ):
+        passport_scope_ok = False
+    elif same_strike_prior is not None:
+        if side_val == "CALL" and bool(
+            getattr(settings, "ce_new_base_fresh_entry_enabled", True)
+        ):
+            passport_scope_ok = False
+        elif side_val == "PUT" and bool(
+            getattr(settings, "pe_new_base_fresh_entry_enabled", False)
+        ):
+            passport_scope_ok = False
     if passport_scope_ok and (
         alert_d or bool(getattr(settings, "quality_moment_passport_enabled", True))
     ):

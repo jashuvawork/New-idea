@@ -343,3 +343,29 @@ def test_put_new_base_reentry_still_blocks_low_ml(mock_settings, mock_ml):
     assert meta["reentryKind"] == "session"
     assert meta["mlWinProb"] == 0.411
     assert meta.get("freshEntry") is not True
+
+
+@patch("app.engines.adaptive_exits.predict_entry_ml_win_prob")
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_pe_new_base_fresh_entry_when_enabled(mock_settings, mock_ml):
+    mock_settings.return_value = Settings(
+        pe_new_base_fresh_entry_enabled=True,
+        explosion_reentry_ml_win_prob_gate_enabled=True,
+    )
+    mock_ml.return_value = 0.41
+    state = AutoTraderState()
+    state.closedPaperTrades = [
+        _closed(strike=24200.0, pnl_inr=2346.0, side=Side.PUT)
+    ]
+    blocked, meta = reentry_ml_win_prob_blocked(
+        state,
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24200.0,
+        snap=MagicMock(),
+        alert=_ce_new_base_alert(side="PUT"),
+        velocity_3s=1.5,
+    )
+    assert blocked is False
+    assert meta.get("reason") == "pe_new_base_fresh_entry"
+    mock_ml.assert_not_called()
