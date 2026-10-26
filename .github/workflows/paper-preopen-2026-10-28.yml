@@ -45,7 +45,7 @@ jobs:
               "git pull --ff-only origin main || git reset --hard origin/main",
               "sudo bash deploy/set-execution-mode.sh --paper",
               "curl -sf http://127.0.0.1:8000/api/deployment/status -o /tmp/nq-deploy-status.json",
-              "python3 -m json.tool /tmp/nq-deploy-status.json | head -40"
+              "python3 -m json.tool /tmp/nq-deploy-status.json | head -40 || true"
             ]' \
             --query Command.CommandId \
             --output text)
