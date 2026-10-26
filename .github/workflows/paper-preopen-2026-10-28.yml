@@ -43,7 +43,7 @@ jobs:
               "git fetch origin main",
               "git checkout main",
               "git pull --ff-only origin main || git reset --hard origin/main",
-              "sudo bash deploy/set-execution-mode.sh --paper",
+              "sudo bash deploy/set-execution-mode.sh --paper --no-loss-stops",
               "curl -sf http://127.0.0.1:8000/api/deployment/status -o /tmp/nq-deploy-status.json",
               "python3 -m json.tool /tmp/nq-deploy-status.json | head -40 || true"
             ]' \
@@ -94,4 +94,10 @@ jobs:
           print('paperTrading:', paper)
           if live or not paper:
               raise SystemExit('Not in paper mode on public API')
+          loss = float(f.get('dailyLossStopInr') or -1)
+          emerg = bool(f.get('emergencyStopEnabled'))
+          print('dailyLossStopInr:', loss)
+          print('emergencyStopEnabled:', emerg)
+          if loss > 0 or emerg:
+              raise SystemExit('Loss stops still armed — expected dailyLossStopInr=0 and emergencyStop off')
           "
