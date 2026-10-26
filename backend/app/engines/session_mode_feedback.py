@@ -1028,6 +1028,32 @@ def _alert_post_win_new_local_base(
     return 0 < local <= max_pad + 1e-6
 
 
+def same_strike_post_win_active(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+) -> tuple[bool, Any | None]:
+    """Post-win FOMO traps apply only after a recent win on this exact strike."""
+    settings = get_settings()
+    raw_lb = getattr(settings, "post_win_late_reentry_waive_lookback_seconds", 14400)
+    try:
+        lookback = float(raw_lb if raw_lb is not None else 14400)
+    except (TypeError, ValueError):
+        lookback = 14400.0
+    if lookback <= 0:
+        lookback = 14400.0
+    prior, _age = _latest_same_strike_win_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        max_age_seconds=lookback,
+    )
+    return prior is not None, prior
+
+
 def post_win_session_late_reentry_waive(
     state: AutoTraderState | None,
     *,

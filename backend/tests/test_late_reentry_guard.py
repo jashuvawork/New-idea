@@ -833,6 +833,43 @@ def test_post_win_exhausted_ftv_still_blocks_continuation_without_rebase():
     assert meta.get("applied") is True
 
 
+def test_post_win_fresh_trap_skips_different_strike_momentum_leg():
+    """Afternoon CE on a new strike must not inherit post-win fresh-base from another strike."""
+    from unittest.mock import MagicMock
+
+    from app.engines.explosion_entry_guards import post_win_fresh_near_base_blocked
+
+    settings = Settings(
+        fake_explosion_trap_post_win_fresh_near_base_enabled=True,
+    )
+    state = AutoTraderState(
+        closedPaperTrades=[_nifty_side_win_trade(side=Side.CALL, strike=22500.0)],
+    )
+    cand = MagicMock(
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22600.0,
+        premium=180.0,
+        explosion_event=MagicMock(velocity_3s=2.2),
+    )
+    with patch(
+        "app.engines.explosion_entry_guards.get_settings",
+        return_value=settings,
+    ), patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ):
+        blocked, reason, _meta = post_win_fresh_near_base_blocked(
+            cand,
+            local_pad=24.0,
+            ict=None,
+            state=state,
+            alert={"tier": "EXPLODING", "ictFirstLift": True},
+        )
+    assert blocked is False
+    assert reason == ""
+
+
 def test_late_reentry_guard_off_by_default_without_explicit_enable():
     _seed_session_peak(
         symbol="NIFTY", strike=22500.0, side=Side.CALL, low=167.0, peak=225.7,

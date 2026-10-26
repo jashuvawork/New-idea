@@ -1,6 +1,6 @@
 """Fake explosion trap — Jul20 NIFTY 24300 CE FOMO / never-green path."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -72,6 +72,10 @@ def _settings(**overrides):
     s.fake_explosion_trap_post_win_streak_lookback = 2
     s.fake_explosion_trap_post_win_streak_max_base_rel_pct = 10.0
     s.fake_explosion_trap_post_win_fresh_near_base_enabled = True
+    s.post_win_late_reentry_waive_lookback_seconds = 14400
+    s.post_win_late_reentry_waive_enabled = True
+    s.post_win_continuation_leg_min_velocity_3s = 2.0
+    s.post_win_new_local_base_max_pad_pct = 22.0
     s.fresh_near_local_base_max_pct = 10.0
     s.armed_base_fresh_entry_max_seconds = 300.0
     s.armed_base_fresh_max_pad_pct = 12.0
@@ -157,6 +161,8 @@ def _candidate(event: ExplosionEvent, snap: SymbolSnapshot, **overrides) -> Magi
     cand.mode = "explosion"
     cand.side = event.side
     cand.strike = event.strike
+    cand.symbol = getattr(event, "symbol", None) or "NIFTY"
+    cand.premium = overrides.get("premium", 140.0)
     cand.score = overrides.get("score", 165.0)
     cand.tier = event.tier
     cand.explosion_event = event
@@ -727,37 +733,50 @@ def test_post_win_extended_chase_blocks_sep17_sensex_style(
     mock_money_settings.return_value = cfg
 
     snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="BELOW")
-    event = _event(daily=25.0, v3=2.37, tier="ELITE", strike=74600.0)
+    event = _event(daily=25.0, v3=1.2, tier="ELITE", strike=74600.0)
     event.side = side
     event.symbol = "SENSEX" if side == Side.PUT else "NIFTY"
     cand = _candidate(event, snap)
 
-    ict = _confirmed_ict(13.7)
-    ict.base_relative_move_pct = 13.7
-    ict.armed_base_launch = True
+    # Extended pad re-chase on the same strike without a fresh re-base — still blocked.
+    ict = _confirmed_ict(24.0)
+    ict.base_relative_move_pct = 24.0
+    ict.armed_base_launch = False
     ict.session_move_pct = 25.0
 
+    sym = "SENSEX" if side == Side.PUT else "NIFTY"
+    from app.models.schemas import AutoTraderState, PaperTrade, StrategyType
+
+    prior = PaperTrade(
+        id="sep17-prior-win",
+        symbol=sym,
+        side=side,
+        strike=74600.0,
+        entryPremium=120.0,
+        currentPremium=150.0,
+        lots=4,
+        openedAt=datetime.now(IST) - timedelta(minutes=45),
+        closedAt=datetime.now(IST) - timedelta(minutes=30),
+        status="CLOSED",
+        exitReason="explosion_peak_keep_trail",
+        strategyType=StrategyType.EXPLOSIVE,
+        pnlInr=16141.86,
+        entryContext={"selectionMode": "explosion"},
+    )
+    state = AutoTraderState(closedPaperTrades=[prior])
+
     with patch(
-        "app.engines.pretrade_validator.collect_session_trades",
-        return_value=[
-            TradeRecord(
-                symbol="NIFTY",
-                side=side,
-                pnl_inr=16141.86,
-                exit_reason="explosion_peak_keep_trail",
-                strike=23300.0,
-            ),
-            TradeRecord(
-                symbol="NIFTY",
-                side=side,
-                pnl_inr=11603.79,
-                exit_reason="explosion_peak_keep_trail",
-                strike=23450.0,
-            ),
-        ],
+        "app.engines.explosion_entry_guards._collect_session_trades_safe",
+        return_value=[],
+    ), patch(
+        "app.engines.explosion_entry_guards._post_small_win",
+        return_value=(False, {}),
+    ), patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=cfg,
     ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
         blocked, reason, meta = detect_fake_explosion_trap(
-            cand, snap, state=MagicMock(), ict=ict,
+            cand, snap, state=state, ict=ict,
         )
 
     assert blocked is True
@@ -784,24 +803,43 @@ def test_post_win_extended_chase_allows_hot_reacceleration(
     ict = _confirmed_ict(8.0)
     ict.base_relative_move_pct = 8.0
 
+    from app.models.schemas import AutoTraderState, PaperTrade, StrategyType
+
+    sym = "SENSEX" if side == Side.PUT else "NIFTY"
+    prior = PaperTrade(
+        id="sep17-hot-reaccel",
+        symbol=sym,
+        side=side,
+        strike=74600.0,
+        entryPremium=120.0,
+        currentPremium=135.0,
+        lots=2,
+        openedAt=datetime.now(IST) - timedelta(minutes=40),
+        closedAt=datetime.now(IST) - timedelta(minutes=25),
+        status="CLOSED",
+        exitReason="explosion_peak_keep_trail",
+        strategyType=StrategyType.EXPLOSIVE,
+        pnlInr=11603.79,
+        entryContext={"selectionMode": "explosion"},
+    )
+    state = AutoTraderState(closedPaperTrades=[prior])
+
     with patch(
-        "app.engines.pretrade_validator.collect_session_trades",
-        return_value=[
-            TradeRecord(
-                symbol="NIFTY",
-                side=side,
-                pnl_inr=11603.79,
-                exit_reason="explosion_peak_keep_trail",
-                strike=23450.0,
-            ),
-        ],
+        "app.engines.explosion_entry_guards._collect_session_trades_safe",
+        return_value=[],
+    ), patch(
+        "app.engines.explosion_entry_guards._post_small_win",
+        return_value=(False, {}),
+    ), patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=cfg,
     ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
         blocked, reason, meta = detect_fake_explosion_trap(
-            cand, snap, state=MagicMock(), ict=ict,
+            cand, snap, state=state, ict=ict,
         )
 
     assert blocked is False
-    assert meta.get("postWinFreshNearBasePass") is True
+    assert meta.get("fakeExplosionTrap") is False
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
