@@ -267,6 +267,8 @@ def test_elite_entry_blocks_shallow_elite_tier_without_lift():
 
 
 def test_elite_entry_blocks_v_rip_without_first_lift_even_with_breakout():
+    from tests.mock_defaults import settings_mock
+
     ok, reason, _ = elite_entry_allowed(
         _v_evidence(
             localBaseMovePct=6.5,
@@ -276,6 +278,7 @@ def test_elite_entry_blocks_v_rip_without_first_lift_even_with_breakout():
             flatVerticalQuality=79.0,
         ),
         _ranking(rankScore=95.0, grade="S"),
+        settings=settings_mock(quality_moment_passport_waives_elite_entry=False),
     )
     assert ok is False
     assert reason == "elite_v_rip_shallow_first_lift_blocked"
@@ -795,12 +798,32 @@ def test_elite_entry_allows_perfect_score_near_base():
 
 
 def test_elite_entry_blocks_bad_timing():
+    from tests.mock_defaults import settings_mock
+
     ok, reason, _ = elite_entry_allowed(
         _v_evidence(timingAssessment="CHASE", timingAction="block"),
         _ranking(),
+        settings=settings_mock(quality_moment_passport_waives_elite_entry=False),
     )
     assert ok is False
     assert reason == "elite_timing_not_good_or_ok"
+
+
+def test_elite_entry_passport_waives_bad_timing_for_ftv_v():
+    from tests.mock_defaults import settings_mock
+
+    settings = settings_mock(
+        quality_moment_passport_enabled=True,
+        quality_moment_passport_waives_elite_entry=True,
+    )
+    ok, reason, assessment = elite_entry_allowed(
+        _v_evidence(timingAssessment="CHASE", timingAction="block"),
+        _ranking(grade="A"),
+        settings=settings,
+    )
+    assert ok is True
+    assert reason == "ok"
+    assert assessment.get("qualityMomentPassportEntry") is True
 
 
 def test_elite_entry_blocks_momentum_rally_worst_day_type():

@@ -1658,19 +1658,37 @@ def elite_entry_allowed(
     if setup not in VALID_SETUPS:
         return False, "elite_setup_not_ftv_v_or_explosive", assessment
 
-    from app.engines.best_trade_policy import elite_base_setup_allowed
+    from app.engines.best_trade_policy import (
+        elite_base_setup_allowed,
+        quality_moment_passport_active,
+        quality_moment_passport_waives_elite_entry,
+    )
+
+    passport_ok, passport_mode = quality_moment_passport_active(
+        evidence, settings=settings,
+    )
+    passport_entry = passport_ok and quality_moment_passport_waives_elite_entry(settings)
+    if passport_entry:
+        assessment = {
+            **assessment,
+            "qualityMomentPassportEntry": True,
+            "qualityMomentPassportMode": passport_mode,
+        }
 
     if not elite_base_setup_allowed(
         setup,
         mega_ok=mega_ok or building_rip_helper_ok,
         settings=settings,
     ):
-        if bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)):
+        if passport_entry and setup.upper() in ("EXPLOSIVE", "FTV", "V"):
+            pass
+        elif bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)):
             assessment = {**assessment, "side": resolved_side}
             return False, "elite_v_rip_only", assessment
-        local = _number(assessment.get("localBasePct"))
-        assessment = {**assessment, "side": resolved_side}
-        return False, f"elite_explosive_chase_local_{local:.0f}pct", assessment
+        else:
+            local = _number(assessment.get("localBasePct"))
+            assessment = {**assessment, "side": resolved_side}
+            return False, f"elite_explosive_chase_local_{local:.0f}pct", assessment
 
     milestone_blocked, milestone_reason = elite_milestone_depth_blocked(
         evidence, settings=settings,
@@ -1687,6 +1705,10 @@ def elite_entry_allowed(
             or 0.92
         )
         score = max(score, live * blend)
+    if passport_entry:
+        from app.engines.best_trade_policy import quality_moment_passport_elite_score_floor
+
+        min_score = min(min_score, quality_moment_passport_elite_score_floor(settings))
     if score < min_score - 1e-6:
         return False, f"elite_score_below_{min_score:g}", assessment
 
@@ -1747,6 +1769,9 @@ def elite_entry_allowed(
     ):
         v_rip_shallow_blocked = False
         v_rip_shallow_reason = ""
+    if v_rip_shallow_blocked and passport_entry:
+        v_rip_shallow_blocked = False
+        v_rip_shallow_reason = ""
     if v_rip_shallow_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, v_rip_shallow_reason, assessment
@@ -1792,7 +1817,7 @@ def elite_entry_allowed(
             and bool(
                 getattr(settings, "live_entry_best_trade_capture_waives_elite_timing", True)
             )
-        ) and not building_rip_helper_ok and not call_capture_waive:
+        ) and not building_rip_helper_ok and not call_capture_waive and not passport_entry:
             return False, "elite_timing_not_good_or_ok", assessment
 
     assessment = {

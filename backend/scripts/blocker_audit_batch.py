@@ -11,7 +11,7 @@ import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,9 +28,47 @@ OUT_JSON = Path("/opt/cursor/artifacts/blocker-audit-latest.json")
 OUT_MD = Path("/opt/cursor/artifacts/blocker-classification.md")
 
 # Heuristic labels for gate families (Phase 2 rubric).
+REENTRY_REASON_MARKERS: tuple[str, ...] = (
+    "reentry",
+    "failed_launch_reentry",
+    "peak_fade_same_side",
+    "session_same_strike_loss",
+    "session_same_side_loss",
+    "exhausted_ftv",
+    "win_reentry_velocity",
+    "late_reentry_near_session_peak",
+    "post_win_late_reentry_waive",
+    "same_strike_post_win",
+    "continuation_leg",
+)
+
+ENTRY_REASON_PREFIXES: tuple[str, ...] = (
+    "elite_",
+    "fake_explosion_trap",
+    "top_moment",
+    "ftv_elite",
+    "pretrade_",
+    "explosion_score",
+    "score_",
+    "chart_",
+    "premium_out",
+    "tier_not",
+    "immature_",
+    "coil_",
+    "post_peak",
+    "session_trough",
+    "extended_session",
+    "live_explosion",
+    "timing_",
+    "hard_block_",
+    "counter_breadth",
+)
+
 GATE_LABELS: dict[str, str] = {
     "reentry_ml_win_prob_low": "RELAX_QUALITY",
     "quality_moment_passport_waive_reentry_ml": "RELAX_QUALITY",
+    "quality_moment_passport_waive_peak": "RELAX_QUALITY",
+    "elite_timing_not_good_or_ok": "RELAX_QUALITY",
     "late_reentry_near_session_peak": "RELAX_QUALITY",
     "fake_explosion_trap_post_win_fresh_near_base": "KEEP_NARROW",
     "fake_explosion_trap_post_win_extended_chase": "KEEP_NARROW",
@@ -93,19 +131,97 @@ def _audit_settings(*, parity: bool = False) -> Settings:
     return s
 
 
+def _is_reentry_reason(reason: str) -> bool:
+    r = str(reason or "").lower()
+    return any(m in r for m in REENTRY_REASON_MARKERS)
+
+
+def _is_entry_reason(reason: str) -> bool:
+    r = str(reason or "").lower()
+    if _is_reentry_reason(r):
+        return False
+    return any(r.startswith(p) for p in ENTRY_REASON_PREFIXES)
+
+
+def _quality_moment_radar_row(row: Mapping[str, Any]) -> bool:
+    tier = str(row.get("bestTier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return False
+    outcome = row.get("radarOutcome") or {}
+    mfe = float(outcome.get("maxFavorableExcursionPct") or outcome.get("mfePct") or 0)
+    if mfe >= 30:
+        return True
+    for ev in row.get("timeline") or []:
+        if str(ev.get("tier") or "").upper() in ("ELITE", "EXPLODING"):
+            return True
+    return tier in ("ELITE", "EXPLODING")
+
+
 def _summarize_funnel(funnel: dict[str, Any]) -> dict[str, Any]:
     reasons: Counter[str] = Counter()
+    entry_reasons: Counter[str] = Counter()
+    reentry_reasons: Counter[str] = Counter()
+    by_stage: Counter[str] = Counter()
+    quality_blocked_entry: list[dict[str, Any]] = []
+
     for row in funnel.get("rows") or []:
-        for b in row.get("blockers") or []:
-            reasons[str(b)] += 1
+        if not isinstance(row, Mapping):
+            continue
+        entered = bool(row.get("entered"))
+        blockers = [str(b) for b in (row.get("blockers") or [])]
+        for b in blockers:
+            reasons[b] += 1
+            if _is_reentry_reason(b):
+                reentry_reasons[b] += 1
+            else:
+                entry_reasons[b] += 1
         for ev in row.get("timeline") or []:
             if ev.get("event") == "GATED" and ev.get("reason"):
-                reasons[str(ev["reason"])] += 1
+                reason = str(ev["reason"])
+                reasons[reason] += 1
+                stage = str(ev.get("stage") or "unknown")
+                by_stage[stage] += 1
+                if _is_reentry_reason(reason):
+                    reentry_reasons[reason] += 1
+                else:
+                    entry_reasons[reason] += 1
+        if (
+            not entered
+            and blockers
+            and _quality_moment_radar_row(row)
+        ):
+            entry_only = [b for b in blockers if not _is_reentry_reason(b)]
+            reentry_only = [b for b in blockers if _is_reentry_reason(b)]
+            quality_blocked_entry.append(
+                {
+                    "key": row.get("key"),
+                    "bestTier": row.get("bestTier"),
+                    "blockers": blockers,
+                    "entryBlockers": entry_only,
+                    "reentryBlockers": reentry_only,
+                    "primaryEntryBlock": entry_only[0] if entry_only else None,
+                    "radarOutcome": row.get("radarOutcome"),
+                }
+            )
+
+    quality_blocked_entry.sort(
+        key=lambda r: -float(
+            (r.get("radarOutcome") or {}).get("maxFavorableExcursionPct")
+            or (r.get("radarOutcome") or {}).get("mfePct")
+            or 0
+        )
+    )
+
     return {
         "detected": funnel.get("detected"),
         "blocked": funnel.get("blocked"),
         "entered": funnel.get("entered"),
         "topBlockReasons": reasons.most_common(25),
+        "topEntryBlockReasons": entry_reasons.most_common(20),
+        "topReentryBlockReasons": reentry_reasons.most_common(20),
+        "blocksByStage": by_stage.most_common(12),
+        "qualityBlockedNotEntered": quality_blocked_entry[:15],
+        "qualityBlockedNotEnteredCount": len(quality_blocked_entry),
     }
 
 
@@ -155,6 +271,10 @@ def _classify_aggregate(all_reasons: Counter[str]) -> list[dict[str, Any]]:
                 label = "KEEP_NARROW"
             elif "loss" in reason or "cooldown" in reason or "stop" in reason:
                 label = "KEEP"
+            elif reason.startswith("elite_score_below") or reason.startswith("elite_explosive"):
+                label = "RELAX_QUALITY"
+            elif reason.startswith("elite_timing") or reason.startswith("elite_v_rip"):
+                label = "RELAX_QUALITY"
             elif "rank_floor" in reason or "score_" in reason:
                 label = "KEEP_NARROW"
             else:
@@ -163,11 +283,20 @@ def _classify_aggregate(all_reasons: Counter[str]) -> list[dict[str, Any]]:
     return rows
 
 
-def _write_classification_md(classification: list[dict[str, Any]], rollup: dict[str, Any]) -> None:
+def _write_classification_md(
+    classification: list[dict[str, Any]],
+    rollup: dict[str, Any],
+    *,
+    entry_classification: list[dict[str, Any]] | None = None,
+    reentry_classification: list[dict[str, Any]] | None = None,
+    sample_quality_entry: list[dict[str, Any]] | None = None,
+) -> None:
     lines = [
         "# Blocker classification (batch audit)",
         "",
         f"Run rollup: {json.dumps(rollup, indent=2)}",
+        "",
+        "## All gates (replay + live funnel)",
         "",
         "| Label | Reason | Count |",
         "|-------|--------|-------|",
@@ -176,12 +305,56 @@ def _write_classification_md(classification: list[dict[str, Any]], rollup: dict[
         lines.append(
             f"| {row['label']} | `{row['reason']}` | {row['count']} |"
         )
+    if entry_classification:
+        lines.extend(
+            [
+                "",
+                "## Live funnel — first entry / selector (not re-entry stack)",
+                "",
+                "| Label | Reason | Count |",
+                "|-------|--------|-------|",
+            ]
+        )
+        for row in entry_classification[:35]:
+            lines.append(
+                f"| {row['label']} | `{row['reason']}` | {row['count']} |"
+            )
+    if reentry_classification:
+        lines.extend(
+            [
+                "",
+                "## Live funnel — re-entry stack",
+                "",
+                "| Label | Reason | Count |",
+                "|-------|--------|-------|",
+            ]
+        )
+        for row in reentry_classification[:25]:
+            lines.append(
+                f"| {row['label']} | `{row['reason']}` | {row['count']} |"
+            )
+    if sample_quality_entry:
+        lines.extend(
+            [
+                "",
+                "## Quality radar rows blocked (sample — entry blockers first)",
+                "",
+                "| Key | Tier | Primary entry block | All blockers |",
+                "|-----|------|---------------------|--------------|",
+            ]
+        )
+        for row in sample_quality_entry[:12]:
+            blockers = ", ".join(f"`{b}`" for b in (row.get("blockers") or [])[:4])
+            lines.append(
+                f"| {row.get('key')} | {row.get('bestTier')} | "
+                f"`{row.get('primaryEntryBlock')}` | {blockers} |"
+            )
     lines.extend(
         [
             "",
             "## Recommended actions (from rubric)",
             "",
-            "- **RELAX_QUALITY**: waive when `quality_moment_passport_active` (FTV/V + structure), especially after session **wins**.",
+            "- **RELAX_QUALITY**: waive when `quality_moment_passport_active` (FTV/V + structure) — **entry** (elite score/timing/V-shallow, peak chase) and **re-entry** (ML after wins).",
             "- **KEEP_NARROW**: scope post-win fake-trap to same-strike or passport — not session-wide blind block.",
             "- **KEEP**: loss cooldowns, failed launch, hard FOMO flat-extension, daily loss stop.",
             "",
@@ -236,6 +409,9 @@ def main() -> int:
     from app.engines.eod_local_base_replay import replay_local_base_day
 
     all_reasons: Counter[str] = Counter()
+    funnel_entry: Counter[str] = Counter()
+    funnel_reentry: Counter[str] = Counter()
+    quality_entry_samples: list[dict[str, Any]] = []
     day_rows: list[dict[str, Any]] = []
     download_failed: list[str] = []
 
@@ -256,6 +432,12 @@ def main() -> int:
             row["funnel"] = _summarize_funnel(funnel)
             for r, c in row["funnel"].get("topBlockReasons") or []:
                 all_reasons[r] += int(c)
+            for r, c in row["funnel"].get("topEntryBlockReasons") or []:
+                funnel_entry[r] += int(c)
+            for r, c in row["funnel"].get("topReentryBlockReasons") or []:
+                funnel_reentry[r] += int(c)
+            for sample in row["funnel"].get("qualityBlockedNotEntered") or []:
+                quality_entry_samples.append({"date": date, **sample})
         except Exception as exc:
             row["funnelError"] = str(exc)
 
@@ -326,11 +508,23 @@ def main() -> int:
         day_rows.append(row)
 
     classification = _classify_aggregate(all_reasons)
+    entry_classification = _classify_aggregate(funnel_entry)
+    reentry_classification = _classify_aggregate(funnel_reentry)
+    quality_entry_samples.sort(
+        key=lambda r: -float(
+            (r.get("radarOutcome") or {}).get("maxFavorableExcursionPct")
+            or (r.get("radarOutcome") or {}).get("mfePct")
+            or 0
+        )
+    )
     rollup = {
         "dates": len(day_rows),
         "withTape": sum(1 for d in day_rows if d.get("hasPremiumTape")),
         "liveTradeDays": len(live_by_date),
         "uniqueBlockReasons": len(all_reasons),
+        "funnelEntryBlockReasons": len(funnel_entry),
+        "funnelReentryBlockReasons": len(funnel_reentry),
+        "qualityRadarBlockedNotEntered": len(quality_entry_samples),
     }
     out = {
         "runAt": datetime.now(IST).isoformat(),
@@ -339,10 +533,19 @@ def main() -> int:
         "downloadFailed": download_failed,
         "rollup": rollup,
         "classification": classification,
+        "funnelEntryClassification": entry_classification,
+        "funnelReentryClassification": reentry_classification,
+        "qualityBlockedAtEntry": quality_entry_samples[:40],
         "days": day_rows,
     }
     OUT_JSON.write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
-    _write_classification_md(classification, rollup)
+    _write_classification_md(
+        classification,
+        rollup,
+        entry_classification=entry_classification,
+        reentry_classification=reentry_classification,
+        sample_quality_entry=quality_entry_samples,
+    )
     print(f"\nWrote {OUT_JSON}", flush=True)
     print(f"Wrote {OUT_MD}", flush=True)
     return 0

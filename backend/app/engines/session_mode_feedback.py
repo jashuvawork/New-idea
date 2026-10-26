@@ -1461,6 +1461,22 @@ def session_peak_late_reentry_blocked(
         if waived:
             return False, f"post_win_late_reentry_waive_{waive_mode}"
 
+    if bool(getattr(settings, "quality_moment_passport_waives_entry_peak_chase", True)):
+        from app.engines.best_trade_policy import (
+            quality_moment_passport_active,
+            quality_moment_passport_waives_elite_entry,
+        )
+
+        passport_ok, passport_mode = quality_moment_passport_active(
+            alert_d, settings=settings, snap=snap,
+        )
+        if passport_ok and quality_moment_passport_waives_elite_entry(settings):
+            min_v3_passport = float(
+                getattr(settings, "explosion_late_reentry_min_velocity_3s", 1.2) or 1.2
+            )
+            if v3 + 1e-9 >= min_v3_passport:
+                return False, f"quality_moment_passport_waive_peak_{passport_mode}"
+
     return True, (
         f"late_reentry_near_session_peak_{sess_peak:.1f}"
         f"_pullback_{pullback_pct:.1f}pct_v3_{v3:.1f}"

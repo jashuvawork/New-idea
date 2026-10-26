@@ -394,6 +394,25 @@ def quality_moment_passport_active(
     return False, "not_top_moment"
 
 
+def quality_moment_passport_waives_elite_entry(settings: Any = None) -> bool:
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    return bool(
+        getattr(settings, "quality_moment_passport_enabled", True)
+        and getattr(settings, "quality_moment_passport_waives_elite_entry", True)
+    )
+
+
+def quality_moment_passport_elite_score_floor(settings: Any = None) -> float:
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    return float(
+        getattr(settings, "quality_moment_passport_elite_score_floor", 82.0) or 82.0
+    )
+
+
 def symmetric_chop_ftv_launch_evidence(
     evidence: Mapping[str, Any] | None,
     assessment: Mapping[str, Any] | None = None,

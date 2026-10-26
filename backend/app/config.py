@@ -3533,6 +3533,10 @@ class Settings(BaseSettings):
     quality_moment_passport_enabled: bool = True
     quality_moment_waive_reentry_ml_after_win: bool = True
     quality_moment_waive_reentry_ml_after_loss: bool = False
+    # First-entry (selector / elite engine) — FTV/V + structure, not flat-extension FOMO.
+    quality_moment_passport_waives_elite_entry: bool = True
+    quality_moment_passport_elite_score_floor: float = 82.0
+    quality_moment_passport_waives_entry_peak_chase: bool = True
     # 2) Legacy INR exit caps — disabled (0). Exits use structural/point SL only.
     explosion_per_trade_max_loss_inr: float = 0.0
     explosion_exceptional_per_trade_max_loss_inr: float = 0.0
