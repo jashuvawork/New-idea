@@ -957,27 +957,6 @@ def call_atm_itm_base_capture_eligible(
     return True, meta
 
 
-def _call_atm_itm_evidence_for_candidate(
-    candidate: Any,
-    snap: Any,
-) -> dict[str, Any]:
-    alert = _alert_for_candidate(candidate)
-    pretrade = getattr(candidate, "pretrade_meta", None) or {}
-    ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
-    if not isinstance(ranking, dict):
-        ranking = {}
-    nested = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
-    evidence = {**alert, **nested, **ranking}
-    sym = str(getattr(candidate, "symbol", "") or "").upper()
-    if snap is not None:
-        evidence.setdefault("spot", getattr(snap, "spot", 0))
-        evidence.setdefault("atmStrike", getattr(snap, "atmStrike", 0))
-        evidence.setdefault("symbol", getattr(snap, "symbol", sym) or sym)
-    evidence.setdefault("strike", getattr(candidate, "strike", 0))
-    evidence.setdefault("side", _side_value(getattr(candidate, "side", "")))
-    return evidence
-
-
 def call_atm_itm_base_rank_armed(
     candidate: Any,
     snap: Any,
@@ -985,7 +964,11 @@ def call_atm_itm_base_rank_armed(
     state: Any = None,
     settings: Any = None,
 ) -> tuple[bool, str]:
-    """Single #676 rank arm: full capture eligible or near-base pad (#834/#835)."""
+    """#676 rank arm: +44 / −36 only when the call is fully capture-eligible.
+
+    A near-base pad that fails eligibility does not move the rank. The 23 Oct
+    v-rip already passes eligibility, so it still takes +44.
+    """
     from app.config import get_settings
 
     settings = settings or get_settings()
@@ -994,19 +977,6 @@ def call_atm_itm_base_rank_armed(
     )
     if ok:
         return True, "eligible"
-    if str(getattr(candidate, "mode", "") or "") != "explosion":
-        return False, ""
-    if _side_value(getattr(candidate, "side", "")) != "CALL":
-        return False, ""
-    evidence = _call_atm_itm_evidence_for_candidate(candidate, snap)
-    if call_atm_itm_near_base_pad(
-        evidence,
-        snap,
-        side="CALL",
-        strike=float(getattr(candidate, "strike", 0) or 0),
-        settings=settings,
-    ):
-        return True, "near_base_pad"
     return False, ""
 
 
