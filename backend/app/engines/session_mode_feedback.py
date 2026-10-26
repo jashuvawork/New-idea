@@ -778,17 +778,17 @@ def ce_momentum_new_base_is_fresh_entry(
     premium_momentum_pct: float = 0.0,
     settings: Any = None,
 ) -> bool:
-    """CALL lifting off a newly formed base is a fresh entry, not a reentry.
+    """CALL or PUT lifting off a newly formed base is a fresh entry, not a reentry.
 
     26 Oct NIFTY 22500 CE rebuilt a base after the morning win and the premium
-    was already moving. The reentry ML floor does not apply to that print.
-    A call chase with no new base, and every put reentry, stays a reentry.
+    was already moving. The same print on a put is a new entry too. The reentry
+    ML floor does not apply. A chase with no new base, on either side, stays a reentry.
     """
     settings = settings or get_settings()
     if not bool(getattr(settings, "ce_new_base_fresh_entry_enabled", True)):
         return False
     side_v = side.value if hasattr(side, "value") else str(side or "").upper()
-    if side_v != "CALL":
+    if side_v not in ("CALL", "PUT"):
         return False
     alert_d = alert if isinstance(alert, dict) else {}
     v3, mom = _ce_momentum_reading(
@@ -831,7 +831,7 @@ def reentry_ml_win_prob_blocked(
 
     Aug28: winners ~56% ML, 24050 post-win/post-loss re-entries ~41-43%.
     First entries (no prior closes on symbol+side) are not gated.
-    A call with momentum off a newly formed base is a new entry, not a reentry.
+    A call or put with momentum off a newly formed base is a new entry, not a reentry.
     """
     settings = get_settings()
     meta: dict[str, Any] = {"applied": False}
@@ -855,11 +855,16 @@ def reentry_ml_win_prob_blocked(
         premium_momentum_pct=premium_momentum_pct,
         settings=settings,
     ):
+        side_v = side.value if hasattr(side, "value") else str(side or "").upper()
         meta.update(
             {
                 "applied": False,
                 "freshEntry": True,
-                "reason": "ce_new_base_fresh_entry",
+                "reason": (
+                    "pe_new_base_fresh_entry"
+                    if side_v == "PUT"
+                    else "ce_new_base_fresh_entry"
+                ),
             }
         )
         return False, meta
