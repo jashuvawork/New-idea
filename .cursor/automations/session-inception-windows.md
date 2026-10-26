@@ -2,6 +2,8 @@
 
 **Purpose:** At the **end** of each trading window, run one structured inspection and post an **action list** (ops vs investigate vs one fix hypothesis vs ignore). **No PRs, no gate changes, no orders** from these three automations.
 
+**Cadence:** Do **not** run full inception every second or every minute — use **3× daily** (09:45 / 12:00 / 15:45 IST). For faster polling use `local-base-layer-monitor.md` every **15 min** (light). **Full copy-paste prompts:** `session-inception-FULL-PROMPTS.md`.
+
 Copy each block below into [cursor.com/automations](https://cursor.com/automations) as **three separate** scheduled automations (same repo attached). Timezone: **`Asia/Kolkata`**.
 
 | Automation name | Cron (IST) | Window covered |
