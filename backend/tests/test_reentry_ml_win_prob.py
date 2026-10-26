@@ -322,8 +322,8 @@ def test_ce_chase_without_new_base_stays_a_reentry(mock_settings, mock_ml):
 
 @patch("app.engines.adaptive_exits.predict_entry_ml_win_prob")
 @patch("app.engines.session_mode_feedback.get_settings")
-def test_put_new_base_reentry_still_blocks_low_ml(mock_settings, mock_ml):
-    """Aug28 put reentries stay on the ML floor even with a base and velocity."""
+def test_pe_new_base_with_momentum_is_a_fresh_entry(mock_settings, mock_ml):
+    """A put lifting off a newly formed base matches the call fresh-entry rule."""
     mock_settings.return_value = Settings()
     mock_ml.return_value = 0.411
     state = AutoTraderState()
@@ -339,7 +339,84 @@ def test_put_new_base_reentry_still_blocks_low_ml(mock_settings, mock_ml):
         velocity_3s=2.0,
         premium_momentum_pct=8.0,
     )
+    assert blocked is False
+    assert meta.get("freshEntry") is True
+    assert meta.get("reason") == "pe_new_base_fresh_entry"
+    assert meta.get("applied") is False
+    mock_ml.assert_not_called()
+
+
+@patch("app.engines.adaptive_exits.predict_entry_ml_win_prob")
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_pe_new_base_with_premium_momentum_is_a_fresh_entry(mock_settings, mock_ml):
+    mock_settings.return_value = Settings()
+    mock_ml.return_value = 0.41
+    state = AutoTraderState()
+    state.closedPaperTrades = [_closed(strike=22350.0, pnl_inr=-25811.5)]
+    blocked, meta = reentry_ml_win_prob_blocked(
+        state,
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=22350.0,
+        snap=MagicMock(),
+        alert=_ce_new_base_alert(side="PUT", premiumMomentum5Pct=0.90),
+        velocity_3s=0.0,
+    )
+    assert blocked is False
+    assert meta.get("reason") == "pe_new_base_fresh_entry"
+    mock_ml.assert_not_called()
+
+
+@patch("app.engines.adaptive_exits.predict_entry_ml_win_prob")
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_pe_new_base_without_momentum_stays_a_reentry(mock_settings, mock_ml):
+    mock_settings.return_value = Settings()
+    mock_ml.return_value = 0.411
+    state = AutoTraderState()
+    state.closedPaperTrades = [_closed(strike=24200.0, pnl_inr=2346.0)]
+    blocked, meta = reentry_ml_win_prob_blocked(
+        state,
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24050.0,
+        snap=MagicMock(),
+        confidence=210.84,
+        alert=_ce_new_base_alert(side="PUT"),
+        velocity_3s=0.0,
+    )
     assert blocked is True
     assert meta["reentryKind"] == "session"
     assert meta["mlWinProb"] == 0.411
+    assert meta.get("freshEntry") is not True
+
+
+@patch("app.engines.adaptive_exits.predict_entry_ml_win_prob")
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_pe_chase_without_new_base_stays_a_reentry(mock_settings, mock_ml):
+    """Aug28 put reentries with momentum but no new base stay on the ML floor."""
+    mock_settings.return_value = Settings()
+    mock_ml.return_value = 0.411
+    state = AutoTraderState()
+    state.closedPaperTrades = [_closed(strike=24200.0, pnl_inr=2346.0)]
+    blocked, meta = reentry_ml_win_prob_blocked(
+        state,
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=24050.0,
+        snap=MagicMock(),
+        confidence=210.84,
+        alert={
+            "ictBaseArmed": True,
+            "ictFlatThenVertical": True,
+            "localBaseMovePct": 40.0,
+            "tier": "ELITE",
+            "side": "PUT",
+            "velocity3s": 2.0,
+        },
+        velocity_3s=2.0,
+        premium_momentum_pct=8.0,
+    )
+    assert blocked is True
+    assert meta["reason"] == "reentry_ml_win_prob_low"
+    assert meta["reentryKind"] == "session"
     assert meta.get("freshEntry") is not True
