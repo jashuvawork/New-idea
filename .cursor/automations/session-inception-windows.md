@@ -18,6 +18,43 @@ Shared rules:
 - Compare deployment `commit` to `origin/main` short hash when git is available in the run
 - Tag every action item: **OPS** | **INVESTIGATE** | **FIX_CANDIDATE** | **IGNORE_OK**
 
+### Shared checklist block (include in every run output)
+
+Append this section to **each** automation digest (after Snapshot, before ACTION LIST):
+
+```text
+## Checklists
+
+### 1) Deployment readiness
+GET {BASE}/api/deployment/readiness
+- Report: readyForPaper, readyForLive, executionMode (from status flags if needed)
+- Table: each key in `checks` → PASS/FAIL (upstoxTokenValid, upstoxDataReady, marketLive, tradeStoreWritable, autoTradingEnabled, riskEngineOk, calibrationClear, eventLoopHealthy, upstoxRateLimitClear, websocketHealthy, paperTradingActive, liveTradingFlagSet)
+- If any FAIL: OPS action from `armLiveSteps` or equivalent message in response
+
+### 2) Sep 9–17 live checklist (4 steps)
+From GET {BASE}/api/auto-trader/status → chopGuards.sep917LiveChecklist:
+- Flags: symmetricBestTradeCapture, callRallyUnlockEnabled, putSlideUnlockEnabled, buildingRipHelperEnabled, postWinChopFomo, postWinChopFomoReasons
+- Per symbol (NIFTY/SENSEX): call.indexRallyUnlock, put.indexSlideUnlock, lockedSide, direction
+- topCandidate (building board): symbol, side, strike, lane, ready, source
+- For topCandidate.steps (or evaluate mentally from funnel best row): indexStructure, optionShape, sessionContext, funnelAuthorize — each ok + detail; first failing step = primary INVESTIGATE tag
+- Repeat stepsGuide questions (4 titles) and answer yes/no for topCandidate
+
+Enforcement note: sep917_live_checklist_enforcement is usually HUD-only; still report step failures as capture gaps even when not hard-blocked.
+
+### 3) Base-capture pipeline L0–L7
+Use docs/base-capture-hourly-stuck-guide.md (repo) — classify **one** best ATM/ITM near-base candidate:
+| Step | Name | Your verdict (PASS / STUCK + one line) |
+| L0 Infra | … | |
+| L1 Feed | … | |
+| L2 Radar/ICT | … | |
+| L3 First-lift readiness | … | |
+| L4 #676 eligibility | … | |
+| L5 SELECTOR_POOL | … | |
+| L6 SELECTOR_GATE | … | |
+| L7 Execution | … | |
+First STUCK step = headline for FIX_CANDIDATE or INVESTIGATE.
+```
+
 ---
 
 ## Automation 1 — Open window close (09:45 IST)
@@ -39,6 +76,7 @@ GET {BASE}/api/ai/radar-funnel/{DATE}
 GET {BASE}/api/ai/radar-scorecard/{DATE}
 GET {BASE}/api/auto-trader/history/{DATE}
 GET {BASE}/api/ai/missed-trades
+GET {BASE}/api/deployment/readiness
 
 ## Open-window focus
 1. Infra: health, WS connected/streamStale, Upstox validToday, commit, paperTrading vs liveTradingEnabled
@@ -60,6 +98,9 @@ phase, API, commit, paper/live, WS/auth
 
 ### Misses (max 6 rows)
 key | tier | mfePct | localBaseMovePct | blockers | entered
+
+### Checklists
+Include full **Shared checklist block** (readiness + Sep917 4-step + L0–L7). Open window: emphasize L1 (feed/auth), L3 (first lift), L4 (#676 ATM/ITM near pad).
 
 ### ACTION LIST (numbered, each tagged)
 Examples:
@@ -87,6 +128,7 @@ Read-only. Window: ~09:45–12:00 IST (core base capture, #676-shaped setups).
 All open-window endpoints, plus:
 GET {BASE}/api/auto-trader/daily-report
 GET {BASE}/api/ai/eod-trade-report/{DATE}  (partial day OK)
+GET {BASE}/api/deployment/readiness
 
 ## Morning-window focus
 1. Session PnL so far, wins/losses, open positions
@@ -97,6 +139,9 @@ GET {BASE}/api/ai/eod-trade-report/{DATE}  (partial day OK)
 
 ## Output title
 `Inception MORNING · {DATE} 12:00 IST`
+
+### Checklists
+Include full **Shared checklist block**. Morning: emphasize Sep917 step 3 (sessionContext/post-win FOMO) and L5–L6 (SELECTOR_POOL/GATE, reentry_ml, fake_trap).
 
 ### ACTION LIST rules
 - Max **one** FIX_CANDIDATE for the whole morning (root cause, not symptom list)
@@ -129,6 +174,7 @@ GET {BASE}/api/ai/radar-scorecard/{DATE}
 GET {BASE}/api/ai/missed-trades
 GET {BASE}/api/ai/eod-trade-report/{DATE}
 GET {BASE}/api/ai/eod-local-base-replay/{DATE}  (if available intraday)
+GET {BASE}/api/deployment/readiness
 
 Optional after 16:00 finalize: POST finalize only if user automation explicitly allows EOD — default skip.
 
@@ -140,6 +186,9 @@ Optional after 16:00 finalize: POST finalize only if user automation explicitly 
 
 ## Output title
 `Inception FULL DAY · {DATE} 15:45 IST`
+
+### Checklists
+Include full **Shared checklist block** plus end-of-day rollup: count how many top misses failed Sep917 step 1–4 vs L6 re-entry. Cross-check readiness `checks` that were FAIL at 09:45 vs now.
 
 ### ACTION LIST (prioritized backlog for human)
 Sections:
@@ -173,7 +222,7 @@ Create **three** automations at [cursor.com/automations](https://cursor.com/auto
 ```text
 ## Slack
 - Always post the full digest to the connected Slack channel (thread OK).
-- If ANY action item is tagged FIX_CANDIDATE or INFRA_RED, also send a second message:
+- If ANY action item is tagged FIX_CANDIDATE or INFRA_RED, OR deployment readiness has a FAIL on upstoxTokenValid/eventLoopHealthy/websocketHealthy, OR Sep917 topCandidate.ready=false with a takeable tier (ELITE/EXPLODING) on building board, also send a second message:
   Title: `🚨 NexusQuant inception · {OPEN|MORNING|FULL DAY} · {DATE}`
   Body: 3–6 lines — what failed, top miss key + blocker, single priority action. @channel only for INFRA_RED (API down, WS stale >45s, live armed unexpectedly).
 - If the run is calm (only IGNORE_OK / INVESTIGATE): Slack title without 🚨 — `Inception …` as in Output title.
@@ -186,7 +235,7 @@ Create **three** automations at [cursor.com/automations](https://cursor.com/auto
 | Field | Value |
 |-------|--------|
 | **Name** | `NexusQuant · Inception OPEN 09:45 IST` |
-| **Description** | Read-only open-window close (~09:15–09:45). Funnel + first-lift/#676 misses, infra/auth. Action list only — no PRs. |
+| **Description** | Read-only open close. Funnel + deployment readiness + Sep917 4-step + L0–L7 checklists. Action list only — no PRs. |
 | **Schedule timezone** | `Asia/Kolkata` |
 | **Cron** | `45 9 * * 1-5` |
 | **Repo** | `jashuvawork/New-idea` @ `main` |
@@ -200,7 +249,7 @@ Create **three** automations at [cursor.com/automations](https://cursor.com/auto
 | Field | Value |
 |-------|--------|
 | **Name** | `NexusQuant · Inception MORNING 12:00 IST` |
-| **Description** | Read-only morning close (~09:45–12:00). Base capture, post-win blockers, CE/PE. Max one FIX_CANDIDATE. |
+| **Description** | Read-only morning close. Checklists + base capture, post-win blockers, CE/PE. Max one FIX_CANDIDATE. |
 | **Schedule timezone** | `Asia/Kolkata` |
 | **Cron** | `0 12 * * 1-5` |
 | **Repo** | `jashuvawork/New-idea` @ `main` |
@@ -214,7 +263,7 @@ Create **three** automations at [cursor.com/automations](https://cursor.com/auto
 | Field | Value |
 |-------|--------|
 | **Name** | `NexusQuant · Inception FULL DAY 15:45 IST` |
-| **Description** | Read-only afternoon close + full-day rollup. Re-entry misses, blocker histogram, one PR tomorrow max. |
+| **Description** | Read-only afternoon close. Full checklists + re-entry misses, L0–L7 rollup, one PR tomorrow max. |
 | **Schedule timezone** | `Asia/Kolkata` |
 | **Cron** | `45 15 * * 1-5` |
 | **Repo** | `jashuvawork/New-idea` @ `main` |
