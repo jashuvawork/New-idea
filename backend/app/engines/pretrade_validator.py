@@ -1050,13 +1050,9 @@ def validate_candidate(
             detect_fake_explosion_trap,
             explosion_entry_window_blocked,
             post_peak_chase_blocked,
-            spot_chart_indicators_cold_blocked,
             tier_promotion_pad_chase_blocked,
         )
 
-        cold_blocked, cold_reason = spot_chart_indicators_cold_blocked(snap)
-        if cold_blocked:
-            return False, cold_reason, meta
         from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
         macd_ok, macd_reason = check_explosion_macd_alignment(
