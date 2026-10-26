@@ -588,7 +588,16 @@ async def build_symbol_snapshot(
 
         candles_5m, candles_1m = await fetch_index_chart_candles(client, symbol)
         if not candles_1m:
-            candles_1m = await client.get_candles(symbol)
+            from app.engines.indicator_series import (
+                indicator_seed_lookback_days,
+                mtf_1m_bar_count,
+            )
+
+            candles_1m = await client.get_candles(
+                symbol,
+                count=mtf_1m_bar_count(),
+                lookback_days=indicator_seed_lookback_days(),
+            )
         candles = candles_1m
 
         if not chain:
