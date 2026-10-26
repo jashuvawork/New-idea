@@ -1717,6 +1717,24 @@ async def _open_from_candidate(
         if lots <= 0:
             return False, "same_strike_post_win_lot_cap"
 
+        from app.engines.session_mode_feedback import cap_post_win_continuation_leg_lots
+
+        alert_for_cap = (
+            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
+        )
+        lots, cont_cap_meta = cap_post_win_continuation_leg_lots(
+            lots,
+            state,
+            symbol=symbol,
+            side=candidate.side,
+            strike=float(candidate.strike or 0),
+            premium=float(fill_premium or candidate.premium or 0),
+            velocity_3s=entry_velocity_3s,
+            alert=alert_for_cap,
+        )
+        if cont_cap_meta.get("postWinContinuationLegCapApplied"):
+            post_win_cap_meta["postWinContinuationLeg"] = cont_cap_meta
+
         # Whipsaw flip: after a same-session WIN on the opposite side, don't max-size the
         # counter-flip (Aug6 78800 PE −20k). Runs even for high-conviction/top-explosion.
         from app.engines.session_mode_feedback import cap_opposite_side_flip_after_win

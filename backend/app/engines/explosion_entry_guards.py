@@ -2093,6 +2093,35 @@ def _post_win_extended_chase_blocked(
     if not post_session_win:
         return False, "", meta
 
+    try:
+        from app.engines.session_mode_feedback import post_win_session_late_reentry_waive
+
+        alert_d = getattr(candidate, "alert", None) or {}
+        prem = float(getattr(candidate, "premium", 0) or 0)
+        sym = str(getattr(candidate, "symbol", "") or "")
+        waived, mode, _wmeta = post_win_session_late_reentry_waive(
+            state,
+            symbol=sym,
+            side=getattr(candidate, "side", ""),
+            strike=float(getattr(candidate, "strike", 0) or 0),
+            premium=prem,
+            velocity_3s=v3,
+            alert=alert_d if isinstance(alert_d, dict) else {},
+        )
+        if waived and mode == "new_local_base":
+            return False, "", meta
+        if waived and mode == "continuation_leg":
+            strict_v3 = float(
+                getattr(
+                    settings, "fake_explosion_trap_post_win_extended_min_velocity_3s", 3.0
+                )
+                or 3.0
+            )
+            if v3 + 1e-9 >= strict_v3:
+                return False, "", meta
+    except Exception:
+        pass
+
     pad_floor = float(
         getattr(settings, "tier_promotion_pad_chase_min_base_rel_pct", 8.0) or 8.0
     )
