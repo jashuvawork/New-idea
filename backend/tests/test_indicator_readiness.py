@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from app.engines.advanced_indicators import compute_adx, compute_squeeze
 from app.engines.chart_advanced_analysis import _compute_classic_ichimoku
-from app.engines.explosion_entry_guards import spot_chart_indicators_cold_blocked
 from app.engines.indicator_readiness import MACD_MIN_CLOSES, readiness_from_closes
 from app.engines.spot_direction import build_spot_chart
 from app.models.schemas import MarketProfile, SpotChart, SymbolSnapshot
@@ -95,20 +94,10 @@ def test_chart_analysis_uses_1m_seed_for_ichimoku_when_5m_thin():
 
 
 def test_cold_indicators_do_not_ban_the_entry():
-    """A missing MACD seed stays quiet. It does not drop the explosion."""
-    from types import SimpleNamespace
+    """A missing MACD seed stays quiet — production default does not hard-block entries."""
+    from app.config import get_settings
 
-    snap = SimpleNamespace(
-        spotChart=SpotChart(
-            direction="BEARISH",
-            spot=22400.0,
-            indicatorsWarm=False,
-            indicatorBarCount=25,
-        ),
-    )
-    blocked, reason = spot_chart_indicators_cold_blocked(snap)
-    assert blocked is False
-    assert reason == ""
+    assert get_settings().spot_chart_block_explosion_when_indicators_cold is False
 
 
 def test_short_ichimoku_does_not_hand_the_gate_a_cloud():
@@ -122,6 +111,37 @@ def test_short_ichimoku_does_not_hand_the_gate_a_cloud():
     assert ich.get("smartCloudBias") == "NEUTRAL"
     assert ich.get("smartPriceVsCloud") == "INSIDE"
     assert ich.get("breakConfirmed") is False
+
+
+def test_refresh_spot_chart_keeps_warm_macd_with_short_session_closes():
+    from app.engines.indicator_readiness import MACD_MIN_CLOSES
+    from app.engines.spot_direction import refresh_spot_chart_live
+    from app.models.schemas import ChartAnalysis, SpotChart
+
+    warm = [22400.0 + i * 0.12 for i in range(MACD_MIN_CLOSES + 40)]
+    session = warm[-6:]
+    chart = SpotChart(
+        direction="BULLISH",
+        spot=session[-1],
+        indicatorsWarm=True,
+        macdReady=True,
+        indicatorBarCount=len(warm),
+    )
+    analysis = ChartAnalysis(
+        consensus="BULLISH",
+        recentCloses=[round(c, 2) for c in session],
+        indicatorWarmCloses=[round(c, 2) for c in warm],
+        ichimoku={"cloudBias": "NEUTRAL", "priceVsCloud": "INSIDE", "tkCross": "NEUTRAL"},
+    )
+    out = refresh_spot_chart_live(
+        chart,
+        live_spot=session[-1] + 5.0,
+        profile=MarketProfile(),
+        chart_analysis=analysis,
+    )
+    assert out.macdReady is True
+    assert out.indicatorsWarm is True
+    assert out.indicatorBarCount >= MACD_MIN_CLOSES
 
 
 def test_mtf_prefers_prior_session_seed_over_thin_intraday():

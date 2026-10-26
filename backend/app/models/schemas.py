@@ -156,6 +156,8 @@ class ChartAnalysis(BaseModel):
     smtDivergence: Optional[dict[str, Any]] = None
     keySignals: list[str] = []
     recentCloses: list[float] = []
+    # Extended 5m warmup closes (prior session + today) for tick refresh without cold MACD.
+    indicatorWarmCloses: list[float] = []
     # Advanced indicators (squeeze / ADX / Supertrend / VWAP) — powerful capture + chop context.
     squeeze: dict[str, Any] = {}
     adx: dict[str, Any] = {}
