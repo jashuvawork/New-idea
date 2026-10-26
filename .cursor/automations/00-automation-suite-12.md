@@ -10,6 +10,7 @@ IST = UTC + 5:30. Market window ≈ **03:30–10:00 UTC** (09:00–15:30 IST), M
 | 3 | TAKEABLE_HEAT fast escalation | `*/5 4-9 * * 1-5` + `30-59 3 * * 1-5` | every 5 min | Read |
 | 4 | Open-trade / exit monitor | `*/2 4-9 * * 1-5` + `30-59 3 * * 1-5` | every 2 min | Read |
 | 5 | Session radar digest | `30 3,0,30 4-9,0 10 * * 1-5` | every 30 min | Read |
+| 5b | **Session inception (3 windows)** | `45 9`, `0 12`, `45 15` IST Mon–Fri | 09:45 / 12:00 / 15:45 | **Read + action list** |
 | 6 | Risk & daily gate watchdog | `*/10 4-9 * * 1-5` | every 10 min | Read |
 | 7 | Upstox & infra watchdog | `*/5 3-10 * * 1-5` | every 5 min | Read |
 | 8 | Live miss remediation | `*/15 4-9 * * 1-5` + `30-59 3,0-29 10 * * 1-5` | every 15 min | **Fix PR** |
@@ -19,7 +20,7 @@ IST = UTC + 5:30. Market window ≈ **03:30–10:00 UTC** (09:00–15:30 IST), M
 | 12 | Deploy smoke & regression | `25 3 * * 1-5` | 08:55 | Read + optional PR |
 
 **API base:** `https://api.jashuvatrade.xyz` → fallback `http://65.0.136.146:8000`  
-**Detailed prompts:** `#2` → `local-base-layer-monitor.md` · `#5/#9` → `market-hours-radar-monitor.md` · `#8/#10` → `local-base-miss-remediation.md`
+**Detailed prompts:** `#2` → `local-base-layer-monitor.md` · `#5/#9` → `market-hours-radar-monitor.md` · `#5b` → `session-inception-windows.md` · `#8/#10` → `local-base-miss-remediation.md`
 
 ---
 
