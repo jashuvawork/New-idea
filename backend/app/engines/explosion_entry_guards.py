@@ -9,20 +9,6 @@ from app.engines.moneyness import _depth_steps, atm_strike, classify_moneyness
 from app.models.schemas import Side, SymbolSnapshot
 
 
-def _cfg_float(settings: Any, name: str, default: float) -> float:
-    """Read a float setting. Unset mocks and missing values fall back to ``default``.
-
-    ``float(MagicMock())`` is ``1.0``, which would turn a 45s age into one second.
-    """
-    raw = getattr(settings, name, default)
-    if raw is None or type(raw).__module__ == "unittest.mock":
-        return float(default)
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return float(default)
-
-
 def _side_val(side: Side | str) -> str:
     return side.value if isinstance(side, Side) else str(side).upper()
 
@@ -391,6 +377,7 @@ def tier_promotion_pad_chase_blocked(
     *,
     ict: Any = None,
     alert: Optional[dict[str, Any]] = None,
+    snap: Any = None,
 ) -> tuple[bool, str]:
     """Block ELITE/EXPLODING entries promoted off the pad without a pad stamp.
 
@@ -421,6 +408,24 @@ def tier_promotion_pad_chase_blocked(
     )
     base_rel = effective_local_base_move_pct(explosion_event, ict)
     if base_rel > threshold + 1e-6:
+        from app.engines.oct_open_index_flip_otm import oct_open_index_flip_pad_chase_waived
+
+        if oct_open_index_flip_pad_chase_waived(
+            resolved,
+            explosion_event,
+            ict,
+            snap,
+            base_rel=base_rel,
+            settings=settings,
+        ):
+            return False, ""
+        from app.engines.live_paper_parity import oct_paper_structural_pad_context
+
+        if oct_paper_structural_pad_context(
+            resolved,
+            settings=settings,
+        ):
+            return False, ""
         return True, f"tier_promotion_pad_chase_blocked_{base_rel:.1f}%"
     return False, ""
 
@@ -432,6 +437,8 @@ def explosion_entry_window_blocked(
     top_must_take: bool = False,
     squeeze_early_base: bool = False,
     bullish_local_base: bool = False,
+    alert: Optional[dict[str, Any]] = None,
+    snap: Any = None,
 ) -> tuple[bool, str]:
     """Hard-block EXPLOSIVE entries outside the active early window.
 
@@ -453,6 +460,19 @@ def explosion_entry_window_blocked(
         return False, ""
     if explosion_event is None:
         return False, ""
+    from app.engines.live_paper_parity import (
+        oct_paper_funnel_readiness_waived,
+        oct_paper_replica_active,
+    )
+
+    if oct_paper_replica_active(settings):
+        tier_u = str(getattr(explosion_event, "tier", "") or "").upper()
+        if tier_u in ("ELITE", "EXPLODING", "BUILDING"):
+            return False, ""
+        if isinstance(alert, dict) and oct_paper_funnel_readiness_waived(
+            alert, settings=settings,
+        ):
+            return False, ""
 
     lo, hi = entry_window_bounds(ict, top_must_take=top_must_take)
     # Non-must-take ELITE/EXPLODING: take at local-base pad (default ≤40%).
@@ -529,9 +549,43 @@ def explosion_entry_window_blocked(
     # Primary: local pad / off-low — never day% when a pad exists.
     pad = effective_local_base_move_pct(explosion_event, ict)
     if pad > 0:
-        if pad < lo:
+        effective_lo = lo
+        if alert is not None:
+            from app.engines.live_paper_parity import (
+                oct_paper_first_lift_entry_window_lo_relax,
+            )
+
+            effective_lo = oct_paper_first_lift_entry_window_lo_relax(
+                alert,
+                default_lo=lo,
+                settings=settings,
+            )
+            if snap is not None:
+                from app.engines.oct_open_index_flip_otm import (
+                    oct_open_index_flip_entry_window_lo_relax,
+                )
+
+                effective_lo = oct_open_index_flip_entry_window_lo_relax(
+                    alert,
+                    snap,
+                    explosion_event,
+                    default_lo=effective_lo,
+                    settings=settings,
+                )
+        if pad < effective_lo:
             return True, f"entry_window_local_low_{pad:.0f}%"
-        if pad > hi:
+        effective_hi = hi
+        if alert is not None:
+            from app.engines.live_paper_parity import (
+                oct_paper_first_lift_entry_window_hi_relax,
+            )
+
+            effective_hi = oct_paper_first_lift_entry_window_hi_relax(
+                alert,
+                default_hi=hi,
+                settings=settings,
+            )
+        if pad > effective_hi:
             return True, f"entry_window_local_high_{pad:.0f}%"
         return False, ""
 
@@ -552,27 +606,6 @@ def explosion_entry_window_blocked(
     if session > hi:
         return True, f"entry_window_high_{session:.0f}%"
     return False, ""
-
-
-def spot_chart_indicators_cold_blocked(
-    snap: SymbolSnapshot | Any | None,
-) -> tuple[bool, str]:
-    """Kept for diagnostics. A cold MACD does not ban an explosion entry."""
-    settings = get_settings()
-    if not getattr(settings, "spot_chart_block_explosion_when_indicators_cold", False):
-        return False, ""
-    if snap is None:
-        return False, ""
-    chart = getattr(snap, "spotChart", None)
-    if chart is None:
-        return False, ""
-    if bool(getattr(chart, "indicatorsWarm", False)):
-        return False, ""
-    n = int(getattr(chart, "indicatorBarCount", 0) or 0)
-    # Legacy mocks / snapshots without readiness fields — do not block.
-    if n <= 0:
-        return False, ""
-    return True, f"spot_chart_indicators_cold_{n}bars"
 
 
 def immature_explosion_blocked(
@@ -811,6 +844,17 @@ def live_explosion_confirmation_blocked(
     ):
         return False, ""
 
+    if isinstance(alert, dict):
+        from app.engines.live_paper_parity import (
+            oct_paper_funnel_readiness_waived,
+            oct_paper_replica_active,
+        )
+
+        if oct_paper_replica_active(settings) and oct_paper_funnel_readiness_waived(
+            alert, settings=settings,
+        ):
+            return False, ""
+
     if snap is not None and isinstance(alert, dict):
         from app.engines.index_confirmed_local_base import index_confirmed_local_base
 
@@ -940,7 +984,20 @@ def live_explosion_confirmation_blocked(
         if midday_chop is None:
             midday_chop = _midday_chop_active()
         if midday_chop:
-            return True, "midday_no_ict_structure"
+            if isinstance(alert, dict):
+                from app.engines.live_paper_parity import (
+                    oct_paper_funnel_readiness_waived,
+                    oct_paper_replica_active,
+                )
+
+                if oct_paper_replica_active(settings) and oct_paper_funnel_readiness_waived(
+                    alert, settings=settings,
+                ):
+                    pass
+                else:
+                    return True, "midday_no_ict_structure"
+            else:
+                return True, "midday_no_ict_structure"
         if not (v3 >= hot_v3 and move >= early_min):
             return True, "no_ict_structure_confirmation"
 
@@ -1030,28 +1087,6 @@ def coil_top_entry_blocked(
     position = (current - low) / (high - low)
     if position <= max_pos:
         return False, ""
-    # The sample that prints the range high is the lift. A coil ceiling is a
-    # high that was already traded. The 1.5s local-base bucket stores the base
-    # until the next sample, so the lifted price shows up about a second later
-    # already sitting at position 1.0.
-    min_age = _cfg_float(
-        settings, "explosion_coil_top_min_ceiling_age_seconds", 45.0,
-    )
-    if min_age > 0:
-        try:
-            from app.engines.explosion_detector import prior_range_ceiling_age_seconds
-
-            ceiling_age = prior_range_ceiling_age_seconds(
-                sym,
-                strike,
-                side,
-                lookback_seconds=lookback,
-                ceiling_position_frac=max_pos,
-            )
-        except Exception:
-            ceiling_age = None
-        if ceiling_age is not None and ceiling_age < min_age:
-            return False, ""
     return True, f"coil_top_{policy.day_type.lower()}_position_{position:.0%}_run_{run:.0%}"
 
 
@@ -1088,15 +1123,10 @@ def post_peak_chase_blocked(
     near_top = float(
         getattr(settings, "explosion_post_peak_chase_near_top_frac", 0.12) or 0.12
     )
-    min_peak_age = getattr(
-        settings, "explosion_post_peak_chase_min_peak_age_seconds", 45.0
-    )
-    min_peak_age = 45.0 if min_peak_age is None else float(min_peak_age)
     try:
         from app.engines.explosion_detector import (
             get_session_low_premium,
             get_session_peak_premium,
-            premium_near_high_age_seconds,
             recent_premium_run,
         )
 
@@ -1108,31 +1138,7 @@ def post_peak_chase_blocked(
     run = float(r.get("run") or 0)
     if high <= 0 or current <= 0:
         return False, ""
-
-    def _top_already_traded(level: float) -> bool:
-        """True once price has been near this high long enough to be a finished top."""
-        if level <= 0 or min_peak_age <= 0:
-            return True
-        try:
-            age = premium_near_high_age_seconds(
-                sym,
-                strike,
-                side,
-                level,
-                lookback_seconds=lookback,
-                near_frac=near_top,
-            )
-        except Exception:
-            return False
-        return age >= min_peak_age
-
-    # A brand-new high is the lift. Exhaustion means this price was already
-    # traded, and we are still buying it.
-    if (
-        run >= min_run
-        and current >= high * (1.0 - near_top)
-        and _top_already_traded(high)
-    ):
+    if run >= min_run and current >= high * (1.0 - near_top):
         return True, "explosion_post_peak_chase"
 
     # Session-level post-peak: a SLOW-GRIND rip (e.g. PE 15->100 over hours) shows only a small
@@ -1149,14 +1155,7 @@ def post_peak_chase_blocked(
             sp = sl = 0.0
         if sp > 0 and sl > 0:
             session_run = (sp - sl) / sl
-            near_session_top = current >= sp * (1.0 - near_top)
-            # Day-high seeded above every sampled print is an older top.
-            unseen_completed_top = high > 0 and sp > high * (1.0 + near_top)
-            if (
-                session_run >= min_run
-                and near_session_top
-                and (unseen_completed_top or _top_already_traded(sp))
-            ):
+            if session_run >= min_run and current >= sp * (1.0 - near_top):
                 return True, "explosion_post_peak_chase_session"
     return False, ""
 
@@ -1283,10 +1282,16 @@ def _near_strike_armed_alert_active(
     tier = str(alert.get("tier") or "").upper()
     if tier not in ("ELITE", "EXPLODING"):
         return False
-    steps = float(alert.get("strikeStepsFromAtm") or 0)
-    if steps <= 0 or steps > max_steps + 1e-6:
+    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
+
+    money = str(alert.get("moneyness") or "").upper()
+    excluded = near_strike_waiver_excluded_moneyness()
+    if money == excluded:
         return False
-    if str(alert.get("moneyness") or "").upper() == "ITM":
+    steps = float(alert.get("strikeStepsFromAtm") or 0)
+    if steps > max_steps + 1e-6:
+        return False
+    if steps <= 0 and (excluded == "ITM" or money != "ATM"):
         return False
     return bool(
         alert.get("ictArmedBaseLaunch")
@@ -1308,7 +1313,7 @@ def deep_itm_near_strike_substitute_blocked(
     settings: Any = None,
     candidate_score: float = 0.0,
 ) -> tuple[bool, str]:
-    """Block ITM/ATM fallback when near-strike OTM on the same side is armed at the pad."""
+    """Block deep ITM when near-strike ATM/ITM on the same side is armed at the pad."""
     s = settings or get_settings()
     if not bool(getattr(s, "explosion_deep_itm_substitute_block_enabled", True)):
         return False, ""
@@ -1355,6 +1360,9 @@ def deep_itm_near_strike_substitute_blocked(
     max_otm = int(
         getattr(s, "explosion_deep_itm_substitute_near_strike_max_steps", 2) or 2
     )
+    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
+
+    excluded_alt = near_strike_waiver_excluded_moneyness(s)
     for alt in snap.explosionAlerts or []:
         if str(alt.get("side") or "").upper() != side_v:
             continue
@@ -1362,7 +1370,7 @@ def deep_itm_near_strike_substitute_blocked(
         if alt_strike <= 0:
             continue
         _, alt_money, _ = _strike_depth(side, alt_strike, snap)
-        if alt_money not in ("ATM", "OTM"):
+        if alt_money == excluded_alt or alt_money not in ("ATM", "ITM", "OTM"):
             continue
         alt_depth, _, _ = _strike_depth(side, alt_strike, snap)
         if alt_depth > max_otm:
@@ -1586,35 +1594,6 @@ def check_explosion_macd_alignment(
     return True, "ok"
 
 
-def structured_local_base_in_entry_window(
-    explosion_event: Any,
-    ict: Any,
-    *,
-    settings: Any = None,
-) -> bool:
-    """ICT local pad inside structured entry window — not a session-peak fade chase."""
-    settings = settings or get_settings()
-    if explosion_event is None or ict is None:
-        return False
-    structured = bool(
-        getattr(ict, "flat_then_vertical", False)
-        or getattr(ict, "local_swing_base", False)
-    )
-    if not structured:
-        return False
-    local = float(trustworthy_local_base_move(ict) or 0.0)
-    if local <= 0:
-        return False
-    try:
-        lo, hi = entry_window_bounds(ict)
-        lo, hi = float(lo), float(hi)
-    except (TypeError, ValueError):
-        lo, hi = 28.0, 55.0
-    if hi <= lo:
-        lo, hi = 28.0, 55.0
-    return lo <= local <= hi
-
-
 def detect_faded_vertical_rip(
     explosion_event: Any,
     snap: Optional[SymbolSnapshot] = None,
@@ -1652,16 +1631,6 @@ def detect_faded_vertical_rip(
     )
     if peak_v3 < float(settings.worst_day_breakout_min_velocity_3s):
         return False, meta
-
-    if snap is not None:
-        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
-
-        ict = analyze_explosion_event_ict(explosion_event, snap)
-        if structured_local_base_in_entry_window(
-            explosion_event, ict, settings=settings,
-        ):
-            meta["structuredLocalBaseRetest"] = True
-            return False, meta
 
     meta = {
         "fadedVerticalRip": True,
@@ -2041,7 +2010,7 @@ def post_win_fresh_near_base_blocked(
     state: Any = None,
     alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
-    """After a same-strike win: only re-enter at fresh near-base — else skip."""
+    """After any session win: only re-enter at fresh near-base — else skip."""
     settings = get_settings()
     meta: dict[str, Any] = {}
     if not getattr(
@@ -2049,45 +2018,10 @@ def post_win_fresh_near_base_blocked(
     ):
         return False, "", meta
 
-    prem = float(getattr(candidate, "premium", 0) or 0)
-    sym = str(getattr(candidate, "symbol", "") or "")
-    strike_f = float(getattr(candidate, "strike", 0) or 0)
-    from app.engines.session_mode_feedback import same_strike_post_win_active
-
-    same_strike_win, prior_win = same_strike_post_win_active(
-        state,
-        symbol=sym,
-        side=getattr(candidate, "side", ""),
-        strike=strike_f,
-    )
-    if not same_strike_win:
+    post_session_win, post_meta = _post_session_win(state)
+    meta.update(post_meta)
+    if not post_session_win:
         return False, "", meta
-    if prior_win is not None:
-        meta["priorWinTradeId"] = getattr(prior_win, "id", None)
-        meta["sameStrikePostWin"] = True
-
-    try:
-        from app.engines.session_mode_feedback import post_win_session_late_reentry_waive
-
-        v3 = float(getattr(getattr(candidate, "explosion_event", None), "velocity_3s", 0) or 0)
-        alert_d = alert if isinstance(alert, dict) else {}
-        waived, mode, wmeta = post_win_session_late_reentry_waive(
-            state,
-            symbol=sym,
-            side=getattr(candidate, "side", ""),
-            strike=strike_f,
-            premium=prem,
-            velocity_3s=v3,
-            alert=alert_d,
-        )
-        if waived:
-            meta["postWinLateReentryWaive"] = True
-            meta["postWinLateReentryWaiveMode"] = mode
-            meta.update(wmeta)
-            meta["postWinFreshNearBasePass"] = True
-            return False, "", meta
-    except Exception:
-        pass
 
     fresh, fresh_meta = fresh_near_local_base(
         local_pad=local_pad, ict=ict, alert=alert, settings=settings,
@@ -2123,50 +2057,10 @@ def _post_win_extended_chase_blocked(
     ):
         return False, "", meta
 
-    sym = str(getattr(candidate, "symbol", "") or "")
-    strike_f = float(getattr(candidate, "strike", 0) or 0)
-    from app.engines.session_mode_feedback import same_strike_post_win_active
-
-    same_strike_win, prior_win = same_strike_post_win_active(
-        state,
-        symbol=sym,
-        side=getattr(candidate, "side", ""),
-        strike=strike_f,
-    )
-    if not same_strike_win:
+    post_session_win, post_meta = _post_session_win(state)
+    meta.update(post_meta)
+    if not post_session_win:
         return False, "", meta
-    if prior_win is not None:
-        meta["priorWinTradeId"] = getattr(prior_win, "id", None)
-        meta["sameStrikePostWin"] = True
-
-    try:
-        from app.engines.session_mode_feedback import post_win_session_late_reentry_waive
-
-        alert_d = getattr(candidate, "alert", None) or {}
-        prem = float(getattr(candidate, "premium", 0) or 0)
-        waived, mode, _wmeta = post_win_session_late_reentry_waive(
-            state,
-            symbol=sym,
-            side=getattr(candidate, "side", ""),
-            strike=strike_f,
-            premium=prem,
-            velocity_3s=v3,
-            alert=alert_d if isinstance(alert_d, dict) else {},
-        )
-        if waived:
-            meta["postWinLateReentryWaive"] = True
-            meta["postWinLateReentryWaiveMode"] = mode
-            if mode == "new_local_base":
-                return False, "", meta
-            if mode == "continuation_leg":
-                min_cont = float(
-                    getattr(settings, "post_win_continuation_leg_min_velocity_3s", 2.0)
-                    or 2.0
-                )
-                if v3 + 1e-9 >= min_cont:
-                    return False, "", meta
-    except Exception:
-        pass
 
     pad_floor = float(
         getattr(settings, "tier_promotion_pad_chase_min_base_rel_pct", 8.0) or 8.0
@@ -2283,6 +2177,39 @@ def _armed_base_launch_active(ict: Any, candidate: Any) -> bool:
     return False
 
 
+def _post_win_base_capture_trap_waive(
+    candidate: Any,
+    snap: SymbolSnapshot,
+    *,
+    state: Any,
+    settings: Any,
+) -> tuple[bool, str]:
+    """Skip post-win fake-trap blocks when PR #676 (or PE mirror) base capture is eligible."""
+    if not bool(
+        getattr(
+            settings,
+            "fake_explosion_trap_post_win_waive_on_base_capture_eligible_enabled",
+            True,
+        )
+    ):
+        return False, ""
+    alert = getattr(candidate, "alert", None)
+    if not isinstance(alert, dict):
+        return False, ""
+    from app.engines.best_trade_policy import base_capture_reentry_ml_waive_eligible
+
+    sym = str(getattr(candidate, "symbol", "") or alert.get("symbol") or "").upper()
+    return base_capture_reentry_ml_waive_eligible(
+        symbol=sym,
+        side=getattr(candidate, "side", ""),
+        strike=float(getattr(candidate, "strike", 0) or alert.get("strike") or 0),
+        snap=snap,
+        alert=alert,
+        state=state,
+        settings=settings,
+    )
+
+
 def detect_fake_explosion_trap(
     candidate: Any,
     snap: SymbolSnapshot,
@@ -2388,8 +2315,20 @@ def detect_fake_explosion_trap(
     if post_session_win:
         flags.append("post_session_win")
 
-    if event and getattr(
-        settings, "fake_explosion_trap_post_win_afternoon_block_enabled", True
+    post_win_base_waive = False
+    post_win_base_waive_reason = ""
+    if (post_win or post_session_win) and state is not None:
+        post_win_base_waive, post_win_base_waive_reason = _post_win_base_capture_trap_waive(
+            candidate, snap, state=state, settings=settings,
+        )
+        if post_win_base_waive:
+            meta["postWinBaseCaptureWaived"] = True
+            meta["postWinBaseCaptureWaiveReason"] = post_win_base_waive_reason
+
+    if (
+        not post_win_base_waive
+        and event
+        and getattr(settings, "fake_explosion_trap_post_win_afternoon_block_enabled", True)
     ):
         from app.engines.expiry_day_guards import expiry_post_win_afternoon_fomo_risk
         from app.engines.morning_premium_capture import is_afternoon_capture_event
@@ -2425,7 +2364,7 @@ def detect_fake_explosion_trap(
                 getattr(
                     settings,
                     "fake_explosion_trap_chop_post_win_afternoon_enabled",
-                    False,
+                    True,
                 )
             )
         ):
@@ -2474,8 +2413,10 @@ def detect_fake_explosion_trap(
                 })
                 return True, "fake_explosion_trap_post_win_afternoon", meta
 
-    if post_win and getattr(
-        settings, "fake_explosion_trap_post_win_velocity_block_enabled", True
+    if (
+        not post_win_base_waive
+        and post_win
+        and getattr(settings, "fake_explosion_trap_post_win_velocity_block_enabled", True)
     ):
         alert = getattr(candidate, "alert", None)
         from app.engines.early_radar_pad_capture import ict_base_armed_prelaunch_pad_lane
@@ -2515,7 +2456,11 @@ def detect_fake_explosion_trap(
             })
             return True, "fake_explosion_trap_post_win_cold_velocity", meta
 
-    if post_win and not _post_win_top_confidence_allows(candidate, v3=v3, snap=snap):
+    if (
+        not post_win_base_waive
+        and post_win
+        and not _post_win_top_confidence_allows(candidate, v3=v3, snap=snap)
+    ):
         meta.update({
             "fakeExplosionTrap": True,
             "action": "block",
@@ -2525,35 +2470,36 @@ def detect_fake_explosion_trap(
         })
         return True, "fake_explosion_trap_post_win_not_top_confidence", meta
 
-    fresh_block, fresh_reason, fresh_meta = post_win_fresh_near_base_blocked(
-        candidate,
-        local_pad=local_pad,
-        ict=ict,
-        state=state,
-        alert=getattr(candidate, "alert", None)
-        if isinstance(getattr(candidate, "alert", None), dict)
-        else None,
-    )
-    if fresh_meta:
-        meta.update(fresh_meta)
-    if fresh_block:
-        meta.setdefault("conflictFlags", flags + ["post_session_win"])
-        meta["conflictCount"] = len(meta["conflictFlags"])
-        return True, fresh_reason, meta
+    if not post_win_base_waive:
+        fresh_block, fresh_reason, fresh_meta = post_win_fresh_near_base_blocked(
+            candidate,
+            local_pad=local_pad,
+            ict=ict,
+            state=state,
+            alert=getattr(candidate, "alert", None)
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None,
+        )
+        if fresh_meta:
+            meta.update(fresh_meta)
+        if fresh_block:
+            meta.setdefault("conflictFlags", flags + ["post_session_win"])
+            meta["conflictCount"] = len(meta["conflictFlags"])
+            return True, fresh_reason, meta
 
-    ext_block, ext_reason, ext_meta = _post_win_extended_chase_blocked(
-        candidate,
-        local_pad=local_pad,
-        session_move=move,
-        v3=v3,
-        state=state,
-    )
-    if ext_meta:
-        meta.update(ext_meta)
-    if ext_block:
-        meta.setdefault("conflictFlags", flags + ["post_session_win"])
-        meta["conflictCount"] = len(meta["conflictFlags"])
-        return True, ext_reason, meta
+        ext_block, ext_reason, ext_meta = _post_win_extended_chase_blocked(
+            candidate,
+            local_pad=local_pad,
+            session_move=move,
+            v3=v3,
+            state=state,
+        )
+        if ext_meta:
+            meta.update(ext_meta)
+        if ext_block:
+            meta.setdefault("conflictFlags", flags + ["post_session_win"])
+            meta["conflictCount"] = len(meta["conflictFlags"])
+            return True, ext_reason, meta
 
     meta.update({
         "fakeExplosionTrap": False,
@@ -2590,7 +2536,7 @@ def detect_fake_explosion_trap(
     # Hard block: classic fake rip — extension already printed, premium cooled,
     # or OTM inside OR on chop with elite narrative.
     hard_block = False
-    if getattr(settings, "fake_explosion_trap_block_on_conflict", True):
+    if getattr(settings, "fake_explosion_trap_block_on_conflict", True) and not post_win_base_waive:
         if premium_flat and session_extended and (chopish or elite_hot):
             hard_block = True
             reason = "fake_explosion_trap_premium_flat_extension"
@@ -2655,7 +2601,7 @@ def detect_fake_explosion_trap(
 
     # Midday/chop + elite narrative without ICT / local-base structure → hard block.
     # Soft lot-cap alone still let Jul23 displacement spikes through.
-    structure_ok = _ict_structure_confirmed(ict)
+    structure_ok = post_win_base_waive or _ict_structure_confirmed(ict)
     if not structure_ok:
         from app.engines.local_base_chart_bypass import local_base_structure_active
 
@@ -2677,7 +2623,8 @@ def detect_fake_explosion_trap(
                 structure_ok = True
                 meta["indexConfirmedStructure"] = True
     if (
-        getattr(settings, "fake_explosion_trap_midday_require_structure", True)
+        not post_win_base_waive
+        and getattr(settings, "fake_explosion_trap_midday_require_structure", True)
         and chopish
         and elite_hot
         and not structure_ok
@@ -2694,7 +2641,8 @@ def detect_fake_explosion_trap(
     # soft cut to 6 lots still opens a full thesis that never greens on chop days.
     armed_launch = _armed_base_launch_active(ict, candidate)
     if (
-        getattr(settings, "fake_explosion_trap_block_chop_elite_armed_base", True)
+        not post_win_base_waive
+        and getattr(settings, "fake_explosion_trap_block_chop_elite_armed_base", True)
         and chopish
         and elite_hot
         and armed_launch
@@ -2725,11 +2673,18 @@ def detect_fake_explosion_trap(
     ) and not session_extended and not otm_inside_or
     if skip_soft:
         meta["baseWindowFullLots"] = True
+    if post_win_base_waive and money in ("ATM", "ITM"):
+        skip_soft = True
+        meta["postWinBaseCapture676FullLots"] = True
 
     cut = False
     if chopish and elite_hot and not skip_soft:
         # Sep08: armed-base shallow launches must hard-block above — never soft-cut to 6 lots.
-        if armed_launch and timing_move < min_move:
+        if (
+            not post_win_base_waive
+            and armed_launch
+            and timing_move < min_move
+        ):
             meta.update({
                 "fakeExplosionTrap": True,
                 "action": "block",
@@ -2745,7 +2700,7 @@ def detect_fake_explosion_trap(
             getattr(settings, "fake_explosion_trap_chop_elite_lot_cap", 6) or 6
         ))
         psych = "OVERCONFIDENCE"
-    if post_win and not skip_soft:
+    if post_win and not skip_soft and not post_win_base_waive:
         cut = True
         action = "cut_size"
         reason = reason or "fake_explosion_trap_post_win_size"
