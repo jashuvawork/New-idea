@@ -1586,6 +1586,35 @@ def check_explosion_macd_alignment(
     return True, "ok"
 
 
+def structured_local_base_in_entry_window(
+    explosion_event: Any,
+    ict: Any,
+    *,
+    settings: Any = None,
+) -> bool:
+    """ICT local pad inside structured entry window — not a session-peak fade chase."""
+    settings = settings or get_settings()
+    if explosion_event is None or ict is None:
+        return False
+    structured = bool(
+        getattr(ict, "flat_then_vertical", False)
+        or getattr(ict, "local_swing_base", False)
+    )
+    if not structured:
+        return False
+    local = float(trustworthy_local_base_move(ict) or 0.0)
+    if local <= 0:
+        return False
+    try:
+        lo, hi = entry_window_bounds(ict)
+        lo, hi = float(lo), float(hi)
+    except (TypeError, ValueError):
+        lo, hi = 28.0, 55.0
+    if hi <= lo:
+        lo, hi = 28.0, 55.0
+    return lo <= local <= hi
+
+
 def detect_faded_vertical_rip(
     explosion_event: Any,
     snap: Optional[SymbolSnapshot] = None,
@@ -1623,6 +1652,16 @@ def detect_faded_vertical_rip(
     )
     if peak_v3 < float(settings.worst_day_breakout_min_velocity_3s):
         return False, meta
+
+    if snap is not None:
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+        ict = analyze_explosion_event_ict(explosion_event, snap)
+        if structured_local_base_in_entry_window(
+            explosion_event, ict, settings=settings,
+        ):
+            meta["structuredLocalBaseRetest"] = True
+            return False, meta
 
     meta = {
         "fadedVerticalRip": True,

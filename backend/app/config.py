@@ -84,6 +84,8 @@ class Settings(BaseSettings):
     chop_live_guards_enabled: bool = True
     chop_live_block_immature_local_base: bool = True
     chop_live_block_premium_5m_fade: bool = True
+    # #676 / pad-lane: shallow 5m premium dip at armed base is not a chop fade block.
+    chop_live_near_base_fade_waive_enabled: bool = True
     chop_live_premium_5m_fade_min_mom_pct: float = -0.12
     chop_live_second_leg_block_enabled: bool = True
     chop_live_second_leg_cooldown_seconds: int = 900
