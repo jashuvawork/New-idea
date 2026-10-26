@@ -54,6 +54,86 @@ def _evidence_local_move_pct(evidence: Mapping[str, Any]) -> float:
     )
 
 
+def _call_base_pad_pct(evidence: Mapping[str, Any]) -> float:
+    """Distance off the option low. A morning high does not make the afternoon base a chase."""
+    return max(
+        _number(evidence.get("localBaseMovePct")),
+        _number(evidence.get("ictBaseRelativeMovePct")),
+        _number(evidence.get("offLowMovePct")),
+    )
+
+
+def _atm_itm_base_moment(evidence: Mapping[str, Any]) -> bool:
+    moment = str(evidence.get("momentType") or evidence.get("reason") or "").lower()
+    if any(token in moment for token in ("v_rip", "armed_base", "elite_base", "ict_base_armed", "first_lift")):
+        return True
+    return bool(
+        evidence.get("ictBaseArmed")
+        or evidence.get("armedBaseLaunch")
+        or evidence.get("ictArmedBaseLaunch")
+        or evidence.get("eliteBaseReady")
+        or evidence.get("ictEliteBaseReady")
+        or evidence.get("vRipReady")
+        or evidence.get("ictVRipReady")
+        or evidence.get("firstLift")
+        or evidence.get("ictFirstLift")
+    )
+
+
+def call_atm_itm_near_base_pad(
+    evidence: Mapping[str, Any] | None,
+    snap: Any = None,
+    *,
+    side: str = "",
+    strike: float = 0.0,
+    settings: Any = None,
+) -> bool:
+    """#676 shape: ELITE/EXPLODING CALL, ATM or ITM, still inside the near-base pad.
+
+    The 23 Oct 13:34 NIFTY book was this shape. Premium had not left the low.
+    A cold 3-second print and a trade-quality reading under 50 are the base.
+    """
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "call_atm_itm_base_capture_enabled", True)):
+        return False
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    side_u = _side_value(side or evidence.get("side"))
+    if side_u != "CALL":
+        return False
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    if not _atm_itm_base_moment(evidence):
+        return False
+    pad = _call_base_pad_pct(evidence)
+    if pad > effective_near_base_max_local_pct(settings) + 1e-6:
+        return False
+
+    money = str(evidence.get("moneyness") or "").upper()
+    if money in ("ATM", "ITM"):
+        return True
+    stk = float(strike or _number(evidence.get("strike")))
+    spot = float(_number(evidence.get("spot")) or _number(getattr(snap, "spot", 0)))
+    if stk <= 0 or spot <= 0:
+        return False
+    from app.engines.moneyness import classify_moneyness
+    from app.models.schemas import Side
+
+    atm = float(
+        _number(evidence.get("atmStrike")) or _number(getattr(snap, "atmStrike", 0))
+    )
+    sym = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "")
+    return classify_moneyness(
+        Side.CALL,
+        stk,
+        spot,
+        symbol=sym,
+        atm=atm or None,
+    ) in ("ATM", "ITM")
+
+
 def _moment_text_blob(
     evidence: Mapping[str, Any],
     alert: Mapping[str, Any] | None = None,
@@ -716,6 +796,16 @@ def _call_atm_itm_launch_ok(
         )
     ):
         return True
+    # Armed base / v-rip while the pad is still the low is the launch. The
+    # first-lift pair can be missing because velocity and trade quality are cold.
+    tier = str(evidence.get("tier") or "").upper()
+    if (
+        tier in ("ELITE", "EXPLODING")
+        and _atm_itm_base_moment(evidence)
+        and _call_base_pad_pct(evidence)
+        <= effective_near_base_max_local_pct(settings) + 1e-6
+    ):
+        return True
     from app.engines.pe_win_ce_mirror import _building_rip_launch_ok
 
     return _building_rip_launch_ok(
@@ -761,8 +851,24 @@ def call_atm_itm_base_capture_eligible(
         ranking = {}
     nested = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
     evidence = {**alert, **nested, **ranking}
+    if snap is not None:
+        evidence.setdefault("spot", getattr(snap, "spot", 0))
+        evidence.setdefault("atmStrike", getattr(snap, "atmStrike", 0))
+        evidence.setdefault("symbol", getattr(snap, "symbol", ""))
+    evidence.setdefault("strike", getattr(candidate, "strike", 0))
+    evidence.setdefault("side", _side_value(getattr(candidate, "side", "")))
 
-    if not symmetric_structural_base_evidence(evidence, settings=settings):
+    structural = symmetric_structural_base_evidence(evidence, settings=settings)
+    pad = _call_base_pad_pct(evidence)
+    max_local = effective_near_base_max_local_pct(settings)
+    if (
+        not structural
+        and _atm_itm_base_moment(evidence)
+        and pad <= max_local + 1e-6
+    ):
+        structural = True
+        meta["nearBasePad"] = True
+    if not structural:
         return False, meta
 
     tier = str(evidence.get("tier") or "").upper()

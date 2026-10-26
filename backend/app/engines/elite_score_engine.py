@@ -1146,6 +1146,13 @@ def elite_v_rip_shallow_lift_blocked(
     settings = settings or get_settings()
     if not bool(getattr(settings, "elite_v_rip_shallow_require_first_lift_enabled", True)):
         return False, ""
+    from app.engines.best_trade_policy import call_atm_itm_near_base_pad
+
+    pad_evidence = dict(evidence)
+    if not pad_evidence.get("localBaseMovePct"):
+        pad_evidence["localBaseMovePct"] = assessment.get("localBasePct")
+    if call_atm_itm_near_base_pad(pad_evidence, settings=settings):
+        return False, ""
     if str(assessment.get("setup") or "") != "V":
         return False, ""
     if bool(evidence.get("armedBaseLaunch")):
