@@ -56,18 +56,11 @@ def _indicator_closes(candles_5m: list, candles_1m: list | None) -> list[float]:
     required 35 resampled-5m bars before using them, which kept the "5m" chart on 1m data
     until ~12:10 IST every day — diverging from the true 5m read all morning.
     """
-    settings = get_settings()
-    native_5m = _candle_rows(candles_5m)[3]
-    ext_5m: list[float] = []
-    if candles_1m:
-        from app.engines.mtf_chart_analysis import resample_candles
-
-        ext_5m = _candle_rows(
-            resample_candles(candles_1m, settings.spot_chart_timeframe_minutes)
-        )[3]
     from app.engines.indicator_readiness import MACD_MIN_CLOSES, RSI_MIN_CLOSES
+    from app.engines.indicator_series import extended_5m_candles
 
-    best_5m = ext_5m if len(ext_5m) >= len(native_5m) else native_5m
+    best_5m = _candle_rows(extended_5m_candles(candles_1m, candles_5m))[3]
+    settings = get_settings()
     min_panel = int(getattr(settings, "spot_chart_min_5m_indicator_bars", 20) or 20)
     if len(best_5m) >= min_panel:
         return best_5m

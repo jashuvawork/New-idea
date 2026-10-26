@@ -112,16 +112,20 @@ def analyze_timeframe(candles: list, price: float, label: str) -> TimeframeChart
     elif red >= green + 1:
         bearish += 1
 
+    from app.engines.indicator_readiness import readiness_from_closes
+
+    readiness = readiness_from_closes(closes)
     rsi_read = compute_rsi(closes)
     macd_read = compute_macd(closes)
     if rsi_read.bias == "OVERSOLD":
         bullish += 1
     elif rsi_read.bias == "OVERBOUGHT":
         bearish += 1
-    if macd_read.bias == "BULLISH":
-        bullish += 1
-    elif macd_read.bias == "BEARISH":
-        bearish += 1
+    if readiness.macd_ready:
+        if macd_read.bias == "BULLISH":
+            bullish += 1
+        elif macd_read.bias == "BEARISH":
+            bearish += 1
 
     if bullish >= bearish + 2:
         direction = "BULLISH"
@@ -140,6 +144,8 @@ def analyze_timeframe(candles: list, price: float, label: str) -> TimeframeChart
         + abs(rsi_read.value - 50) * 0.2,
     )
 
+    macd_out = macd_read if readiness.macd_ready else type(macd_read)()
+
     return TimeframeChartRead(
         label=label,
         direction=direction,
@@ -151,10 +157,10 @@ def analyze_timeframe(candles: list, price: float, label: str) -> TimeframeChart
         barCount=len(closes),
         rsi=rsi_read.value,
         rsiBias=rsi_read.bias,
-        macd=macd_read.line,
-        macdSignal=macd_read.signal,
-        macdHistogram=macd_read.histogram,
-        macdBias=macd_read.bias,
+        macd=macd_out.line,
+        macdSignal=macd_out.signal,
+        macdHistogram=macd_out.histogram,
+        macdBias=macd_out.bias,
     )
 
 
@@ -218,10 +224,12 @@ async def fetch_mtf_charts(
 ) -> dict[str, TimeframeChartRead]:
     """Fetch and analyze all scalp timeframes for index or option leg."""
     settings = get_settings()
+    from app.engines.indicator_series import mtf_1m_bar_count
+
     candles_1m = await client.get_historical_candles(
         instrument_key,
         interval="1minute",
-        count=settings.execution_mtf_1m_bars,
+        count=mtf_1m_bar_count(settings),
         force_refresh=force_refresh,
     )
 

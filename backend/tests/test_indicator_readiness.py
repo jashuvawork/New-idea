@@ -80,6 +80,20 @@ def test_squeeze_not_ready_on_thin_series():
     assert sq.ready is False
 
 
+def test_chart_analysis_uses_1m_seed_for_ichimoku_when_5m_thin():
+    from app.engines.chart_advanced_analysis import build_chart_analysis
+
+    candles_1m = _synthetic_1m_closes(400, step=0.12)
+    candles_5m = _synthetic_1m_closes(5)  # native intraday only
+    spot = float(candles_1m[-1][4])
+    analysis = build_chart_analysis(
+        candles_1m, candles_5m, spot, MarketProfile(), symbol="NIFTY",
+    )
+    assert analysis.ichimoku.get("ichimokuReady") is True
+    assert analysis.adx.get("ready") is True
+    assert analysis.squeeze.get("ready") is True
+
+
 def test_spot_chart_cold_blocks_explosion():
     from types import SimpleNamespace
 

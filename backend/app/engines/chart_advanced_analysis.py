@@ -540,8 +540,18 @@ def build_chart_analysis(
     mtf_reads = build_mtf_reads(candles_1m, spot, candles_5m=candles_5m)
     consensus = _consensus(mtf_reads)
 
-    primary_candles = candles_5m or candles_1m
+    from app.engines.indicator_series import (
+        extended_5m_candles,
+        session_5m_candles,
+        session_ohlc,
+        warmup_ohlc,
+    )
+
+    primary_candles = session_5m_candles(candles_1m, candles_5m) or candles_1m or []
     opens, highs, lows, closes = _candle_rows(primary_candles)
+    if not closes and candles_1m:
+        primary_candles = extended_5m_candles(candles_1m, candles_5m)
+        opens, highs, lows, closes = _candle_rows(primary_candles)
     if not closes:
         return ChartAnalysis(consensus=consensus, timeframes={k: v.model_dump() for k, v in mtf_reads.items()})
 
@@ -555,6 +565,9 @@ def build_chart_analysis(
         lows = list(lows)
         lows[-1] = min(lows[-1], spot)
 
+    w_opens, w_highs, w_lows, w_closes = warmup_ohlc(candles_1m, candles_5m, spot)
+    s_opens, s_highs, s_lows, s_closes = session_ohlc(candles_1m, candles_5m, spot)
+
     swing_highs, swing_lows = _find_swings(highs, lows)
     sh = swing_highs[-1][1] if swing_highs else max(highs)
     sl = swing_lows[-1][1] if swing_lows else min(lows)
@@ -565,7 +578,7 @@ def build_chart_analysis(
         prior_close_before_cash_session,
     )
 
-    session_rows = cash_session_candles(primary_candles)
+    session_rows = cash_session_candles(candles_1m if candles_1m else primary_candles)
     _session_opens, session_highs, session_lows, session_closes = _candle_rows(session_rows)
     if session_highs and spot > 0:
         session_highs = list(session_highs)
@@ -577,7 +590,8 @@ def build_chart_analysis(
 
     from app.services.upstox import _candle_ts
 
-    stamped = any(_candle_ts(row) is not None for row in primary_candles)
+    stamp_source = candles_1m if candles_1m else primary_candles
+    stamped = any(_candle_ts(row) is not None for row in stamp_source)
     # A timestamped chart is a live Upstox series. Today's high is the cash
     # session or the quote. The multi-day window, and the live spot, are not
     # a substitute. An untimestamped series is a self-contained replay.
@@ -595,7 +609,8 @@ def build_chart_analysis(
             dl = min(lows)
     pc = float(prev_close or 0)
     if pc <= 0:
-        pc = prior_close_before_cash_session(primary_candles)
+        pc_source = candles_1m if candles_1m else primary_candles
+        pc = prior_close_before_cash_session(pc_source)
     if pc <= 0 and not stamped and closes:
         pc = closes[0]
 
@@ -603,7 +618,9 @@ def build_chart_analysis(
     pivots = compute_pivot_points(dh, dl, pc)
     gann = compute_gann_levels(dl, dh)
     pitchfork = compute_andrews_pitchfork(swing_lows, swing_highs, spot)
-    ichimoku = compute_ichimoku(highs, lows, closes, spot)
+    ichimoku = compute_ichimoku(
+        w_highs or highs, w_lows or lows, w_closes or closes, spot,
+    )
     if session_highs and session_lows:
         # Structure, premium/discount, and session high from today's cash bars.
         # The 300-bar window still feeds Ichimoku and RSI, which need warmup.
@@ -680,14 +697,19 @@ def build_chart_analysis(
         vwap_bars = primary_candles
         vwap_highs, vwap_lows, vwap_closes = highs, lows, closes
     volumes = [_bar_volume(row) for row in vwap_bars]
-    squeeze = asdict(compute_squeeze(highs, lows, closes))
-    adx = asdict(compute_adx(highs, lows, closes))
-    supertrend = asdict(compute_supertrend(highs, lows, closes))
+    wh, wl, wc = w_highs or highs, w_lows or lows, w_closes or closes
+    squeeze = asdict(compute_squeeze(wh, wl, wc))
+    adx = asdict(compute_adx(wh, wl, wc))
+    supertrend = asdict(compute_supertrend(wh, wl, wc))
     from app.config import get_settings as _gs
 
     _s = _gs()
+    dc_o = s_opens or opens
+    dc_h = s_highs or highs
+    dc_l = s_lows or lows
+    dc_c = s_closes or closes
     decisive_candle = asdict(compute_decisive_candle(
-        opens, highs, lows, closes,
+        dc_o, dc_h, dc_l, dc_c,
         body_ratio_min=float(getattr(_s, "decisive_candle_body_ratio_min", 0.6) or 0.6),
         rsi_ceiling=float(getattr(_s, "decisive_candle_rsi_ceiling", 80.0) or 80.0),
         pullback_lookback=int(getattr(_s, "decisive_candle_pullback_lookback", 5) or 5),
