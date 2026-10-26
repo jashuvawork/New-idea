@@ -1007,10 +1007,30 @@ def trading_rules_match_paper(settings: Any | None = None) -> bool:
 
     s = settings or get_settings()
     if not _strict_bool(getattr(s, "enable_live_trading", False)):
-        return live_paper_parity_active(s) or _strict_bool(
-            getattr(s, "october_frozen_profile_enabled", False)
+        return (
+            live_paper_parity_active(s)
+            or _strict_bool(getattr(s, "october_frozen_profile_enabled", False))
+            or paper_676_entry_choke_active(s)
         )
     return entry_gates_match_paper(s)
+
+
+def paper_676_entry_choke_active(settings: Any | None = None) -> bool:
+    """
+    Paper book uses the #676-era entry stack (Oct 1/5 replica + base-capture rank arm).
+
+    True on disarmed paper when ``paper_676_entry_choke_enabled`` or ``oct_paper_replica_enabled``.
+    """
+    from app.config import get_settings
+
+    s = settings or get_settings()
+    if _strict_bool(getattr(s, "enable_live_trading", False)):
+        return False
+    if not _strict_bool(getattr(s, "paper_trading", True)):
+        return False
+    return _strict_bool(getattr(s, "paper_676_entry_choke_enabled", False)) or _strict_bool(
+        getattr(s, "oct_paper_replica_enabled", False)
+    )
 
 
 def oct_paper_replica_active(settings: Any | None = None) -> bool:
@@ -1025,7 +1045,9 @@ def oct_paper_replica_active(settings: Any | None = None) -> bool:
     from app.config import get_settings
 
     s = settings or get_settings()
-    return _strict_bool(getattr(s, "oct_paper_replica_enabled", False))
+    if _strict_bool(getattr(s, "oct_paper_replica_enabled", False)):
+        return True
+    return paper_676_entry_choke_active(s)
 
 
 def oct_paper_entry_loosening_active(settings: Any | None = None) -> bool:
@@ -1129,6 +1151,7 @@ def live_paper_profile_summary(settings: Any | None = None) -> dict[str, Any]:
         "active": parity,
         "entryGatesMatchPaper": gates,
         "tradingRulesMatchPaper": rules,
+        "paper676EntryChoke": paper_676_entry_choke_active(s),
         "octPaperReplica": {
             "enabled": oct_paper_replica_active(s),
             "postOct5EntryLooseningActive": loosening,

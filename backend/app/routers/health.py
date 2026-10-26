@@ -46,6 +46,7 @@ async def loop_stalls(limit: int = 10):
 
 @router.get("/api/deployment/status")
 async def deployment_status():
+    from app.engines.live_paper_parity import paper_676_entry_choke_active
     from app.loop_watchdog import watchdog_status
     from app.services.radar_health import health_status
 
@@ -143,6 +144,7 @@ async def deployment_status():
             "composerApiConfigured": bool(settings.cursor_api_key),
             "paperSlippageEnabled": settings.paper_slippage_enabled,
             "paperLiveParityEnabled": settings.paper_live_parity_enabled,
+            "paper676EntryChoke": paper_676_entry_choke_active(settings),
             "sep917LegacyProfile": _sep917_legacy_profile_summary(settings),
         },
         "paperSlippage": slippage_config_summary(),

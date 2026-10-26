@@ -154,6 +154,20 @@ else
   _set_env_key PAPER_SLIPPAGE_ENABLED true
   _set_env_key PAPER_SIMULATE_BROKER_ORDERS true
   _set_env_key SHADOW_TRADE_ALL_SIGNALS true
+  echo "Paper #676 entry choke (Oct 1/5 replica + base-capture stack)..."
+  PAPER_676_KEYS=(
+    PAPER_676_ENTRY_CHOKE_ENABLED
+    OCT_PAPER_REPLICA_ENABLED
+    LIVE_BEST_TRADES_ONLY_ENABLED
+    LEGACY_LIVE_NARROW_STACK_ENABLED
+    CALL_ATM_ITM_BASE_CAPTURE_ENABLED
+  )
+  for key in "${PAPER_676_KEYS[@]}"; do
+    val="$(_template_value "$key" || true)"
+    if [ -n "$val" ]; then
+      _set_env_key "$key" "$val"
+    fi
+  done
 fi
 
 if [ "$NO_LOSS_STOPS" -eq 1 ]; then

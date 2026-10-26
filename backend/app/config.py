@@ -3355,6 +3355,10 @@ class Settings(BaseSettings):
     max_option_premium_inr: float = 350.0
     explosion_max_premium_inr: float = 350.0
     explosion_ict_max_premium_inr: float = 350.0
+    # Oct 1 / Oct 5 paper replica entry stack (see live_paper_parity.oct_paper_replica_active).
+    oct_paper_replica_enabled: bool = False
+    # Paper deploy (#676 era): Oct 1/5 entry choke — base-capture rank arm; no live_best_trades wire.
+    paper_676_entry_choke_enabled: bool = False
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0
