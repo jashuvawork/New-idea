@@ -67,6 +67,20 @@ def strict_atm_itm_scan(settings: Any = None) -> bool:
     return True
 
 
+def _oct_paper_replica(settings: Any) -> bool:
+    from app.engines.live_paper_parity import oct_paper_replica_active
+
+    return oct_paper_replica_active(settings)
+
+
+def near_strike_waiver_excluded_moneyness(settings: Any = None) -> str:
+    """Near-strike armed/v-rip waivers skip this moneyness: OTM (ATM/ITM book) or ITM (Oct paper)."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    return "ITM" if _oct_paper_replica(settings) else "OTM"
+
+
 def sep917_legacy_profile_summary(settings: Any = None) -> dict[str, Any]:
     from app.config import get_settings
 

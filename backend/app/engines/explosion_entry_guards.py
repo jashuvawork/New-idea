@@ -9,6 +9,17 @@ from app.engines.moneyness import _depth_steps, atm_strike, classify_moneyness
 from app.models.schemas import Side, SymbolSnapshot
 
 
+def _cfg_float(settings: Any, name: str, default: float) -> float:
+    """Read a float setting. Unset mocks fall back to ``default`` (float(MagicMock()) is 1.0)."""
+    raw = getattr(settings, name, default)
+    if raw is None or type(raw).__module__ == "unittest.mock":
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _side_val(side: Side | str) -> str:
     return side.value if isinstance(side, Side) else str(side).upper()
 
@@ -1087,6 +1098,22 @@ def coil_top_entry_blocked(
     position = (current - low) / (high - low)
     if position <= max_pos:
         return False, ""
+    min_age = _cfg_float(settings, "explosion_coil_top_min_ceiling_age_seconds", 45.0)
+    if min_age > 0:
+        try:
+            from app.engines.explosion_detector import prior_range_ceiling_age_seconds
+
+            ceiling_age = prior_range_ceiling_age_seconds(
+                sym,
+                strike,
+                side,
+                lookback_seconds=lookback,
+                ceiling_position_frac=max_pos,
+            )
+        except Exception:
+            ceiling_age = None
+        if ceiling_age is not None and ceiling_age < min_age:
+            return False, ""
     return True, f"coil_top_{policy.day_type.lower()}_position_{position:.0%}_run_{run:.0%}"
 
 
@@ -1123,10 +1150,14 @@ def post_peak_chase_blocked(
     near_top = float(
         getattr(settings, "explosion_post_peak_chase_near_top_frac", 0.12) or 0.12
     )
+    min_peak_age = _cfg_float(
+        settings, "explosion_post_peak_chase_min_peak_age_seconds", 45.0,
+    )
     try:
         from app.engines.explosion_detector import (
             get_session_low_premium,
             get_session_peak_premium,
+            premium_near_high_age_seconds,
             recent_premium_run,
         )
 
@@ -1138,7 +1169,28 @@ def post_peak_chase_blocked(
     run = float(r.get("run") or 0)
     if high <= 0 or current <= 0:
         return False, ""
-    if run >= min_run and current >= high * (1.0 - near_top):
+
+    def _top_already_traded(level: float) -> bool:
+        if level <= 0 or min_peak_age <= 0:
+            return True
+        try:
+            age = premium_near_high_age_seconds(
+                sym,
+                strike,
+                side,
+                level,
+                lookback_seconds=lookback,
+                near_frac=near_top,
+            )
+        except Exception:
+            return False
+        return age >= min_peak_age
+
+    if (
+        run >= min_run
+        and current >= high * (1.0 - near_top)
+        and _top_already_traded(high)
+    ):
         return True, "explosion_post_peak_chase"
 
     # Session-level post-peak: a SLOW-GRIND rip (e.g. PE 15->100 over hours) shows only a small
@@ -1155,7 +1207,13 @@ def post_peak_chase_blocked(
             sp = sl = 0.0
         if sp > 0 and sl > 0:
             session_run = (sp - sl) / sl
-            if session_run >= min_run and current >= sp * (1.0 - near_top):
+            near_session_top = current >= sp * (1.0 - near_top)
+            unseen_completed_top = high > 0 and sp > high * (1.0 + near_top)
+            if (
+                session_run >= min_run
+                and near_session_top
+                and (unseen_completed_top or _top_already_traded(sp))
+            ):
                 return True, "explosion_post_peak_chase_session"
     return False, ""
 
@@ -1278,20 +1336,28 @@ def _near_strike_armed_alert_active(
     alert: Mapping[str, Any],
     *,
     max_steps: int,
+    settings: Any = None,
+    for_substitute: bool = False,
 ) -> bool:
     tier = str(alert.get("tier") or "").upper()
     if tier not in ("ELITE", "EXPLODING"):
         return False
-    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
-
     money = str(alert.get("moneyness") or "").upper()
-    excluded = near_strike_waiver_excluded_moneyness()
-    if money == excluded:
-        return False
+    excluded = ""
+    if not for_substitute:
+        from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
+
+        excluded = near_strike_waiver_excluded_moneyness(settings)
+        if money == excluded:
+            return False
     steps = float(alert.get("strikeStepsFromAtm") or 0)
     if steps > max_steps + 1e-6:
         return False
-    if steps <= 0 and (excluded == "ITM" or money != "ATM"):
+    if (
+        not for_substitute
+        and steps <= 0
+        and (excluded == "ITM" or money != "ATM")
+    ):
         return False
     return bool(
         alert.get("ictArmedBaseLaunch")
@@ -1360,22 +1426,20 @@ def deep_itm_near_strike_substitute_blocked(
     max_otm = int(
         getattr(s, "explosion_deep_itm_substitute_near_strike_max_steps", 2) or 2
     )
-    from app.engines.sep917_legacy_profile import near_strike_waiver_excluded_moneyness
-
-    excluded_alt = near_strike_waiver_excluded_moneyness(s)
     for alt in snap.explosionAlerts or []:
         if str(alt.get("side") or "").upper() != side_v:
             continue
         alt_strike = float(alt.get("strike") or 0)
         if alt_strike <= 0:
             continue
-        _, alt_money, _ = _strike_depth(side, alt_strike, snap)
-        if alt_money == excluded_alt or alt_money not in ("ATM", "ITM", "OTM"):
+        alt_depth, alt_money, _ = _strike_depth(side, alt_strike, snap)
+        if alt_money not in ("ATM", "ITM", "OTM"):
             continue
-        alt_depth, _, _ = _strike_depth(side, alt_strike, snap)
         if alt_depth > max_otm:
             continue
-        if _near_strike_armed_alert_active(alt, max_steps=max_otm):
+        if _near_strike_armed_alert_active(
+            alt, max_steps=max_otm, settings=s, for_substitute=True,
+        ):
             return True, "explosion_deep_itm_near_strike_substitute"
     return False, ""
 
@@ -1594,6 +1658,35 @@ def check_explosion_macd_alignment(
     return True, "ok"
 
 
+def structured_local_base_in_entry_window(
+    explosion_event: Any,
+    ict: Any,
+    *,
+    settings: Any = None,
+) -> bool:
+    """ICT local pad inside structured entry window — not a session-peak fade chase."""
+    settings = settings or get_settings()
+    if explosion_event is None or ict is None:
+        return False
+    structured = bool(
+        getattr(ict, "flat_then_vertical", False)
+        or getattr(ict, "local_swing_base", False)
+    )
+    if not structured:
+        return False
+    local = float(trustworthy_local_base_move(ict) or 0.0)
+    if local <= 0:
+        return False
+    try:
+        lo, hi = entry_window_bounds(ict)
+        lo, hi = float(lo), float(hi)
+    except (TypeError, ValueError):
+        lo, hi = 28.0, 55.0
+    if hi <= lo:
+        lo, hi = 28.0, 55.0
+    return lo <= local <= hi
+
+
 def detect_faded_vertical_rip(
     explosion_event: Any,
     snap: Optional[SymbolSnapshot] = None,
@@ -1631,6 +1724,16 @@ def detect_faded_vertical_rip(
     )
     if peak_v3 < float(settings.worst_day_breakout_min_velocity_3s):
         return False, meta
+
+    if snap is not None:
+        from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+        ict = analyze_explosion_event_ict(explosion_event, snap)
+        if structured_local_base_in_entry_window(
+            explosion_event, ict, settings=settings,
+        ):
+            meta["structuredLocalBaseRetest"] = True
+            return False, meta
 
     meta = {
         "fadedVerticalRip": True,
@@ -2010,7 +2113,7 @@ def post_win_fresh_near_base_blocked(
     state: Any = None,
     alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
-    """After any session win: only re-enter at fresh near-base — else skip."""
+    """After a same-strike win: only re-enter at fresh near-base — else skip."""
     settings = get_settings()
     meta: dict[str, Any] = {}
     if not getattr(
@@ -2018,10 +2121,45 @@ def post_win_fresh_near_base_blocked(
     ):
         return False, "", meta
 
-    post_session_win, post_meta = _post_session_win(state)
-    meta.update(post_meta)
-    if not post_session_win:
+    prem = float(getattr(candidate, "premium", 0) or 0)
+    sym = str(getattr(candidate, "symbol", "") or "")
+    strike_f = float(getattr(candidate, "strike", 0) or 0)
+    from app.engines.session_mode_feedback import same_strike_post_win_active
+
+    same_strike_win, prior_win = same_strike_post_win_active(
+        state,
+        symbol=sym,
+        side=getattr(candidate, "side", ""),
+        strike=strike_f,
+    )
+    if not same_strike_win:
         return False, "", meta
+    if prior_win is not None:
+        meta["priorWinTradeId"] = getattr(prior_win, "id", None)
+        meta["sameStrikePostWin"] = True
+
+    try:
+        from app.engines.session_mode_feedback import post_win_session_late_reentry_waive
+
+        v3 = float(getattr(getattr(candidate, "explosion_event", None), "velocity_3s", 0) or 0)
+        alert_d = alert if isinstance(alert, dict) else {}
+        waived, mode, wmeta = post_win_session_late_reentry_waive(
+            state,
+            symbol=sym,
+            side=getattr(candidate, "side", ""),
+            strike=strike_f,
+            premium=prem,
+            velocity_3s=v3,
+            alert=alert_d,
+        )
+        if waived:
+            meta["postWinLateReentryWaive"] = True
+            meta["postWinLateReentryWaiveMode"] = mode
+            meta.update(wmeta)
+            meta["postWinFreshNearBasePass"] = True
+            return False, "", meta
+    except Exception:
+        pass
 
     fresh, fresh_meta = fresh_near_local_base(
         local_pad=local_pad, ict=ict, alert=alert, settings=settings,
@@ -2057,10 +2195,50 @@ def _post_win_extended_chase_blocked(
     ):
         return False, "", meta
 
-    post_session_win, post_meta = _post_session_win(state)
-    meta.update(post_meta)
-    if not post_session_win:
+    sym = str(getattr(candidate, "symbol", "") or "")
+    strike_f = float(getattr(candidate, "strike", 0) or 0)
+    from app.engines.session_mode_feedback import same_strike_post_win_active
+
+    same_strike_win, prior_win = same_strike_post_win_active(
+        state,
+        symbol=sym,
+        side=getattr(candidate, "side", ""),
+        strike=strike_f,
+    )
+    if not same_strike_win:
         return False, "", meta
+    if prior_win is not None:
+        meta["priorWinTradeId"] = getattr(prior_win, "id", None)
+        meta["sameStrikePostWin"] = True
+
+    try:
+        from app.engines.session_mode_feedback import post_win_session_late_reentry_waive
+
+        alert_d = getattr(candidate, "alert", None) or {}
+        prem = float(getattr(candidate, "premium", 0) or 0)
+        waived, mode, _wmeta = post_win_session_late_reentry_waive(
+            state,
+            symbol=sym,
+            side=getattr(candidate, "side", ""),
+            strike=strike_f,
+            premium=prem,
+            velocity_3s=v3,
+            alert=alert_d if isinstance(alert_d, dict) else {},
+        )
+        if waived:
+            meta["postWinLateReentryWaive"] = True
+            meta["postWinLateReentryWaiveMode"] = mode
+            if mode == "new_local_base":
+                return False, "", meta
+            if mode == "continuation_leg":
+                min_cont = float(
+                    getattr(settings, "post_win_continuation_leg_min_velocity_3s", 2.0)
+                    or 2.0
+                )
+                if v3 + 1e-9 >= min_cont:
+                    return False, "", meta
+    except Exception:
+        pass
 
     pad_floor = float(
         getattr(settings, "tier_promotion_pad_chase_min_base_rel_pct", 8.0) or 8.0
