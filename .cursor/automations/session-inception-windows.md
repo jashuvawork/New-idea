@@ -8,9 +8,11 @@ Copy each block below into [cursor.com/automations](https://cursor.com/automatio
 
 | Automation name | Cron (IST) | Window covered |
 |-----------------|------------|----------------|
-| Inception · open close | `45 9 * * 1-5` | ~09:15–09:45 (open / first lifts) |
-| Inception · morning close | `0 12 * * 1-5` | ~09:45–12:00 (base capture core) |
-| Inception · afternoon close | `45 15 * * 1-5` | ~12:01–15:45 (re-entry + power hour) |
+| Inception · open close | `45 9 * * 1-5` | ~09:15–09:45 IST · digest **05:15 CET** |
+| Inception · morning close | `0 12 * * 1-5` | ~09:45–12:00 IST · digest **07:30 CET** |
+| Inception · afternoon close | `45 15 * * 1-5` | ~12:01–15:45 IST · digest **11:15 CET** |
+
+Schedule timezone in Cursor: **`Asia/Kolkata`** (not CET). CET = IST − 4h30m (winter); CEST = IST − 3h30m (summer).
 
 API base: `https://api.jashuvatrade.xyz` → fallback `http://65.0.136.146:8000`
 

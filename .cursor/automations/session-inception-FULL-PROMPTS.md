@@ -9,7 +9,17 @@
 | **Every 15 min — light monitor** | **Optional.** Use `.cursor/automations/local-base-layer-monitor.md` (L0–L5 layers, Slack on TAKEABLE_HEAT only). |
 | **3× per day — FULL inception** | **Yes.** **09:45**, **12:00**, **15:45 IST** — end of open / morning / afternoon windows. |
 
-Each prompt below is **self-contained** (checklists + Slack inlined). Paste **one block** per Cursor Automation.
+**Your clock (CET / Europe–Madrid):** crons stay **Asia/Kolkata** (market time). You receive digests at:
+
+| Run (IST) | **CET (UTC+1, winter)** | **CEST (UTC+2, summer)** |
+|-----------|-------------------------|---------------------------|
+| 09:45 | **05:15** | **04:15** |
+| 12:00 | **07:30** | **06:30** |
+| 15:45 | **11:15** | **10:15** |
+
+Enable automations before **05:10 CET** / **04:10 CEST** (~09:40 IST).
+
+Each prompt below is **self-contained** (checklists + Slack inlined). Paste **one block** per Cursor Automation. **Do not** move cron to CET — NSE windows are IST-defined.
 
 ---
 
@@ -212,18 +222,30 @@ PnL, trades, top 10 blockReason counts
 ### Misses (≤10 rows)
 
 ### Checklists
-(Full readiness + Sep917 + L0–L7; rollup: how many top misses failed each Sep917 step vs stuck at L6)
+
+#### 1) Deployment readiness
+Full PASS/FAIL table; note any check that was FAIL at open vs now.
+
+#### 2) Sep 9–17 live checklist
+Full topCandidate 4-step; rollup count: misses failing step 1 vs 2 vs 3 vs 4.
+
+#### 3) L0–L7 full session
+For top 3 near-base misses: first STUCK step each; session-wide most common STUCK step.
 
 ### ACTION LIST
-1. Do tonight (ops)
-2. One PR tomorrow max (hypothesis + CE/PE) or "none — analysis only"
-3. EOD replay URLs/commands for DATE
-4. Defer (intentional blocks)
+1. **Do tonight (ops)** — auth, deploy, infra
+2. **One PR tomorrow (max)** — single hypothesis, CE/PE, tests — or "none; analysis only"
+3. **EOD replay** — list curl paths for DATE (eod-trade-report, eod-local-base-replay, funnel)
+4. **Defer** — intentional blocks to keep
 
 Session grade: CAPTURED | MIXED | MISSED_DAY + one sentence.
 
 ## Slack
-(same rules; use FULL DAY in 🚨 title)
+- Post full digest to Slack.
+- 🚨 if FIX_CANDIDATE, INFRA_RED, readiness critical FAIL, or ELITE/EXPLODING blocked with Sep917 ready=false.
+  Title: 🚨 NexusQuant inception · FULL DAY · {DATE}
+  @channel only for INFRA_RED.
+- Else Output title without 🚨.
 ```
 
 ---
