@@ -2909,7 +2909,9 @@ class Settings(BaseSettings):
     spot_chart_1m_bars: int = 300  # 1m history for 5m resample + RSI/MACD warmup
     # Prior-session seed target (~78×5m Ichimoku cloud + MACD 35 on 1m resample).
     spot_chart_indicator_warmup_1m_bars: int = 400
-    spot_chart_block_explosion_when_indicators_cold: bool = True
+    # Off. A missing MACD seed must not ban the entry. Unready MACD, EMA, and
+    # Ichimoku stay quiet; they do not vote and they do not block.
+    spot_chart_block_explosion_when_indicators_cold: bool = False
     # Historical time-to-FTV advisory. V3 index candles train a time-of-day
     # breakout prior; live premium/orderflow must still confirm every entry.
     ftv_probability_enabled: bool = True

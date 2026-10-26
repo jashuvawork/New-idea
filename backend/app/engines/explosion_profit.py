@@ -735,12 +735,6 @@ def check_explosion_entry(
         if not is_afternoon_capture_event(event, chart=chart) and open_move < open_min:
             return False, "velocity_too_low"
 
-    from app.engines.explosion_entry_guards import spot_chart_indicators_cold_blocked
-
-    cold_blocked, cold_reason = spot_chart_indicators_cold_blocked(snap)
-    if cold_blocked:
-        return False, cold_reason
-
     from app.engines.rally_capture import (
         breadth_blocks_explosion_side,
         chart_blocks_explosion_side,

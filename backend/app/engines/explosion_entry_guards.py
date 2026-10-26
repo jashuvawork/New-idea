@@ -557,9 +557,9 @@ def explosion_entry_window_blocked(
 def spot_chart_indicators_cold_blocked(
     snap: SymbolSnapshot | Any | None,
 ) -> tuple[bool, str]:
-    """Block explosion entries when RSI/MACD/EMA21 lack prior-session seed bars."""
+    """Kept for diagnostics. A cold MACD does not ban an explosion entry."""
     settings = get_settings()
-    if not getattr(settings, "spot_chart_block_explosion_when_indicators_cold", True):
+    if not getattr(settings, "spot_chart_block_explosion_when_indicators_cold", False):
         return False, ""
     if snap is None:
         return False, ""

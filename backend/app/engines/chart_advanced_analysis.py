@@ -240,9 +240,6 @@ def compute_ichimoku(
     classic = _compute_classic_ichimoku(highs, lows, closes, spot)
     smart = compute_smart_ichimoku(highs, lows, closes, spot)
     out = dict(classic)
-    if not classic.get("ichimokuReady"):
-        out["smartCloudBias"] = "NEUTRAL"
-        out["smartPriceVsCloud"] = "INSIDE"
     for key in _SMART_ICHIMOKU_META_KEYS:
         if key in smart:
             out[key] = smart[key]
@@ -250,6 +247,15 @@ def compute_ichimoku(
     out["smartPriceVsCloud"] = smart.get("priceVsCloud") or classic.get("priceVsCloud")
     out["smartCloudBias"] = smart.get("cloudBias") or classic.get("cloudBias")
     out["smartTkCross"] = smart.get("tkCross") or classic.get("tkCross")
+    # A short series is not a cloud. The lines above would otherwise copy the
+    # clipped HMA read back onto the gate fields.
+    if not classic.get("ichimokuReady"):
+        out["smartPriceVsCloud"] = "INSIDE"
+        out["smartCloudBias"] = "NEUTRAL"
+        out["smartTkCross"] = "NEUTRAL"
+        out["smartBias"] = "NEUTRAL"
+        out["breakConfirmed"] = False
+        out["breakSide"] = "NONE"
     return out
 
 

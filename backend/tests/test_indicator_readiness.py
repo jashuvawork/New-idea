@@ -94,7 +94,8 @@ def test_chart_analysis_uses_1m_seed_for_ichimoku_when_5m_thin():
     assert analysis.squeeze.get("ready") is True
 
 
-def test_spot_chart_cold_blocks_explosion():
+def test_cold_indicators_do_not_ban_the_entry():
+    """A missing MACD seed stays quiet. It does not drop the explosion."""
     from types import SimpleNamespace
 
     snap = SimpleNamespace(
@@ -106,9 +107,31 @@ def test_spot_chart_cold_blocks_explosion():
         ),
     )
     blocked, reason = spot_chart_indicators_cold_blocked(snap)
-    assert blocked is True
-    assert "cold" in reason
-
-    snap.spotChart = SpotChart(direction="BEARISH", spot=22400.0, indicatorsWarm=True)
-    blocked, _ = spot_chart_indicators_cold_blocked(snap)
     assert blocked is False
+    assert reason == ""
+
+
+def test_short_ichimoku_does_not_hand_the_gate_a_cloud():
+    from app.engines.chart_advanced_analysis import compute_ichimoku
+
+    highs = [22450.0 - i * 2 for i in range(12)]
+    lows = [22420.0 - i * 2 for i in range(12)]
+    closes = [22440.0 - i * 2 for i in range(12)]
+    ich = compute_ichimoku(highs, lows, closes, closes[-1])
+    assert ich.get("ichimokuReady") is False
+    assert ich.get("smartCloudBias") == "NEUTRAL"
+    assert ich.get("smartPriceVsCloud") == "INSIDE"
+    assert ich.get("breakConfirmed") is False
+
+
+def test_mtf_prefers_prior_session_seed_over_thin_intraday():
+    from app.engines.mtf_chart_analysis import prefer_warmup_series
+
+    thin = _synthetic_1m_closes(5)
+    seeded = _synthetic_1m_closes(80)
+    chosen = prefer_warmup_series(thin, seeded)
+    assert len(chosen) == 80
+
+    native_ready = _synthetic_1m_closes(40)
+    shorter_seed = _synthetic_1m_closes(35)
+    assert len(prefer_warmup_series(native_ready, shorter_seed)) == 40

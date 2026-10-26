@@ -24,6 +24,21 @@ SCALP_TIMEFRAMES: list[dict[str, Any]] = [
 ]
 
 
+def prefer_warmup_series(native: list | None, resampled: list | None) -> list:
+    """Keep today's native frame once it can carry MACD. Otherwise use the longer 1m seed."""
+    from app.engines.indicator_readiness import MACD_MIN_CLOSES
+
+    native_rows = list(native or [])
+    resampled_rows = list(resampled or [])
+    if len(resampled_rows) >= MACD_MIN_CLOSES and len(resampled_rows) >= len(native_rows):
+        return resampled_rows
+    if len(native_rows) >= MACD_MIN_CLOSES:
+        return native_rows
+    if len(resampled_rows) > len(native_rows):
+        return resampled_rows
+    return native_rows
+
+
 def resample_ohlc_bars(candles: list, bars_per_bucket: int) -> list[list[float]]:
     """Aggregate OHLCV every N bars (works for 1m→5m or 5m→15m grouping)."""
     if bars_per_bucket <= 1 or not candles:
@@ -238,19 +253,19 @@ async def fetch_mtf_charts(
 
     async def _native_or_resample(frame: dict[str, Any]) -> tuple[str, list]:
         label = frame["label"]
+        resampled = resample_candles(candles_1m, frame["resample"])
+        native: list = []
         if settings.execution_mtf_use_v3_native:
             try:
-                candles = await client.get_intraday_candles_v3(
+                native = await client.get_intraday_candles_v3(
                     instrument_key,
                     unit=frame["unit"],
                     interval=frame["interval"],
                     force_refresh=force_refresh,
                 )
-                if candles:
-                    return label, candles
             except Exception as exc:
                 logger.debug("V3 %s failed, resampling 1m: %s", label, exc)
-        return label, resample_candles(candles_1m, frame["resample"])
+        return label, prefer_warmup_series(native, resampled)
 
     other_frames = [f for f in SCALP_TIMEFRAMES if f["label"] != "1m"]
     results = await asyncio.gather(*[_native_or_resample(f) for f in other_frames])
