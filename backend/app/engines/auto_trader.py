@@ -1717,24 +1717,6 @@ async def _open_from_candidate(
         if lots <= 0:
             return False, "same_strike_post_win_lot_cap"
 
-        from app.engines.session_mode_feedback import cap_post_win_continuation_leg_lots
-
-        alert_for_cap = (
-            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
-        )
-        lots, cont_cap_meta = cap_post_win_continuation_leg_lots(
-            lots,
-            state,
-            symbol=symbol,
-            side=candidate.side,
-            strike=float(candidate.strike or 0),
-            premium=float(fill_premium or candidate.premium or 0),
-            velocity_3s=entry_velocity_3s,
-            alert=alert_for_cap,
-        )
-        if cont_cap_meta.get("postWinContinuationLegCapApplied"):
-            post_win_cap_meta["postWinContinuationLeg"] = cont_cap_meta
-
         # Whipsaw flip: after a same-session WIN on the opposite side, don't max-size the
         # counter-flip (Aug6 78800 PE −20k). Runs even for high-conviction/top-explosion.
         from app.engines.session_mode_feedback import cap_opposite_side_flip_after_win
@@ -2211,6 +2193,32 @@ async def _open_from_candidate(
         top_explosion_max = True
         elite_full_lot = True
         top_rank_full_budget_lots = True
+    if candidate.mode == "explosion":
+        from app.engines.session_mode_feedback import cap_post_win_continuation_leg_lots
+
+        alert_for_cap = (
+            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
+        )
+        prev_lots = lots
+        lots, cont_cap_meta = cap_post_win_continuation_leg_lots(
+            lots,
+            state,
+            symbol=symbol,
+            side=candidate.side,
+            strike=float(candidate.strike or 0),
+            premium=float(fill_premium or candidate.premium or 0),
+            velocity_3s=entry_velocity_3s,
+            alert=alert_for_cap,
+        )
+        if cont_cap_meta.get("postWinContinuationLegCapApplied"):
+            post_win_cap_meta = {**post_win_cap_meta, **cont_cap_meta}
+            post_win_cap_meta["applied"] = True
+            top_explosion_max = False
+            elite_full_lot = False
+            if exit_plan is not None and lots != prev_lots:
+                exit_plan["lots"] = lots
+        if lots <= 0:
+            return False, "post_win_continuation_leg_lot_cap"
     if exit_plan and settings.edge_engine_enabled:
         plan_obj = AdaptiveExitPlan.from_dict(exit_plan)
         # Jul30: edge_tighten crushed calculated ~20pt SL to 7.99 on max-lot ELITE.
