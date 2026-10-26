@@ -664,6 +664,11 @@ def validate_candidate(
 
         exhausted = False
         if str(getattr(candidate, "mode", "") or "").lower() == "explosion":
+            alert_d = (
+                candidate.alert
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else {}
+            )
             exhausted, _ = exhausted_ftv_reentry_blocked(
                 state,
                 symbol=str(getattr(candidate, "symbol", "") or ""),
@@ -678,13 +683,9 @@ def validate_candidate(
                     )
                     or 0
                 ),
+                alert=alert_d,
             )
             if not exhausted:
-                alert_d = (
-                    candidate.alert
-                    if isinstance(getattr(candidate, "alert", None), dict)
-                    else {}
-                )
                 late_peak, late_reason = session_peak_late_reentry_blocked(
                     symbol=str(getattr(candidate, "symbol", "") or ""),
                     side=getattr(candidate, "side", ""),

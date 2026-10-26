@@ -2041,7 +2041,7 @@ def post_win_fresh_near_base_blocked(
     state: Any = None,
     alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
-    """After any session win: only re-enter at fresh near-base — else skip."""
+    """After a same-strike win: only re-enter at fresh near-base — else skip."""
     settings = get_settings()
     meta: dict[str, Any] = {}
     if not getattr(
@@ -2049,10 +2049,45 @@ def post_win_fresh_near_base_blocked(
     ):
         return False, "", meta
 
-    post_session_win, post_meta = _post_session_win(state)
-    meta.update(post_meta)
-    if not post_session_win:
+    prem = float(getattr(candidate, "premium", 0) or 0)
+    sym = str(getattr(candidate, "symbol", "") or "")
+    strike_f = float(getattr(candidate, "strike", 0) or 0)
+    from app.engines.session_mode_feedback import same_strike_post_win_active
+
+    same_strike_win, prior_win = same_strike_post_win_active(
+        state,
+        symbol=sym,
+        side=getattr(candidate, "side", ""),
+        strike=strike_f,
+    )
+    if not same_strike_win:
         return False, "", meta
+    if prior_win is not None:
+        meta["priorWinTradeId"] = getattr(prior_win, "id", None)
+        meta["sameStrikePostWin"] = True
+
+    try:
+        from app.engines.session_mode_feedback import post_win_session_late_reentry_waive
+
+        v3 = float(getattr(getattr(candidate, "explosion_event", None), "velocity_3s", 0) or 0)
+        alert_d = alert if isinstance(alert, dict) else {}
+        waived, mode, wmeta = post_win_session_late_reentry_waive(
+            state,
+            symbol=sym,
+            side=getattr(candidate, "side", ""),
+            strike=strike_f,
+            premium=prem,
+            velocity_3s=v3,
+            alert=alert_d,
+        )
+        if waived:
+            meta["postWinLateReentryWaive"] = True
+            meta["postWinLateReentryWaiveMode"] = mode
+            meta.update(wmeta)
+            meta["postWinFreshNearBasePass"] = True
+            return False, "", meta
+    except Exception:
+        pass
 
     fresh, fresh_meta = fresh_near_local_base(
         local_pad=local_pad, ict=ict, alert=alert, settings=settings,
@@ -2088,37 +2123,48 @@ def _post_win_extended_chase_blocked(
     ):
         return False, "", meta
 
-    post_session_win, post_meta = _post_session_win(state)
-    meta.update(post_meta)
-    if not post_session_win:
+    sym = str(getattr(candidate, "symbol", "") or "")
+    strike_f = float(getattr(candidate, "strike", 0) or 0)
+    from app.engines.session_mode_feedback import same_strike_post_win_active
+
+    same_strike_win, prior_win = same_strike_post_win_active(
+        state,
+        symbol=sym,
+        side=getattr(candidate, "side", ""),
+        strike=strike_f,
+    )
+    if not same_strike_win:
         return False, "", meta
+    if prior_win is not None:
+        meta["priorWinTradeId"] = getattr(prior_win, "id", None)
+        meta["sameStrikePostWin"] = True
 
     try:
         from app.engines.session_mode_feedback import post_win_session_late_reentry_waive
 
         alert_d = getattr(candidate, "alert", None) or {}
         prem = float(getattr(candidate, "premium", 0) or 0)
-        sym = str(getattr(candidate, "symbol", "") or "")
         waived, mode, _wmeta = post_win_session_late_reentry_waive(
             state,
             symbol=sym,
             side=getattr(candidate, "side", ""),
-            strike=float(getattr(candidate, "strike", 0) or 0),
+            strike=strike_f,
             premium=prem,
             velocity_3s=v3,
             alert=alert_d if isinstance(alert_d, dict) else {},
         )
-        if waived and mode == "new_local_base":
-            return False, "", meta
-        if waived and mode == "continuation_leg":
-            strict_v3 = float(
-                getattr(
-                    settings, "fake_explosion_trap_post_win_extended_min_velocity_3s", 3.0
-                )
-                or 3.0
-            )
-            if v3 + 1e-9 >= strict_v3:
+        if waived:
+            meta["postWinLateReentryWaive"] = True
+            meta["postWinLateReentryWaiveMode"] = mode
+            if mode == "new_local_base":
                 return False, "", meta
+            if mode == "continuation_leg":
+                min_cont = float(
+                    getattr(settings, "post_win_continuation_leg_min_velocity_3s", 2.0)
+                    or 2.0
+                )
+                if v3 + 1e-9 >= min_cont:
+                    return False, "", meta
     except Exception:
         pass
 
@@ -2379,7 +2425,7 @@ def detect_fake_explosion_trap(
                 getattr(
                     settings,
                     "fake_explosion_trap_chop_post_win_afternoon_enabled",
-                    True,
+                    False,
                 )
             )
         ):
