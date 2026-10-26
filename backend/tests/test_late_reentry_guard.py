@@ -14,7 +14,9 @@ from app.engines.explosion_detector import (
     _session_peak,
 )
 from app.engines.session_mode_feedback import (
+    cap_post_win_continuation_leg_lots,
     exhausted_ftv_reentry_blocked,
+    post_win_session_late_reentry_waive,
     session_peak_late_reentry_blocked,
 )
 from app.models.schemas import AutoTraderState, PaperTrade, Side, StrategyType
@@ -377,3 +379,203 @@ def test_exhausted_ftv_blocks_after_trail_lock_peak():
     assert blocked is True
     assert meta["applied"] is True
     assert meta["priorPeak"] == pytest.approx(121.85, rel=1e-3)
+
+
+def _nifty_ce_win_trade(*, strike: float = 22500.0, minutes_ago: int = 120) -> PaperTrade:
+    closed_at = datetime.now(IST) - timedelta(minutes=minutes_ago)
+    return PaperTrade(
+        id="oct26-ce-win",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=strike,
+        entryPremium=197.6,
+        currentPremium=225.0,
+        lots=8,
+        openedAt=closed_at - timedelta(minutes=6),
+        closedAt=closed_at,
+        status="CLOSED",
+        exitReason="explosion_peak_keep_trail",
+        strategyType=StrategyType.EXPLOSIVE,
+        pnlInr=5089.0,
+        entryContext={"selectionMode": "explosion"},
+    )
+
+
+def test_post_win_new_local_base_waives_session_peak_late_reentry():
+    """Oct26-style: re-base on pad after CE win — not a blind session-peak chase."""
+    _seed_session_peak(
+        symbol="NIFTY", strike=22500.0, side=Side.CALL, low=167.0, peak=225.7,
+    )
+    settings = Settings(
+        explosion_late_reentry_block_enabled=True,
+        explosion_late_reentry_min_peak_points=15.0,
+        explosion_late_reentry_near_peak_pct=12.0,
+        explosion_late_reentry_pullback_ok_pct=22.0,
+        explosion_late_reentry_min_velocity_3s=1.2,
+        post_win_late_reentry_waive_enabled=True,
+        post_win_new_local_base_max_pad_pct=22.0,
+    )
+    state = AutoTraderState(closedPaperTrades=[_nifty_ce_win_trade()])
+    alert = {
+        "ictBaseArmed": True,
+        "ictFlatThenVertical": True,
+        "localBaseMovePct": 14.0,
+        "tier": "ELITE",
+    }
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ), patch(
+        "app.engines.explosion_detector.post_close_base_reacceleration",
+        return_value=(False, {}),
+    ):
+        blocked, reason = session_peak_late_reentry_blocked(
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=22500.0,
+            premium=244.0,
+            velocity_3s=0.3,
+            alert=alert,
+            state=state,
+        )
+    assert blocked is False
+    assert reason == "post_win_late_reentry_waive_new_local_base"
+
+
+def test_post_win_continuation_leg_waives_once_with_hot_v3():
+    _seed_session_peak(
+        symbol="NIFTY", strike=22500.0, side=Side.CALL, low=167.0, peak=225.7,
+    )
+    settings = Settings(
+        explosion_late_reentry_block_enabled=True,
+        explosion_late_reentry_min_peak_points=15.0,
+        explosion_late_reentry_near_peak_pct=12.0,
+        explosion_late_reentry_pullback_ok_pct=22.0,
+        explosion_late_reentry_min_velocity_3s=1.2,
+        post_win_continuation_leg_enabled=True,
+        post_win_continuation_leg_min_velocity_3s=2.0,
+    )
+    state = AutoTraderState(closedPaperTrades=[_nifty_ce_win_trade()])
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ), patch(
+        "app.engines.explosion_detector.post_close_base_reacceleration",
+        return_value=(False, {}),
+    ):
+        blocked, reason = session_peak_late_reentry_blocked(
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=22500.0,
+            premium=244.0,
+            velocity_3s=2.4,
+            alert={"tier": "BUILDING"},
+            state=state,
+        )
+    assert blocked is False
+    assert reason == "post_win_late_reentry_waive_continuation_leg"
+
+
+def test_post_win_continuation_leg_cold_v3_still_blocked():
+    _seed_session_peak(
+        symbol="NIFTY", strike=22500.0, side=Side.CALL, low=167.0, peak=225.7,
+    )
+    settings = Settings(
+        explosion_late_reentry_block_enabled=True,
+        explosion_late_reentry_min_peak_points=15.0,
+        explosion_late_reentry_near_peak_pct=12.0,
+        explosion_late_reentry_pullback_ok_pct=22.0,
+        explosion_late_reentry_min_velocity_3s=1.2,
+        post_win_continuation_leg_min_velocity_3s=2.0,
+    )
+    state = AutoTraderState(closedPaperTrades=[_nifty_ce_win_trade()])
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ), patch(
+        "app.engines.explosion_detector.post_close_base_reacceleration",
+        return_value=(False, {}),
+    ):
+        blocked, reason = session_peak_late_reentry_blocked(
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=22500.0,
+            premium=244.0,
+            velocity_3s=0.5,
+            alert={"tier": "BUILDING"},
+            state=state,
+        )
+    assert blocked is True
+    assert "late_reentry_near_session_peak" in reason
+
+
+def test_post_win_continuation_leg_caps_lots_not_full_rank():
+    settings = Settings(
+        post_win_continuation_leg_enabled=True,
+        post_win_continuation_leg_min_velocity_3s=2.0,
+        post_win_continuation_leg_lot_cap=4,
+    )
+    state = AutoTraderState(closedPaperTrades=[_nifty_ce_win_trade()])
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ), patch(
+        "app.engines.explosion_detector.post_close_base_reacceleration",
+        return_value=(False, {}),
+    ):
+        capped, meta = cap_post_win_continuation_leg_lots(
+            20,
+            state,
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=22500.0,
+            premium=244.0,
+            velocity_3s=2.5,
+            alert={"tier": "BUILDING"},
+        )
+    assert capped == 4
+    assert meta.get("postWinContinuationLegCapApplied") is True
+
+
+def test_post_win_only_one_continuation_leg_after_win():
+    settings = Settings(
+        post_win_continuation_leg_enabled=True,
+        post_win_continuation_leg_min_velocity_3s=2.0,
+    )
+    win = _nifty_ce_win_trade(minutes_ago=180)
+    leg = PaperTrade(
+        id="post-win-leg",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22500.0,
+        entryPremium=240.0,
+        currentPremium=238.0,
+        lots=4,
+        openedAt=win.closedAt + timedelta(minutes=30),
+        closedAt=win.closedAt + timedelta(minutes=35),
+        status="CLOSED",
+        exitReason="explosion_trail_lock",
+        strategyType=StrategyType.EXPLOSIVE,
+        pnlInr=-800.0,
+        entryContext={"selectionMode": "explosion"},
+    )
+    state = AutoTraderState(closedPaperTrades=[win, leg])
+    with patch(
+        "app.engines.session_mode_feedback.get_settings",
+        return_value=settings,
+    ), patch(
+        "app.engines.explosion_detector.post_close_base_reacceleration",
+        return_value=(False, {}),
+    ):
+        waived, mode, meta = post_win_session_late_reentry_waive(
+            state,
+            symbol="NIFTY",
+            side=Side.CALL,
+            strike=22500.0,
+            premium=245.0,
+            velocity_3s=3.0,
+            alert={"tier": "BUILDING"},
+        )
+    assert waived is False
+    assert mode == ""
+    assert meta.get("sameStrikeLegsAfterWin") == 1

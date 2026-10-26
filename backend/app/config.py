@@ -2062,6 +2062,14 @@ class Settings(BaseSettings):
     explosion_late_reentry_near_peak_pct: float = 12.0
     explosion_late_reentry_pullback_ok_pct: float = 22.0
     explosion_late_reentry_min_velocity_3s: float = 1.2
+    # After a same-strike win: waive near-peak late reentry on a fresh local base, or
+    # one capped continuation leg (hot v3) — not full #676 rank.
+    post_win_late_reentry_waive_enabled: bool = True
+    post_win_late_reentry_waive_lookback_seconds: int = 14400
+    post_win_new_local_base_max_pad_pct: float = 22.0
+    post_win_continuation_leg_enabled: bool = True
+    post_win_continuation_leg_min_velocity_3s: float = 2.0
+    post_win_continuation_leg_lot_cap: int = 4
     # Sep28 NIFTY 22850 PE: first-lift + hot v3 must not waive a shallow pullback
     # near session peak after the rip is already extended (2% off peak → −₹33k SL).
     explosion_late_reentry_first_lift_hot_v3_min_pullback_pct: float = 8.0

@@ -743,6 +743,264 @@ def _first_strike_launch_waive_alert(alert: Optional[dict[str, Any]]) -> bool:
     )
 
 
+def _latest_same_strike_win_close(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    max_age_seconds: float,
+) -> tuple[Any | None, float]:
+    """Latest profitable explosion close on exact strike within max_age_seconds."""
+    if state is None or max_age_seconds <= 0:
+        return None, 0.0
+    sym = str(symbol or "").upper()
+    side_v = _side_key(side)
+    strike_f = float(strike or 0)
+    prior: Any | None = None
+    latest_ts = None
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if str(getattr(t, "symbol", "") or "").upper() != sym:
+            continue
+        if _side_key(getattr(t, "side", "")) != side_v:
+            continue
+        if abs(float(getattr(t, "strike", 0) or 0) - strike_f) > 0.01:
+            continue
+        ctx = getattr(t, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or getattr(t, "mode", "") or "").lower()
+        st = str(getattr(t, "strategyType", "") or "")
+        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+        if mode != "explosion" and st_u != "EXPLOSIVE":
+            continue
+        pnl = float(getattr(t, "pnlInr", 0) or getattr(t, "pnl_inr", 0) or 0)
+        if pnl <= 0:
+            continue
+        ts = getattr(t, "closedAt", None) or getattr(t, "openedAt", None)
+        if ts is None:
+            continue
+        if prior is None or (latest_ts is None or ts > latest_ts):
+            prior = t
+            latest_ts = ts
+    if prior is None or getattr(prior, "closedAt", None) is None:
+        return None, 0.0
+    now = datetime.now(_IST)
+    closed_at = prior.closedAt
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    age = max(0.0, (now - closed_at.astimezone(_IST)).total_seconds())
+    if age > max_age_seconds:
+        return None, age
+    return prior, age
+
+
+def _same_strike_legs_after_close(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    closed_at: datetime,
+) -> int:
+    """Count explosion legs opened on this strike after a reference close."""
+    if state is None:
+        return 0
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+
+    sym = str(symbol or "").upper()
+    side_u = _side_key(side)
+    strike_f = float(strike or 0)
+    count = 0
+    ref = closed_at.astimezone(_IST)
+
+    def _count_trade(trade: Any) -> None:
+        nonlocal count
+        if str(getattr(trade, "symbol", "") or "").upper() != sym:
+            return
+        if _side_key(getattr(trade, "side", "")) != side_u:
+            return
+        if abs(float(getattr(trade, "strike", 0) or 0) - strike_f) > 0.01:
+            return
+        ctx = getattr(trade, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or getattr(trade, "mode", "") or "").lower()
+        st = str(getattr(trade, "strategyType", "") or "")
+        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+        if mode != "explosion" and st_u != "EXPLOSIVE":
+            return
+        opened = getattr(trade, "openedAt", None)
+        if opened is None:
+            return
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=_IST)
+        if opened.astimezone(_IST) > ref:
+            count += 1
+
+    for bucket in (
+        getattr(state, "closedPaperTrades", None) or [],
+        getattr(state, "openPaperTrades", None) or [],
+    ):
+        for trade in bucket:
+            _count_trade(trade)
+    return count
+
+
+def _alert_post_win_new_local_base(
+    alert: dict[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """ICT re-base on the pad after a win — not a blind session-peak chase."""
+    settings = settings or get_settings()
+    alert_d = alert if isinstance(alert, dict) else {}
+    from app.engines.best_trade_policy import symmetric_structural_base_evidence
+
+    if not symmetric_structural_base_evidence(alert_d, settings=settings):
+        return False
+    armed = bool(
+        alert_d.get("ictBaseArmed")
+        or alert_d.get("armedBaseLaunch")
+        or alert_d.get("ictArmedBaseLaunch")
+        or alert_d.get("eliteBaseReady")
+        or alert_d.get("vRipReady")
+        or alert_d.get("ictVRipReady")
+    )
+    if not armed:
+        return False
+    local = max(
+        float(alert_d.get("localBaseMovePct") or 0),
+        float(alert_d.get("ictBaseRelativeMovePct") or 0),
+    )
+    max_pad = float(
+        getattr(settings, "post_win_new_local_base_max_pad_pct", 22.0) or 22.0
+    )
+    return 0 < local <= max_pad + 1e-6
+
+
+def post_win_session_late_reentry_waive(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    premium: float,
+    velocity_3s: float,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Waive late_reentry_near_session_peak after a same-strike win when:
+    1) post-close base reacceleration or fresh ICT local base on the pad, or
+    2) one continuation leg with hot v3 (capped lots separately — not #676 rank).
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"postWinLateReentryWaive": False}
+    if not bool(getattr(settings, "post_win_late_reentry_waive_enabled", True)):
+        return False, "", meta
+    lookback = float(
+        getattr(settings, "post_win_late_reentry_waive_lookback_seconds", 14400) or 14400
+    )
+    prior, age = _latest_same_strike_win_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        max_age_seconds=lookback,
+    )
+    if prior is None:
+        return False, "", meta
+    meta["priorWinTradeId"] = getattr(prior, "id", None)
+    meta["priorWinPnlInr"] = round(
+        float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0), 2,
+    )
+    meta["secondsSinceWinClose"] = round(age, 1)
+    closed_at = prior.closedAt
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+
+    from app.engines.explosion_detector import post_close_base_reacceleration
+
+    reset, reset_meta = post_close_base_reacceleration(
+        symbol,
+        strike,
+        side,
+        closed_at=closed_at,
+        current_premium=float(premium or 0),
+        velocity_3s=float(velocity_3s or 0),
+        min_base_samples=int(
+            getattr(settings, "explosion_post_peak_reentry_base_samples", 3) or 3
+        ),
+        min_base_span_seconds=float(
+            getattr(settings, "explosion_post_peak_reentry_base_span_seconds", 6.0) or 6.0
+        ),
+        min_reacceleration_pct=float(
+            getattr(settings, "explosion_post_peak_reentry_min_reacceleration_pct", 8.0)
+            or 8.0
+        ),
+        min_velocity_3s=float(
+            getattr(settings, "explosion_post_peak_reentry_min_velocity_3s", 1.5) or 1.5
+        ),
+    )
+    meta["postCloseBase"] = reset_meta
+    if reset or _alert_post_win_new_local_base(alert, settings=settings):
+        meta["postWinLateReentryWaive"] = True
+        meta["postWinLateReentryWaiveMode"] = "new_local_base"
+        return True, "new_local_base", meta
+
+    legs_after = _same_strike_legs_after_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        closed_at=closed_at,
+    )
+    meta["sameStrikeLegsAfterWin"] = legs_after
+    if legs_after >= 1:
+        return False, "", meta
+
+    if not bool(getattr(settings, "post_win_continuation_leg_enabled", True)):
+        return False, "", meta
+    min_v3 = float(
+        getattr(settings, "post_win_continuation_leg_min_velocity_3s", 2.0) or 2.0
+    )
+    v3 = float(velocity_3s or 0)
+    if v3 + 1e-9 < min_v3:
+        return False, "", meta
+    meta["postWinLateReentryWaive"] = True
+    meta["postWinLateReentryWaiveMode"] = "continuation_leg"
+    return True, "continuation_leg", meta
+
+
+def cap_post_win_continuation_leg_lots(
+    lots: int,
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    premium: float,
+    velocity_3s: float,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[int, dict[str, Any]]:
+    """Cap lots for the single post-win continuation leg (not #676 full rank)."""
+    settings = get_settings()
+    waived, mode, meta = post_win_session_late_reentry_waive(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        premium=premium,
+        velocity_3s=velocity_3s,
+        alert=alert,
+    )
+    if not waived or mode != "continuation_leg":
+        return lots, meta
+    cap = int(getattr(settings, "post_win_continuation_leg_lot_cap", 4) or 4)
+    capped = min(max(0, lots), max(1, cap))
+    meta["postWinContinuationLegCapApplied"] = capped < lots
+    meta["postWinContinuationLegCap"] = cap
+    meta["cappedLots"] = capped
+    return capped, meta
+
+
 def _strike_has_session_trade(
     state: AutoTraderState | None,
     *,
@@ -975,6 +1233,19 @@ def session_peak_late_reentry_blocked(
                 return False, ""
         except Exception:
             pass
+
+    if state is not None:
+        waived, waive_mode, waive_meta = post_win_session_late_reentry_waive(
+            state,
+            symbol=symbol,
+            side=side,
+            strike=strike,
+            premium=prem,
+            velocity_3s=v3,
+            alert=alert_d,
+        )
+        if waived:
+            return False, f"post_win_late_reentry_waive_{waive_mode}"
 
     return True, (
         f"late_reentry_near_session_peak_{sess_peak:.1f}"
