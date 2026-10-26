@@ -1021,6 +1021,125 @@ def call_atm_itm_base_capture_eligible(
     return True, meta
 
 
+def put_atm_itm_base_capture_mirror_eligible(
+    candidate: Any,
+    snap: Any,
+    *,
+    state: Any = None,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """PE mirror of #676 — ATM/ITM PUT at structural pad with launch confirm."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "call_atm_itm_base_capture_enabled", True)):
+        return False, meta
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return False, meta
+    if _side_value(getattr(candidate, "side", "")) != "PUT":
+        return False, meta
+    if snap is None:
+        return False, meta
+
+    money = _classify_moneyness(candidate, snap)
+    meta["moneyness"] = money
+    if money not in ("ATM", "ITM"):
+        return False, meta
+
+    alert = _alert_for_candidate(candidate)
+    evidence = dict(alert) if isinstance(alert, Mapping) else {}
+    if not symmetric_structural_base_evidence(evidence, settings=settings):
+        return False, meta
+
+    tier = str(evidence.get("tier") or "").upper()
+    meta["tier"] = tier
+    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
+        return False, meta
+
+    sym = str(getattr(candidate, "symbol", "") or evidence.get("symbol") or "").upper()
+    if state is not None:
+        from app.engines.put_slide_ce_mirror import put_pe_base_context_armed
+
+        armed, reason, _ = put_pe_base_context_armed(
+            state,
+            snap,
+            sym,
+            evidence,
+            readiness_reason=readiness_reason,
+            settings=settings,
+        )
+        if not armed:
+            return False, {**meta, "reason": reason or "put_base_not_armed"}
+    elif max(
+        _number(evidence.get("offHighMovePct")),
+        _number(evidence.get("localBaseMovePct")),
+    ) < float(getattr(settings, "put_premium_local_base_min_off_high_pct", 2.0) or 2.0) - 1e-6:
+        return False, {**meta, "reason": "put_pad_not_confirmed"}
+
+    if not _call_atm_itm_launch_ok(
+        evidence, snap=snap, readiness_reason=readiness_reason, settings=settings,
+    ):
+        return False, {**meta, "reason": "launch_not_confirmed"}
+
+    return True, meta
+
+
+def base_capture_reentry_ml_waive_eligible(
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    snap: Any,
+    alert: Mapping[str, Any] | None,
+    state: Any = None,
+    settings: Any = None,
+) -> tuple[bool, str]:
+    """True when re-entry is a #676-style CE base or symmetric PE base (waive ML / fake-trap)."""
+    from types import SimpleNamespace
+
+    from app.config import get_settings
+    from app.models.schemas import Side
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "reentry_ml_waive_on_base_capture_eligible_enabled", True)):
+        return False, "disabled"
+    if snap is None or not isinstance(alert, Mapping):
+        return False, "missing_context"
+
+    side_u = _side_value(side)
+    sym = str(symbol or alert.get("symbol") or "").upper()
+    stk = float(strike or alert.get("strike") or 0)
+    if not sym or stk <= 0 or side_u not in ("CALL", "PUT"):
+        return False, "invalid_candidate"
+
+    side_enum = Side.CALL if side_u == "CALL" else Side.PUT
+    cand = SimpleNamespace(
+        mode="explosion",
+        symbol=sym,
+        side=side_enum,
+        strike=stk,
+        alert=dict(alert),
+        pretrade_meta={},
+        snap=snap,
+    )
+    if side_u == "CALL":
+        ok, meta = call_atm_itm_base_capture_eligible(
+            cand, snap, state=state, settings=settings,
+        )
+        if ok:
+            return True, "call_atm_itm_base_capture_676"
+        return False, str(meta.get("reason") or "not_676_eligible")
+
+    ok, meta = put_atm_itm_base_capture_mirror_eligible(
+        cand, snap, state=state, settings=settings,
+    )
+    if ok:
+        return True, "put_atm_itm_base_capture_mirror"
+    return False, str(meta.get("reason") or "not_put_base_eligible")
+
+
 def call_alert_from_timing_context(
     event: Any,
     *,

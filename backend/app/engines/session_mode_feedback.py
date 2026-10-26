@@ -869,6 +869,28 @@ def reentry_ml_win_prob_blocked(
         )
         return False, meta
 
+    if isinstance(alert, dict):
+        from app.engines.best_trade_policy import base_capture_reentry_ml_waive_eligible
+
+        base_ok, base_reason = base_capture_reentry_ml_waive_eligible(
+            symbol=symbol,
+            side=side,
+            strike=strike,
+            snap=snap,
+            alert=alert,
+            state=state,
+            settings=settings,
+        )
+        if base_ok:
+            meta.update(
+                {
+                    "applied": False,
+                    "reentryMlBaseCaptureWaived": True,
+                    "reentryMlBaseCaptureWaiveReason": base_reason,
+                }
+            )
+            return False, meta
+
     session_min = float(
         getattr(settings, "explosion_reentry_ml_win_prob_min", 0.52) or 0.52
     )
