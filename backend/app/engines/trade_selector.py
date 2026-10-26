@@ -922,8 +922,13 @@ def _explosion_candidates(
             post_peak_chase_blocked,
             session_trough_late_chase_blocked,
             coil_top_entry_blocked,
+            spot_chart_indicators_cold_blocked,
             tier_promotion_pad_chase_blocked,
         )
+
+        cold_blocked, _cold_reason = spot_chart_indicators_cold_blocked(snap)
+        if cold_blocked:
+            continue
 
         immature_blocked, _immature_reason = immature_explosion_blocked(
             event,
