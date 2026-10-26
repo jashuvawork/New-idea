@@ -227,7 +227,7 @@ def test_broker_day_open_beats_a_preopen_tick_open():
 
 def test_window_0925_to_0945_and_first_order_stays_0920():
     s = Settings()
-    assert s.open_side_confirmation_enabled is True
+    assert s.open_side_confirmation_enabled is False
     assert s.open_side_confirmation_start_hour == 9
     assert s.open_side_confirmation_start_minute == 25
     assert s.open_caution_until_hour == 9 and s.open_caution_until_minute == 45
@@ -244,13 +244,16 @@ def test_window_0925_to_0945_and_first_order_stays_0920():
         (Side.CALL, 22700.0, 22710.0, 22660.0, 22665.0),
     ],
 )
-def test_default_blocks_the_wrong_side_only_inside_0925_0945(side, open_, hi, lo, last):
+def test_default_does_not_block_either_side_from_0915_to_0945(side, open_, hi, lo, last):
+    """#676 has no index-side check from the cash open through 09:45."""
     snap = _tape("NIFTY", open_=open_, hi=hi, lo=lo, last=last)
-    blocked_open, _, _ = open_side_confirmation(
-        "NIFTY", side, snap, now=_at(9, 25), settings=Settings(),
+    for minute in (15, 25, 40, 45):
+        blocked, reason, _ = open_side_confirmation(
+            "NIFTY", side, snap, now=_at(9, minute), settings=Settings(),
+        )
+        assert blocked is False
+        assert reason == ""
+    blocked_on, _, _ = open_side_confirmation(
+        "NIFTY", side, snap, now=_at(9, 25), settings=_settings(),
     )
-    blocked_later, _, _ = open_side_confirmation(
-        "NIFTY", side, snap, now=_at(9, 45), settings=Settings(),
-    )
-    assert blocked_open is True
-    assert blocked_later is False
+    assert blocked_on is True

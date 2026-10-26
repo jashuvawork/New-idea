@@ -3064,9 +3064,11 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
-    # 09:15 → 09:45 only. The side must match today's index tape (Oct 13 22300 PE).
-    # Idle from 09:45. The first order stays 09:20.
-    open_side_confirmation_enabled: bool = True
+    # Off, as on #676. From 09:15 through 09:45 the side is not checked against
+    # today's open or the session range. The first order stays 09:20. Open
+    # caution (score floor) still runs until 09:45. Turn the flag on to replay
+    # the 09:25–09:45 tape check.
+    open_side_confirmation_enabled: bool = False
     open_side_confirmation_start_hour: int = 9
     open_side_confirmation_start_minute: int = 25
     open_side_confirmation_min_minutes: float = 1.0

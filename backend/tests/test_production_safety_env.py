@@ -35,7 +35,7 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["LIVE_BEST_TRADES_ONLY_ENABLED"] == "true"
     assert env["LIVE_BEST_TRADES_MIN_GRADE"] == "A"
     assert env["WIN_REENTRY_REQUIRES_VELOCITY_ENABLED"] == "false"
-    assert env["OPEN_SIDE_CONFIRMATION_ENABLED"] == "true"
+    assert env["OPEN_SIDE_CONFIRMATION_ENABLED"] == "false"
     assert env["OPEN_SIDE_CONFIRMATION_START_HOUR"] == "9"
     assert env["OPEN_SIDE_CONFIRMATION_START_MINUTE"] == "25"
     assert env["OPEN_SIDE_CONFIRMATION_MIN_MINUTES"] == "1"

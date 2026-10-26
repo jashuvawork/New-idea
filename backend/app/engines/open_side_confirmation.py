@@ -1,4 +1,4 @@
-"""Open side confirmation — no blind side picks while the session is forming.
+"""Open side confirmation. Off by default, matching #676 from 09:15 through 09:45.
 
 Oct 13 NIFTY 22300 PE: entered 09:15:37 off a PUT premium "local low" with a 5m chart
 built from the previous session's bars, while NIFTY V-reversed up off the open and the
@@ -156,7 +156,7 @@ def open_side_confirmation(
 ) -> tuple[bool, str, dict[str, Any]]:
     """Return (blocked, reason, meta) for an entry on ``side`` during the open window."""
     settings = settings or get_settings()
-    if getattr(settings, "open_side_confirmation_enabled", True) is not True:
+    if getattr(settings, "open_side_confirmation_enabled", False) is not True:
         return False, "", {}
     now = (now or datetime.now(IST)).astimezone(IST)
     minutes = _ist_minutes(now)
@@ -233,7 +233,7 @@ def open_side_confirmation_summary(snapshots: dict[str, Any], *, settings: Any =
     """HUD: whether CE / PE would pass open confirmation right now, per symbol."""
     settings = settings or get_settings()
     out: dict[str, Any] = {
-        "enabled": getattr(settings, "open_side_confirmation_enabled", True) is True,
+        "enabled": getattr(settings, "open_side_confirmation_enabled", False) is True,
         "windowStartIst": (
             f"{int(getattr(settings, 'open_side_confirmation_start_hour', 9)):02d}:"
             f"{int(getattr(settings, 'open_side_confirmation_start_minute', 25)):02d}"
