@@ -29,6 +29,83 @@ def index_trend_features_active(settings: Any = None) -> bool:
     )
 
 
+def _trough_flip_fraction(settings: Any, *, slide: bool = False) -> float:
+    key = (
+        "index_trend_peak_flip_slide_fraction"
+        if slide
+        else "index_trend_trough_flip_rally_fraction"
+    )
+    return float(getattr(settings, key, 0.35) or 0.35)
+
+
+def index_trough_rally_context_active(
+    symbol: str,
+    snap: SymbolSnapshot,
+    state: Any = None,
+    *,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Index slow-V off session low — block blind PUT when dominant trend is still NEUTRAL."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not index_trend_features_active(settings):
+        return False, meta
+    from app.engines.index_rally_side_flip import index_rally_metrics
+    from app.engines.spot_direction import index_trough_momentum_turn
+    from app.models.schemas import Side
+
+    chart = snap.spotChart if snap is not None else None
+    if chart is None or not index_trough_momentum_turn(Side.CALL, chart, settings=settings):
+        return False, meta
+    metrics = index_rally_metrics(symbol, snap, settings=settings)
+    rally_pts = float(metrics.get("rallyPoints") or 0)
+    min_pts = float(metrics.get("minMovePoints") or 0)
+    frac = _trough_flip_fraction(settings, slide=False)
+    soft_min = min_pts * max(0.05, min(1.0, frac))
+    if rally_pts < soft_min - 1e-6:
+        return False, meta
+    meta["indexTroughRallyContext"] = {
+        **metrics,
+        "troughFlipFraction": frac,
+        "softMinRallyPts": round(soft_min, 1),
+    }
+    return True, meta
+
+
+def index_peak_slide_context_active(
+    symbol: str,
+    snap: SymbolSnapshot,
+    state: Any = None,
+    *,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Mirror: index turn off session high — block blind CALL when trend is NEUTRAL."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not index_trend_features_active(settings):
+        return False, meta
+    from app.engines.index_rally_side_flip import index_rally_metrics
+    from app.engines.spot_direction import index_trough_momentum_turn
+    from app.models.schemas import Side
+
+    chart = snap.spotChart if snap is not None else None
+    if chart is None or not index_trough_momentum_turn(Side.PUT, chart, settings=settings):
+        return False, meta
+    metrics = index_rally_metrics(symbol, snap, settings=settings)
+    slide_pts = float(metrics.get("slidePoints") or 0)
+    min_pts = float(metrics.get("minMovePoints") or 0)
+    frac = _trough_flip_fraction(settings, slide=True)
+    soft_min = min_pts * max(0.05, min(1.0, frac))
+    if slide_pts < soft_min - 1e-6:
+        return False, meta
+    meta["indexPeakSlideContext"] = {
+        **metrics,
+        "peakFlipFraction": frac,
+        "softMinSlidePts": round(soft_min, 1),
+    }
+    return True, meta
+
+
 def _resolve_trend_arms(
     sym: str,
     snap: SymbolSnapshot,
@@ -78,6 +155,22 @@ def _resolve_trend_arms(
     if mom5 < -0.02:
         meta["indexTrendFlip"] = "mom5_slide"
         return False, True, meta
+
+    trough_rally, trough_meta = index_trough_rally_context_active(
+        sym, snap, state, settings=settings,
+    )
+    if trough_rally:
+        meta.update(trough_meta)
+        meta["indexTrendFlip"] = "trough_momentum_rally"
+        return True, False, meta
+    peak_slide, peak_meta = index_peak_slide_context_active(
+        sym, snap, state, settings=settings,
+    )
+    if peak_slide:
+        meta.update(peak_meta)
+        meta["indexTrendFlip"] = "peak_momentum_slide"
+        return False, True, meta
+
     meta["indexTrendFlip"] = "both_neutral"
     return False, False, meta
 
@@ -110,9 +203,9 @@ def index_session_dominant_trend(
         dominant = "SLIDE"
     elif call_armed and put_armed:
         flip = str(meta.get("indexTrendFlip") or "")
-        if flip in ("rally_dominant", "mom5_rally"):
+        if flip in ("rally_dominant", "mom5_rally", "trough_momentum_rally"):
             dominant = "RALLY"
-        elif flip in ("slide_dominant", "mom5_slide"):
+        elif flip in ("slide_dominant", "mom5_slide", "peak_momentum_slide"):
             dominant = "SLIDE"
 
     meta["dominantTrend"] = dominant
@@ -199,6 +292,21 @@ def index_trend_rank_adjustment(
         sym, snap, state, settings=settings, track_flip=True,
     )
     if dominant == "NEUTRAL":
+        trough_rally, _ = index_trough_rally_context_active(
+            sym, snap, state, settings=settings,
+        )
+        peak_slide, _ = index_peak_slide_context_active(
+            sym, snap, state, settings=settings,
+        )
+        side_u = str(side or "").upper()
+        bonus = float(getattr(settings, "index_trend_rank_bonus_aligned", 8.0) or 8.0)
+        penalty = float(
+            getattr(settings, "index_trend_rank_penalty_opposite", 6.0) or 6.0
+        )
+        if trough_rally:
+            return bonus if side_u == "CALL" else -penalty
+        if peak_slide:
+            return bonus if side_u == "PUT" else -penalty
         return 0.0
     bonus = float(getattr(settings, "index_trend_rank_bonus_aligned", 8.0) or 8.0)
     penalty = float(getattr(settings, "index_trend_rank_penalty_opposite", 6.0) or 6.0)

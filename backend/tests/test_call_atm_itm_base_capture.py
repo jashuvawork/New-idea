@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from app.engines.best_trade_policy import (
@@ -107,6 +107,45 @@ def test_chop_deep_waived_for_atm_itm_call_at_base():
     )
     assert blocked is False
     assert reason == ""
+
+
+def test_symbols_ready_when_near_base_pad_without_full_eligible():
+    """#676 PUT −36 must arm when CE passes the lighter near-base pad bar only."""
+    s = settings_mock()
+    snap = _nifty_snap()
+    snapshots = {"NIFTY": snap}
+    alert = _oct23_base_alert(
+        momentType="v_rip_session_low",
+        offLowMovePct=17.0,
+        localBaseMovePct=9.0,
+        ictBaseRelativeMovePct=9.0,
+        vRipReady=True,
+        ictVRipReady=True,
+    )
+    call_c = _call(strike=22400.0, alert=alert)
+    call_c.symbol = "NIFTY"
+    call_c.snap = snap
+    put_c = SimpleNamespace(
+        mode="explosion",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=22450.0,
+        alert={"tier": "ELITE", "score": 92},
+        pretrade_meta={},
+        snap=snap,
+    )
+    with patch(
+        "app.engines.best_trade_policy.call_atm_itm_base_capture_eligible",
+        return_value=(False, {"reason": "launch_not_confirmed"}),
+    ):
+        syms = symbols_with_call_atm_itm_base_ready(
+            [call_c, put_c], MagicMock(), snapshots, settings=s,
+        )
+    assert "NIFTY" in syms
+    put_delta = call_atm_itm_base_selector_rank_delta(
+        put_c, MagicMock(), snapshots, symbols_call_atm_itm_base=syms, settings=s,
+    )
+    assert put_delta == -36.0
 
 
 def test_put_rank_penalty_when_call_atm_itm_base_ready():

@@ -1056,6 +1056,28 @@ def symbols_with_call_atm_itm_base_ready(
         )
         if ok:
             out.add(sym)
+            continue
+        alert = _alert_for_candidate(cand)
+        pretrade = getattr(cand, "pretrade_meta", None) or {}
+        ranking = pretrade.get("causalRanking") if isinstance(pretrade, dict) else {}
+        if not isinstance(ranking, dict):
+            ranking = {}
+        nested = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
+        evidence = {**alert, **nested, **ranking}
+        if snap is not None:
+            evidence.setdefault("spot", getattr(snap, "spot", 0))
+            evidence.setdefault("atmStrike", getattr(snap, "atmStrike", 0))
+            evidence.setdefault("symbol", getattr(snap, "symbol", sym))
+        evidence.setdefault("strike", getattr(cand, "strike", 0))
+        evidence.setdefault("side", "CALL")
+        if call_atm_itm_near_base_pad(
+            evidence,
+            snap,
+            side="CALL",
+            strike=float(getattr(cand, "strike", 0) or 0),
+            settings=settings,
+        ):
+            out.add(sym)
     return out
 
 

@@ -86,6 +86,54 @@ def test_slide_leg_dominant_slide_only_put_aligned():
     assert side_aligns_with_dominant_trend("CALL", trend) is False
 
 
+def test_both_armed_neutral_tie_breaks_to_rally_on_trough_turn():
+    settings = _symmetric_settings()
+    settings.index_trend_trough_flip_rally_fraction = 0.35
+    snap = _snap(mom5=0.0)
+    with patch(
+        "app.engines.pe_win_ce_mirror.call_rally_unlock_armed",
+        return_value=(True, "ok", {}),
+    ), patch(
+        "app.engines.put_slide_ce_mirror.put_slide_unlock_armed",
+        return_value=(True, "ok", {}),
+    ), patch(
+        "app.engines.index_rally_side_flip.index_rally_metrics",
+        return_value={"rallyPoints": 50.0, "slidePoints": 48.0, "minMovePoints": 45.0},
+    ), patch(
+        "app.engines.spot_direction.index_trough_momentum_turn",
+        side_effect=lambda side, chart, **_: str(getattr(side, "value", side)) == "CALL",
+    ):
+        trend, meta = index_session_dominant_trend(
+            "NIFTY", snap, AutoTraderState(), settings=settings,
+        )
+    assert trend == "RALLY"
+    assert meta.get("indexTrendFlip") == "trough_momentum_rally"
+
+
+def test_trough_rally_context_boosts_call_rank_when_dominant_neutral():
+    reset_index_session_dominant_trend_for_tests()
+    settings = _symmetric_settings()
+    snap = _snap(mom5=0.04)
+    state = AutoTraderState()
+    snapshots = {"NIFTY": snap}
+    call_c = SimpleNamespace(symbol="NIFTY", side=Side.CALL, snap=snap)
+    put_c = SimpleNamespace(symbol="NIFTY", side=Side.PUT, snap=snap)
+    with patch(
+        "app.engines.index_session_dominant_trend._resolve_trend_arms",
+        return_value=(False, False, {"indexTrendFlip": "both_neutral", "indexTrendMetrics": {}}),
+    ), patch(
+        "app.engines.index_session_dominant_trend.index_trough_rally_context_active",
+        return_value=(True, {"indexTroughRallyContext": {}}),
+    ), patch(
+        "app.engines.index_session_dominant_trend.index_peak_slide_context_active",
+        return_value=(False, {}),
+    ):
+        call_adj = index_trend_rank_adjustment(call_c, snapshots, state, settings=settings)
+        put_adj = index_trend_rank_adjustment(put_c, snapshots, state, settings=settings)
+    assert call_adj > 0
+    assert put_adj < 0
+
+
 def test_both_armed_tie_break_rally_by_points():
     settings = _symmetric_settings()
     settings.index_trend_opposite_side_flip_margin_pts = 20.0
