@@ -109,6 +109,14 @@ def test_explosion_near_miss_blocks_velocity_failure():
             alert,
             readiness_reason="first_lift_live_velocity_negative",
         ) is False
+        assert explosion_near_miss_waive(
+            alert,
+            readiness_reason="first_lift_live_velocity9s_negative",
+        ) is False
+        assert explosion_near_miss_waive(
+            alert,
+            readiness_reason="preauthorized_stamp_needs_confirmed_base_lift",
+        ) is False
 
 
 def test_explosion_near_miss_call_mirror_v_rip_session_high():
