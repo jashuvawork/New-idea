@@ -210,6 +210,7 @@ def assess_entry_timing(
     assessment = "OK"
     action = "allow"
     lot_cap: Optional[int] = None
+    waive_mode = ""
 
     # Soft near-ATM floor for structured (matches live-confirm soft floor).
     near_atm_soft = False
@@ -264,10 +265,46 @@ def assess_entry_timing(
         action = "block"
         reasons.append(f"session_{session:.0f}%>ceiling_{chase_hi:.0f}%")
     elif structured_failed_launch:
-        assessment = "FAILED_LAUNCH"
-        action = "block"
-        reasons.append(f"structured_base_negative_v3_{live_v:.1f}")
-        reasons.append("wait_for_positive_reacceleration")
+        waive_mode = ""
+        try:
+            from app.engines.best_trade_policy import (
+                call_atm_itm_base_waives_structured_failed_launch,
+            )
+
+            waived, waive_mode = call_atm_itm_base_waives_structured_failed_launch(
+                event,
+                ict=ict,
+                snap=snap,
+                state=state,
+                in_window=in_window,
+                settings=settings,
+            )
+        except Exception:
+            waived = False
+        if waived and waive_mode == "eligible":
+            assessment = "OK"
+            action = "allow"
+            reasons.append(f"structured_base_negative_v3_{live_v:.1f}")
+            reasons.append("call_atm_itm_base_676_waive_failed_launch")
+        elif waived:
+            assessment = "COLD_BASE"
+            action = "lot_cap"
+            lot_cap = max(
+                1,
+                int(
+                    getattr(entry_policy, "cold_base_lot_cap", None)
+                    or getattr(settings, "entry_timing_structured_cold_lot_cap", 3)
+                    or 3
+                ),
+            )
+            reasons.append(f"structured_base_negative_v3_{live_v:.1f}")
+            reasons.append("call_atm_itm_near_base_pad_waive_failed_launch")
+            reasons.append(f"cold_base_lot_cap_{lot_cap}")
+        else:
+            assessment = "FAILED_LAUNCH"
+            action = "block"
+            reasons.append(f"structured_base_negative_v3_{live_v:.1f}")
+            reasons.append("wait_for_positive_reacceleration")
     elif cold_base:
         # Positive but sub-breakout velocity: take only a small probe. Full sleeve
         # requires the separate armed-launch/CVD proof in auto_trader.
@@ -341,10 +378,16 @@ def assess_entry_timing(
             action = "allow"
             reasons.append("default_ok")
 
+    call_676_waive = (
+        "call_atm_itm_base_676_waive_failed_launch" in reasons
+        or "call_atm_itm_near_base_pad_waive_failed_launch" in reasons
+    )
     return {
         "assessment": assessment,
         "action": action,
         "lotCap": lot_cap,
+        "callAtmItmBase676Waive": call_676_waive,
+        "callAtmItmBase676WaiveMode": waive_mode if call_676_waive else "",
         "liveVelocity3s": round(live_v, 3),
         "sessionMovePct": round(session, 2),
         "localBasePct": round(local, 2),

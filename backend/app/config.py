@@ -398,6 +398,9 @@ class Settings(BaseSettings):
     call_atm_itm_base_put_rank_penalty: float = 36.0
     call_atm_itm_base_elite_score_floor: float = 76.0
     call_atm_itm_base_waive_chop_deep_itm: bool = True
+    # PR #676: armed ATM/ITM CE base may enter on negative v3 (not FAILED_LAUNCH block).
+    call_atm_itm_base_waives_failed_launch_enabled: bool = True
+    call_atm_itm_base_failed_launch_full_size_when_eligible: bool = True
     # PUT slide / CE-win PE mirror — symmetric Sep 9–17 SENSEX 73900 PE OTM capture.
     put_slide_unlock_enabled: bool = True
     put_slide_unlock_waive_expiry_otm: bool = False
