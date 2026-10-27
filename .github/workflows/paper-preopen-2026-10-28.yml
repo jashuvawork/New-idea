@@ -44,6 +44,7 @@ jobs:
               "git checkout main",
               "git pull --ff-only origin main || git reset --hard origin/main",
               "sudo bash deploy/set-execution-mode.sh --paper --no-loss-stops",
+              "bash deploy/verify-paper-676-session.sh",
               "curl -sf http://127.0.0.1:8000/api/deployment/status -o /tmp/nq-deploy-status.json",
               "python3 -m json.tool /tmp/nq-deploy-status.json | head -40 || true"
             ]' \
@@ -100,4 +101,8 @@ jobs:
           print('emergencyStopEnabled:', emerg)
           if loss > 0 or emerg:
               raise SystemExit('Loss stops still armed — expected dailyLossStopInr=0 and emergencyStop off')
+          choke = f.get('paper676EntryChoke')
+          print('paper676EntryChoke:', choke)
+          if choke is not True:
+              raise SystemExit('paper676EntryChoke must be true after --paper (#859)')
           "

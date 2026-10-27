@@ -145,6 +145,9 @@ async def deployment_status():
             "paperSlippageEnabled": settings.paper_slippage_enabled,
             "paperLiveParityEnabled": settings.paper_live_parity_enabled,
             "paper676EntryChoke": paper_676_entry_choke_active(settings),
+            "liveBestTradesOnlyEnabled": bool(
+                getattr(settings, "live_best_trades_only_enabled", True)
+            ),
             "sep917LegacyProfile": _sep917_legacy_profile_summary(settings),
         },
         "paperSlippage": slippage_config_summary(),
