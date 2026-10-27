@@ -773,6 +773,41 @@ def test_put_bullish_day_block_waived_by_put_slide_fingerprint():
     assert reason == ""
 
 
+def test_elite_entry_allows_same_strike_fresh_base_past_chase_stamps():
+    ev = _v_evidence(
+        localBaseMovePct=80.0,
+        flatVerticalQuality=90.0,
+        explosionScore=100.0,
+        side="PUT",
+        symbol="SENSEX",
+        strike=74200,
+        premium=320.0,
+        velocity3s=2.1,
+    )
+    ranking = _ranking(rankScore=95.0, grade="S")
+    blocked, block_reason, _ = elite_entry_allowed(ev, ranking)
+    assert blocked is False
+    assert (
+        block_reason
+        in {
+            "elite_fvq_chase_above_ceiling",
+            "elite_perfect_score_chase_blocked",
+            "elite_chase_past_local_base_window",
+            "elite_put_chase_past_local_base_window",
+        }
+        or str(block_reason).startswith("elite_explosive_chase_local_")
+    )
+    state = AutoTraderState()
+    with patch(
+        "app.engines.session_mode_feedback.same_strike_post_win_fresh_base_reentry",
+        return_value=(True, {"reason": "fresh_base_reentry"}),
+    ):
+        ok, reason, assessment = elite_entry_allowed(ev, ranking, state=state)
+    assert ok is True
+    assert reason == "ok"
+    assert assessment.get("sameStrikePostWinFreshBase") is True
+
+
 def test_elite_entry_blocks_perfect_score_chase():
     ev = _v_evidence(
         localBaseMovePct=18.0,

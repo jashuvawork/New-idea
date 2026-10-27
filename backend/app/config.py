@@ -2073,6 +2073,11 @@ class Settings(BaseSettings):
     post_win_continuation_leg_enabled: bool = True
     post_win_continuation_leg_min_velocity_3s: float = 2.0
     post_win_continuation_leg_lot_cap: int = 4
+    # One same-strike reentry after a win, only while that premium is rising off a
+    # fresh post-close base inside the pad. Clears near-miss and elite chase stamps.
+    # A fading print, the opposite side, a second leg, or a lift already past the
+    # pad stays blocked. Oct 21 SENSEX 74200 PUT sold near 315 and ran to 1029.
+    same_strike_post_win_fresh_base_reentry_enabled: bool = True
     # Sep28 NIFTY 22850 PE: first-lift + hot v3 must not waive a shallow pullback
     # near session peak after the rip is already extended (2% off peak → −₹33k SL).
     explosion_late_reentry_first_lift_hot_v3_min_pullback_pct: float = 8.0
