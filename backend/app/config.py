@@ -3049,6 +3049,11 @@ class Settings(BaseSettings):
     open_side_confirmation_min_minutes: float = 1.0
     open_side_confirmation_min_index_move_pct: float = 0.10
     open_side_confirmation_min_range_position: float = 0.6
+    # 09:15–09:45. A call must still be holding the cash high. A put must still
+    # be holding the low. First-lift and premium-rip waivers do not skip this.
+    index_candle_rollover_block_enabled: bool = True
+    index_candle_rollover_steps: int = 3
+    index_candle_rollover_min_giveback_pct: float = 0.04
     open_caution_min_explosion_score: int = 45
     open_caution_score_bonus: int = 0
     open_caution_min_rank_score: float = 55.0

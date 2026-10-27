@@ -170,6 +170,8 @@ async def fetch_live_trade_charts(
         "recommendedSide": chart_summary_dict(index_chart).get("recommendedSide"),
         "_indexMtfReads": index_mtf_reads,
         "_premiumMtfReads": premium_mtf_reads,
+        "_indexCandles1m": index_candles,
+        "_indexCandles5m": candles_5m,
     }
 
 
@@ -482,6 +484,27 @@ async def monitor_trade_chart_before_execution(
         return True, "ok", fallback
 
     index_chart = SpotChart(**meta["indexChartFull"])
+    from app.engines.index_candle_rollover import index_candle_rollover_blocked
+
+    # 09:15–09:45 cash-candle side. Intentionally before first-lift and premium bypasses.
+    candles_1m = meta.pop("_indexCandles1m", None)
+    candles_5m = meta.pop("_indexCandles5m", None)
+    roll_blocked, roll_reason, roll_meta = index_candle_rollover_blocked(
+        side,
+        candles_1m,
+        candles_5m,
+        spot=float(meta.get("spot") or getattr(snap, "spot", 0) or 0),
+        now=datetime.now(IST),
+        settings=settings,
+    )
+    if roll_blocked:
+        meta.pop("_indexMtfReads", None)
+        meta.pop("_premiumMtfReads", None)
+        meta["indexCandleRollover"] = roll_meta
+        meta["enabled"] = True
+        meta["passed"] = False
+        meta["blockReason"] = f"exec_{roll_reason}"
+        return False, f"exec_{roll_reason}", meta
     if not index_trough_bypass:
         index_trough_bypass = index_trough_momentum_turn(side, index_chart)
     premium_data = meta.get("premiumChart") or {}
