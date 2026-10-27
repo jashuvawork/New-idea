@@ -106,6 +106,10 @@ jobs:
               raise SystemExit('paper676EntryChoke must be true after full #676 redeploy')
           entry = f.get('entryEarliestIst')
           print('entryEarliestIst:', entry)
-          if entry != '09:16':
-              raise SystemExit('Expected entryEarliestIst 09:16 from paper-676-full overlay')
+          if entry != '09:20':
+              raise SystemExit('Expected entryEarliestIst 09:20')
+          macro = f.get('openSideConfirmationStartIst')
+          print('openSideConfirmationStartIst:', macro)
+          if macro != '09:25':
+              raise SystemExit('Expected openSideConfirmationStartIst 09:25')
           "

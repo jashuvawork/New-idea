@@ -3095,8 +3095,9 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
-    # 09:15 → 09:45 only. The side must match today's index tape (Oct 13 22300 PE).
-    # Idle from 09:45. The first order stays 09:20.
+    # Macro side check 09:25–09:45. Idle before 09:25 and after 09:45.
+    # The cash-candle hold covers 09:15–09:45. The first order stays 09:20.
+    # A 09:15 start locked the opening push before three closes existed.
     open_side_confirmation_enabled: bool = True
     open_side_confirmation_start_hour: int = 9
     open_side_confirmation_start_minute: int = 25
