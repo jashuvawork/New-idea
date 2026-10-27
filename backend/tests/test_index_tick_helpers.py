@@ -331,6 +331,7 @@ def _seed_extremes(symbol, hi, lo, last):
     ith._session_extremes[symbol.upper()] = {
         "date": _dt.datetime.now(IST).date(),
         "open": lo, "hi": hi, "lo": lo, "last": last,
+        "fromCashOpen": True,
     }
 
 
@@ -371,7 +372,7 @@ def test_index_trend_breakout_rejects_new_high_without_thrust():
 
 
 def test_trend_breakout_seeds_session_hilo_from_snapshot_when_ticks_cold():
-    """After a restart the tick tracker is cold — broker session H/L still enables the override."""
+    """After a restart the tick tracker is cold — today's quote high/low still enables the override."""
     from app.engines.index_tick_helpers import index_trend_breakout
     from app.models.schemas import ChartAnalysis
     reset_index_tick_helpers_for_tests()  # no _session_extremes (cold start)
@@ -379,11 +380,72 @@ def test_trend_breakout_seeds_session_hilo_from_snapshot_when_ticks_cold():
     snap = _snap_put(direction="BULLISH", momentum5Pct=0.165)
     snap.spot = 77590.0
     snap.chartAnalysis = ChartAnalysis(
-        institutional={"sessionHigh": 77600.0, "sessionLow": 77440.0}
+        institutional={"dayHigh": 77600.0, "dayLow": 77440.0, "dayOpen": 77450.0}
     )
     bo = index_trend_breakout("SENSEX", Side.CALL, snap)
     assert bo["breakout"] is True
     assert "near_session_high" in bo["reasons"]
+
+
+def test_yesterday_chart_session_is_not_todays_open():
+    """SMC sessionHigh is the chart window. It must not stand in for today's range."""
+    from app.engines.index_tick_helpers import index_trend_breakout, resolve_index_session
+    from app.models.schemas import ChartAnalysis
+
+    reset_index_tick_helpers_for_tests()
+    snap = _snap_put()
+    snap.spot = 77590.0
+    snap.chartAnalysis = ChartAnalysis(
+        institutional={"sessionHigh": 77600.0, "sessionLow": 77440.0}
+    )
+    resolved = resolve_index_session("SENSEX", snap)
+    assert resolved["open"] == 0.0
+    assert resolved["hi"] == 77590.0
+    bo = index_trend_breakout("SENSEX", Side.CALL, snap)
+    assert bo["breakout"] is False
+
+
+def test_today_cash_bars_supply_the_open_when_the_quote_has_none():
+    from datetime import datetime
+
+    from app.engines.realtime_engine import _today_cash_ohlc
+
+    today = datetime.now(IST).date().isoformat()
+    yesterday = "2026-10-26"
+    candles = [
+        [f"{today}T09:20:00+05:30", 22750.0, 22760.0, 22740.0, 22755.0, 0],
+        [f"{today}T09:15:00+05:30", 22743.2, 22748.0, 22740.0, 22746.0, 0],
+        [f"{yesterday}T15:29:00+05:30", 22610.0, 22680.0, 22590.0, 22640.0, 0],
+    ]
+    ohlc = _today_cash_ohlc(candles)
+    assert ohlc["dayOpen"] == 22743.2
+    assert ohlc["dayHigh"] == 22760.0
+    assert ohlc["dayLow"] == 22740.0
+
+
+def test_live_day_open_beats_the_tick_tape_open():
+    from app.engines.index_tick_helpers import resolve_index_session
+    from app.models.schemas import ChartAnalysis
+
+    reset_index_tick_helpers_for_tests()
+    from app.engines import index_tick_helpers as helpers
+
+    helpers._session_extremes["NIFTY"] = {
+        "date": None,
+        "open": 22680.0,
+        "hi": 22763.0,
+        "lo": 22680.0,
+        "last": 22748.0,
+    }
+    snap = _snap_put()
+    snap.spot = 22748.0
+    snap.chartAnalysis = ChartAnalysis(
+        institutional={"dayOpen": 22743.2, "dayHigh": 22786.9, "dayLow": 22699.8}
+    )
+    resolved = resolve_index_session("NIFTY", snap)
+    assert resolved["open"] == 22743.2
+    assert resolved["hi"] == 22786.9
+    assert resolved["lo"] == 22699.8
 
 
 def test_index_trend_override_active_scans_symbols():
