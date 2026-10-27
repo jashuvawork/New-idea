@@ -1319,6 +1319,144 @@ def post_win_session_late_reentry_waive(
     return True, "continuation_leg", meta
 
 
+def _alert_premium_already_fading(
+    alert: dict[str, Any] | None,
+    velocity_3s: float,
+) -> bool:
+    """True when the live print is flat or already rolling over."""
+    try:
+        v3 = float(velocity_3s or 0)
+    except (TypeError, ValueError):
+        v3 = 0.0
+    if v3 <= 0:
+        return True
+    if not isinstance(alert, dict):
+        return False
+
+    def _negative(raw: Any) -> bool:
+        if raw is None or raw == "":
+            return False
+        try:
+            return float(raw) < 0
+        except (TypeError, ValueError):
+            return False
+
+    for key in (
+        "premiumMomentum3Pct",
+        "premiumMomentum5Pct",
+        "momentum3Pct",
+        "momentum5Pct",
+    ):
+        if _negative(alert.get(key)):
+            return True
+    chart = alert.get("premiumChart") or alert.get("premium_chart") or {}
+    if isinstance(chart, dict):
+        for key in ("momentum3Pct", "momentum5Pct", "premiumMomentum3Pct", "premiumMomentum5Pct"):
+            if _negative(chart.get(key)):
+                return True
+    return False
+
+
+def same_strike_post_win_fresh_base_reentry(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    premium: float,
+    velocity_3s: float,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, dict[str, Any]]:
+    """
+    One same-strike reentry after a win, only off a fresh post-close base.
+
+    The premium must still be rising, and the lift off that new base must sit
+    inside the post-win pad. A flat or fading print, the opposite side, a second
+    leg, and a move already past the pad stay blocked.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"sameStrikePostWinFreshBase": False}
+    if not bool(getattr(settings, "same_strike_post_win_fresh_base_reentry_enabled", True)):
+        meta["reason"] = "disabled"
+        return False, meta
+    lookback = float(
+        getattr(settings, "post_win_late_reentry_waive_lookback_seconds", 14400) or 14400
+    )
+    prior, age = _latest_same_strike_win_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        max_age_seconds=lookback,
+    )
+    if prior is None:
+        meta["reason"] = "no_same_strike_win"
+        return False, meta
+    meta["priorWinTradeId"] = getattr(prior, "id", None)
+    meta["priorWinPnlInr"] = round(
+        float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0), 2,
+    )
+    meta["secondsSinceWinClose"] = round(age, 1)
+    closed_at = prior.closedAt
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    legs_after = _same_strike_legs_after_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        closed_at=closed_at,
+    )
+    meta["sameStrikeLegsAfterWin"] = legs_after
+    if legs_after >= 1:
+        meta["reason"] = "reentry_already_taken"
+        return False, meta
+    if _alert_premium_already_fading(alert, velocity_3s):
+        meta["reason"] = "premium_fading"
+        return False, meta
+
+    from app.engines.explosion_detector import post_close_base_reacceleration
+
+    reset, reset_meta = post_close_base_reacceleration(
+        symbol,
+        strike,
+        side,
+        closed_at=closed_at,
+        current_premium=float(premium or 0),
+        velocity_3s=float(velocity_3s or 0),
+        min_base_samples=int(
+            getattr(settings, "explosion_post_peak_reentry_base_samples", 3) or 3
+        ),
+        min_base_span_seconds=float(
+            getattr(settings, "explosion_post_peak_reentry_base_span_seconds", 6.0) or 6.0
+        ),
+        min_reacceleration_pct=float(
+            getattr(settings, "explosion_post_peak_reentry_min_reacceleration_pct", 8.0)
+            or 8.0
+        ),
+        min_velocity_3s=float(
+            getattr(settings, "explosion_post_peak_reentry_min_velocity_3s", 1.5) or 1.5
+        ),
+    )
+    meta["postCloseBase"] = reset_meta
+    if not reset:
+        meta["reason"] = "no_fresh_base"
+        return False, meta
+    try:
+        reaccel = float(reset_meta.get("reaccelerationPct") or 0)
+    except (TypeError, ValueError):
+        reaccel = 0.0
+    max_pad = float(
+        getattr(settings, "post_win_new_local_base_max_pad_pct", 22.0) or 22.0
+    )
+    if reaccel > max_pad + 1e-6:
+        meta["reason"] = "above_fresh_base_pad"
+        return False, meta
+    meta["sameStrikePostWinFreshBase"] = True
+    meta["reason"] = "fresh_base_reentry"
+    return True, meta
+
+
 def cap_post_win_continuation_leg_lots(
     lots: int,
     state: AutoTraderState | None,

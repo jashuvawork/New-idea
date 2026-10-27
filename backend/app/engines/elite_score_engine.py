@@ -1675,12 +1675,47 @@ def elite_entry_allowed(
             "qualityMomentPassportMode": passport_mode,
         }
 
+    fresh_base_reentry = False
+    if state is not None and bool(
+        getattr(settings, "same_strike_post_win_fresh_base_reentry_enabled", True)
+    ):
+        from app.engines.session_mode_feedback import (
+            same_strike_post_win_fresh_base_reentry,
+        )
+
+        try:
+            strike_v = float(evidence.get("strike") or 0)
+        except (TypeError, ValueError):
+            strike_v = 0.0
+        try:
+            prem_v = float(evidence.get("premium") or 0)
+        except (TypeError, ValueError):
+            prem_v = 0.0
+        try:
+            v3 = float(evidence.get("velocity3s") or evidence.get("velocity_3s") or 0)
+        except (TypeError, ValueError):
+            v3 = 0.0
+        alert_d = dict(evidence) if isinstance(evidence, Mapping) else None
+        fresh_base_reentry, _fresh_meta = same_strike_post_win_fresh_base_reentry(
+            state,
+            symbol=str(evidence.get("symbol") or ""),
+            side=resolved_side,
+            strike=strike_v,
+            premium=prem_v,
+            velocity_3s=v3,
+            alert=alert_d,
+        )
+        if fresh_base_reentry:
+            assessment = {**assessment, "sameStrikePostWinFreshBase": True}
+
     if not elite_base_setup_allowed(
         setup,
         mega_ok=mega_ok or building_rip_helper_ok,
         settings=settings,
     ):
-        if passport_entry and setup.upper() in ("EXPLOSIVE", "FTV", "V"):
+        if (
+            passport_entry and setup.upper() in ("EXPLOSIVE", "FTV", "V")
+        ) or fresh_base_reentry:
             pass
         elif bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)):
             assessment = {**assessment, "side": resolved_side}
@@ -1723,7 +1758,7 @@ def elite_entry_allowed(
         side=resolved_side,
         ranking=ranking,
     )
-    if fvq_blocked:
+    if fvq_blocked and not fresh_base_reentry:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, fvq_reason, assessment
 
@@ -1782,7 +1817,7 @@ def elite_entry_allowed(
         settings=settings,
         call_capture_waive=call_capture_waive,
     )
-    if perfect_blocked:
+    if perfect_blocked and not fresh_base_reentry:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, perfect_reason, assessment
 
@@ -1797,7 +1832,7 @@ def elite_entry_allowed(
         return False, shallow_reason, assessment
 
     local = _number(assessment.get("localBasePct"))
-    if local > max_local + 1e-6:
+    if local > max_local + 1e-6 and not fresh_base_reentry:
         from app.engines.best_trade_policy import symmetric_best_trade_capture_active
 
         assessment = {**assessment, "side": resolved_side, "localBaseCapPct": round(max_local, 2)}
