@@ -158,8 +158,6 @@ else
   PAPER_676_KEYS=(
     PAPER_676_ENTRY_CHOKE_ENABLED
     OCT_PAPER_REPLICA_ENABLED
-    LIVE_BEST_TRADES_ONLY_ENABLED
-    LEGACY_LIVE_NARROW_STACK_ENABLED
     CALL_ATM_ITM_BASE_CAPTURE_ENABLED
   )
   for key in "${PAPER_676_KEYS[@]}"; do
@@ -168,6 +166,9 @@ else
       _set_env_key "$key" "$val"
     fi
   done
+  # Paper #676 stack — not the live-arm grade gate (template keeps live_best true for --live pin).
+  _set_env_key LIVE_BEST_TRADES_ONLY_ENABLED false
+  _set_env_key LEGACY_LIVE_NARROW_STACK_ENABLED false
 fi
 
 if [ "$NO_LOSS_STOPS" -eq 1 ]; then

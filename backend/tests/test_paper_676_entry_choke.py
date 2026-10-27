@@ -41,7 +41,25 @@ def test_production_template_arms_paper_676_entry_choke():
     env = _template_env()
     assert env.get("PAPER_676_ENTRY_CHOKE_ENABLED") == "true"
     assert env.get("OCT_PAPER_REPLICA_ENABLED") == "true"
-    assert env.get("LIVE_BEST_TRADES_ONLY_ENABLED") == "false"
+    # Live arm pin keeps grade gate true; --paper mode sets live_best false explicitly.
+    assert env.get("LIVE_BEST_TRADES_ONLY_ENABLED") == "true"
+
+
+def test_set_execution_mode_paper_disables_live_best_gate(tmp_path):
+    import os
+    import subprocess
+
+    root = _TEMPLATE.parents[1]
+    env_file = tmp_path / "env"
+    env_file.write_text("ENABLE_LIVE_TRADING=true\nLIVE_BEST_TRADES_ONLY_ENABLED=true\n")
+    subprocess.run(
+        ["bash", str(root / "deploy/set-execution-mode.sh"), "--paper"],
+        check=True,
+        env={**os.environ, "ENV_FILE": str(env_file), "REPO_DIR": str(root), "SKIP_RESTART": "1"},
+    )
+    text = env_file.read_text()
+    assert "LIVE_BEST_TRADES_ONLY_ENABLED=false" in text
+    assert "PAPER_676_ENTRY_CHOKE_ENABLED=true" in text
 
 
 def test_paper_676_flag_enables_replica_stack(use_settings):
