@@ -33,7 +33,12 @@ def _reset_tape():
 
 def _tape(symbol: str, *, open_: float, hi: float, lo: float, last: float):
     index_tick_helpers._session_extremes[symbol] = {
-        "date": _at(9, 15).date(), "open": open_, "hi": hi, "lo": lo, "last": last,
+        "date": _at(9, 15).date(),
+        "open": open_,
+        "hi": hi,
+        "lo": lo,
+        "last": last,
+        "fromCashOpen": True,
     }
     return SimpleNamespace(spot=last)
 
@@ -106,3 +111,30 @@ def test_enabled_at_one_minute_by_default():
     blocked16, _, _ = open_side_confirmation("NIFTY", Side.CALL, snap, now=_at(9, 16, 18), settings=s)
     assert blocked15 and reason15 == "open_side_unconfirmed_first_bar"
     assert blocked16 is False
+
+
+def test_confirmation_uses_live_day_open_not_the_preopen_tick():
+    from app.models.schemas import ChartAnalysis
+
+    index_tick_helpers._session_extremes["NIFTY"] = {
+        "date": _at(9, 28).date(),
+        "open": 22680.0,
+        "hi": 22763.0,
+        "lo": 22680.0,
+        "last": 22748.0,
+    }
+    snap = SimpleNamespace(
+        spot=22748.0,
+        chartAnalysis=ChartAnalysis(
+            institutional={
+                "dayOpen": 22743.2,
+                "dayHigh": 22786.9,
+                "dayLow": 22699.8,
+            }
+        ),
+    )
+    blocked, reason, meta = open_side_confirmation(
+        "NIFTY", Side.CALL, snap, now=_at(9, 28, 20), settings=_settings(),
+    )
+    assert blocked and reason == "open_side_call_index_not_above_open"
+    assert meta["sessionOpen"] == 22743.2

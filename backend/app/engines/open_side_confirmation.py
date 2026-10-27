@@ -60,13 +60,13 @@ def open_side_confirmation(
             "minutesSinceOpen": round(minutes - MARKET_OPEN_MINUTES, 2),
         }
 
-    from app.engines.index_tick_helpers import index_session_extremes
+    from app.engines.index_tick_helpers import resolve_index_session
 
-    ext = index_session_extremes(symbol)
+    ext = resolve_index_session(symbol, snap)
     session_open = float(ext.get("open") or 0)
     hi = float(ext.get("hi") or 0)
     lo = float(ext.get("lo") or 0)
-    spot = float(getattr(snap, "spot", 0) or 0) or float(ext.get("last") or 0)
+    spot = float(ext.get("last") or 0) or float(getattr(snap, "spot", 0) or 0)
     if session_open <= 0 or spot <= 0 or hi <= 0 or lo <= 0:
         return True, "open_side_no_session_tape", {}
     hi, lo = max(hi, spot), min(lo, spot)
