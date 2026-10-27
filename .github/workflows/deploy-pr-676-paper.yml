@@ -134,8 +134,10 @@ jobs:
               raise SystemExit('enableLiveTrading must be false')
           if f.get('paper676EntryChoke') is not True:
               raise SystemExit('paper676EntryChoke must be true')
-          if f.get('entryEarliestIst') != '09:16':
-              raise SystemExit('entryEarliestIst must be 09:16 after overlay')
+          if f.get('entryEarliestIst') != '09:20':
+              raise SystemExit('entryEarliestIst must be 09:20 after overlay')
+          if f.get('openSideConfirmationStartIst') != '09:25':
+              raise SystemExit('openSideConfirmationStartIst must be 09:25 after overlay')
           if f.get('liveBestTradesOnlyEnabled') is not False:
               raise SystemExit('liveBestTradesOnlyEnabled must be false on --paper')
           "; then
