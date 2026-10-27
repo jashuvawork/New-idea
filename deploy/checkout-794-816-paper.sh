@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Detach the EC2 checkout at the #794 book plus the #816 exit stack
-# (8400308e on cursor/794-816-exits-3b1b) and recreate the backend with
+# (43208db0 on cursor/794-816-exits-3b1b) and recreate the backend with
 # paper on and live off. That tree's production template arms live trading,
 # so this script pins paper after the checkout. The sizing book stays the
 # #794 ₹2,00,000 sleeve.
@@ -12,8 +12,8 @@ export GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/root/.gitconfig}"
 
 REPO=/opt/nexusquant/New-idea
 ENV_FILE=/opt/nexusquant/env
-SHA=8400308e79867f1fef5661f29afa347e77842b41
-SHORT=8400308e
+SHA=43208db083dd97c48d1ce6b605510c75863b1002
+SHORT=43208db0
 
 git config --global --add safe.directory "$REPO" || true
 git config --global --add safe.directory /opt/nexusquant || true
@@ -34,7 +34,7 @@ forced = {
     "PAPER_TRADING": "true",
     "PAPER_SLIPPAGE_ENABLED": "true",
     "PAPER_SIMULATE_BROKER_ORDERS": "true",
-    "COMMIT_SHA": "8400308e",
+    "COMMIT_SHA": "43208db0",
     "FALLBACK_CAPITAL_INR": "200000",
     "MAX_SIZING_CAPITAL_INR": "200000",
     "ENTRY_EARLIEST_HOUR": "9",
