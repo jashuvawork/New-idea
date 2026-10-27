@@ -491,7 +491,7 @@ jobs:
           }, indent=2))
           if d.get('status') != 'ok':
               raise SystemExit('status not ok')
-          if not commit.startswith('8492d875'):
+          if not commit.startswith('43208db0'):
               raise SystemExit('commit mismatch: ' + commit)
           if f.get('paperTrading') is not True or f.get('enableLiveTrading') is not False:
               raise SystemExit('paper mode is not on')
