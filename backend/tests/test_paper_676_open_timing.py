@@ -40,6 +40,18 @@ def test_template_keeps_safer_0920_entry_not_in_overlay_conflict():
     assert ovl["ENTRY_EARLIEST_MINUTE"] == "16"
 
 
+def test_full_session_overlay_pins_816_mega_tp_rung_exits():
+    """Paper redeploy must not drift off #816 mega TP-rung / unified ladder defaults."""
+    env = _parse_env(OVERLAY)
+    assert env["UNIFIED_PROFIT_LADDER_ENABLED"] == "true"
+    assert env["TP_RUNG_LADDER_EXIT_ENABLED"] == "true"
+    assert env["TP_RUNG_LADDER_MEGA_FADE_MIN_GIVEBACK_POINTS"] == "12"
+    assert env["TP_RUNG_LADDER_MEGA_HOT_DEFER_VELOCITY_3S"] == "4"
+    assert env["TP_RUNG_LADDER_MEGA_DISABLE_BETWEEN_FADE_MIN_BEST_POINTS"] == "55"
+    assert env["TP_RUNG_LADDER_MEGA_LADDER_FIRST_MIN_BEST_POINTS"] == "55"
+    assert env["DAILY_PROFIT_STAGE_LOCKS_ENABLED"] == "true"
+
+
 def test_settings_reflect_overlay_entry_and_open_side():
     s = Settings(
         entry_earliest_hour=9,
@@ -59,3 +71,18 @@ def test_settings_reflect_overlay_entry_and_open_side():
         f"{s.open_side_confirmation_start_hour:02d}:"
         f"{s.open_side_confirmation_start_minute:02d}"
     ) == "09:15"
+
+
+def test_overlay_816_exit_env_loads_into_settings():
+    env = _parse_env(OVERLAY)
+    mega_keys = {
+        "TP_RUNG_LADDER_MEGA_FADE_MIN_GIVEBACK_POINTS": "tp_rung_ladder_mega_fade_min_giveback_points",
+        "TP_RUNG_LADDER_MEGA_LADDER_FIRST_MIN_BEST_POINTS": "tp_rung_ladder_mega_ladder_first_min_best_points",
+    }
+    kwargs = {}
+    for env_key, field in mega_keys.items():
+        val = env[env_key]
+        kwargs[field] = float(val) if "." in val else int(val)
+    s = Settings(**kwargs)
+    assert s.tp_rung_ladder_mega_fade_min_giveback_points == 12.0
+    assert s.tp_rung_ladder_mega_ladder_first_min_best_points == 55.0
