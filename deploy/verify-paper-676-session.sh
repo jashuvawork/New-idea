@@ -13,6 +13,7 @@ checks = [
     ("paperTrading", True),
     ("enableLiveTrading", False),
     ("paper676EntryChoke", True),
+    ("paper816ExitPack", True),
     ("liveBestTradesOnlyEnabled", False),
 ]
 failed = []

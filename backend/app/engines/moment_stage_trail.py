@@ -719,7 +719,9 @@ def profit_ladder_floor(
       * breakeven  — off unless ``unified_profit_ladder_breakeven_enabled``. When
         on, a peak ≥ 8% locks entry + 2%.
     """
-    s = settings or get_settings()
+    from app.engines.paper_816_exit_pack import settings_for_paper_exit
+
+    s = settings_for_paper_exit(settings or get_settings())
     if getattr(s, "unified_profit_ladder_enabled", False) is not True:
         return None
     entry = _safe_float(getattr(trade, "entryPremium", 0))

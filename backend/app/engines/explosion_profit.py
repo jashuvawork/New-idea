@@ -2241,7 +2241,9 @@ def unified_profit_ladder_exit_reason(
     The multiple lock still sells on a floor break. A hot tick (v3 ≥ +2)
     defers one evaluation but never lowers the floor.
     """
-    settings = get_settings()
+    from app.engines.paper_816_exit_pack import settings_for_paper_exit
+
+    settings = settings_for_paper_exit(get_settings())
     from app.engines.moment_stage_trail import profit_ladder_floor
 
     ladder = profit_ladder_floor(trade, best, settings=settings)
@@ -2379,7 +2381,9 @@ def stage_runner_mega_pullback_exit_reason(
     red had no exit. Touch-sell at the 75% line when price returns; hole-take and
     red-giveback when it does not.
     """
-    settings = get_settings()
+    from app.engines.paper_816_exit_pack import settings_for_paper_exit
+
+    settings = settings_for_paper_exit(get_settings())
     from app.engines.ict_breakout_monitor import _ict_max_profit_trade
     from app.engines.moment_stage_trail import ftv_runner_pct_floor, trade_uses_moment_stage_ladder
 
@@ -2465,12 +2469,20 @@ def evaluate_explosion_exit(
     Explosion exits: hard SL when losing, trailing SL + TP while winning.
     Lets runners extend; locks profit as peak builds.
     """
-    settings = get_settings()
+    from app.engines.paper_816_exit_pack import (
+        paper_816_exit_pack_active,
+        settings_for_paper_exit,
+    )
+
+    settings = settings_for_paper_exit(get_settings())
     from app.engines.risk_stops import live_hold_to_structural_sl
 
     hold_to_sl = live_hold_to_structural_sl(settings)
     exit_params = params or default_explosion_exit_params(event_tier)
-    ctx = trade.entryContext or {}
+    ctx = dict(trade.entryContext or {})
+    if paper_816_exit_pack_active(settings):
+        ctx["paper816ExitPack"] = True
+        trade.entryContext = ctx
     if ctx.get("afternoonCapture"):
         from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
 

@@ -47,6 +47,7 @@ async def loop_stalls(limit: int = 10):
 @router.get("/api/deployment/status")
 async def deployment_status():
     from app.engines.live_paper_parity import paper_676_entry_choke_active
+    from app.engines.paper_816_exit_pack import paper_816_exit_pack_active
     from app.loop_watchdog import watchdog_status
     from app.services.radar_health import health_status
 
@@ -145,6 +146,7 @@ async def deployment_status():
             "paperSlippageEnabled": settings.paper_slippage_enabled,
             "paperLiveParityEnabled": settings.paper_live_parity_enabled,
             "paper676EntryChoke": paper_676_entry_choke_active(settings),
+            "paper816ExitPack": paper_816_exit_pack_active(settings),
             "liveBestTradesOnlyEnabled": bool(
                 getattr(settings, "live_best_trades_only_enabled", True)
             ),

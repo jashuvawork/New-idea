@@ -282,7 +282,9 @@ def tp_rung_exit_reason(
     settings: Optional[Settings] = None,
 ) -> Optional[str]:
     """Exit when fading between rungs or falling through the active rung floor."""
-    s = settings or get_settings()
+    from app.engines.paper_816_exit_pack import settings_for_paper_exit
+
+    s = settings_for_paper_exit(settings or get_settings())
     if not trade_uses_tp_rung_ladder(trade, settings=s):
         return None
 

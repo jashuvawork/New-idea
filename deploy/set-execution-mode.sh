@@ -155,10 +155,12 @@ else
   _set_env_key PAPER_SIMULATE_BROKER_ORDERS true
   _set_env_key SHADOW_TRADE_ALL_SIGNALS true
   echo "Paper #676 entry choke (Oct 1/5 replica + base-capture stack)..."
+  echo "Paper #816 exit pack (mega 75% ladder, no early between-rung fade)..."
   PAPER_676_KEYS=(
     PAPER_676_ENTRY_CHOKE_ENABLED
     OCT_PAPER_REPLICA_ENABLED
     CALL_ATM_ITM_BASE_CAPTURE_ENABLED
+    PAPER_816_EXIT_PACK_ENABLED
   )
   for key in "${PAPER_676_KEYS[@]}"; do
     val="$(_template_value "$key" || true)"

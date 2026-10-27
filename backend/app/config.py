@@ -3359,6 +3359,9 @@ class Settings(BaseSettings):
     oct_paper_replica_enabled: bool = False
     # Paper deploy (#676 era): Oct 1/5 entry choke — base-capture rank arm; no live_best_trades wire.
     paper_676_entry_choke_enabled: bool = False
+    # #816 mega exit pack on that paper book (75% ladder before between-rung fade).
+    # Also on whenever the #676 paper choke is active. Live does not use it.
+    paper_816_exit_pack_enabled: bool = False
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0

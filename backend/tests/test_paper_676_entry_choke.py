@@ -60,6 +60,7 @@ def test_set_execution_mode_paper_disables_live_best_gate(tmp_path):
     text = env_file.read_text()
     assert "LIVE_BEST_TRADES_ONLY_ENABLED=false" in text
     assert "PAPER_676_ENTRY_CHOKE_ENABLED=true" in text
+    assert "PAPER_816_EXIT_PACK_ENABLED=true" in text
 
 
 def test_paper_676_flag_enables_replica_stack(use_settings):
