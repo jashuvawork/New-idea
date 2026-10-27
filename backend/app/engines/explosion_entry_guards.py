@@ -1423,6 +1423,7 @@ def deep_itm_near_strike_substitute_blocked(
     min_itm = int(getattr(s, "explosion_deep_itm_substitute_min_itm_steps", 1) or 1)
     if money == "ITM" and depth < min_itm:
         return False, ""
+    candidate_strike = float(strike or 0)
     max_otm = int(
         getattr(s, "explosion_deep_itm_substitute_near_strike_max_steps", 2) or 2
     )
@@ -1431,6 +1432,11 @@ def deep_itm_near_strike_substitute_blocked(
             continue
         alt_strike = float(alt.get("strike") or 0)
         if alt_strike <= 0:
+            continue
+        if (
+            candidate_strike > 0
+            and abs(alt_strike - candidate_strike) <= 0.51
+        ):
             continue
         alt_depth, alt_money, _ = _strike_depth(side, alt_strike, snap)
         if alt_money not in ("ATM", "ITM", "OTM"):
