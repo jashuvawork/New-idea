@@ -43,8 +43,7 @@ jobs:
               "git fetch origin main",
               "git checkout main",
               "git pull --ff-only origin main || git reset --hard origin/main",
-              "sudo bash deploy/set-execution-mode.sh --paper --no-loss-stops",
-              "bash deploy/verify-paper-676-session.sh",
+              "sudo bash deploy/redeploy-paper-676-full.sh --no-loss-stops",
               "curl -sf http://127.0.0.1:8000/api/deployment/status -o /tmp/nq-deploy-status.json",
               "python3 -m json.tool /tmp/nq-deploy-status.json | head -40 || true"
             ]' \
@@ -104,5 +103,9 @@ jobs:
           choke = f.get('paper676EntryChoke')
           print('paper676EntryChoke:', choke)
           if choke is not True:
-              raise SystemExit('paper676EntryChoke must be true after --paper (#859)')
+              raise SystemExit('paper676EntryChoke must be true after full #676 redeploy')
+          entry = f.get('entryEarliestIst')
+          print('entryEarliestIst:', entry)
+          if entry != '09:16':
+              raise SystemExit('Expected entryEarliestIst 09:16 from paper-676-full overlay')
           "

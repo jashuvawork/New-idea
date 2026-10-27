@@ -100,6 +100,14 @@ async def deployment_status():
             "scalpStopPoints": settings.scalp_stop_points,
             "explosionInitialStopPoints": settings.explosion_initial_stop_points,
             "entryEarliestIst": f"{settings.entry_earliest_hour:02d}:{settings.entry_earliest_minute:02d}",
+            "explosionEntryEarliestIst": (
+                f"{settings.explosion_entry_earliest_hour:02d}:"
+                f"{settings.explosion_entry_earliest_minute:02d}"
+            ),
+            "openSideConfirmationStartIst": (
+                f"{settings.open_side_confirmation_start_hour:02d}:"
+                f"{settings.open_side_confirmation_start_minute:02d}"
+            ),
             "openCautionUntilIst": f"{settings.open_caution_until_hour:02d}:{settings.open_caution_until_minute:02d}",
             "openCautionMinExplosionScore": settings.open_caution_min_explosion_score,
             "aggressiveMinExplosionScore": settings.aggressive_min_explosion_score,
