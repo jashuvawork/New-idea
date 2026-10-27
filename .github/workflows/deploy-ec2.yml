@@ -337,7 +337,10 @@ jobs:
           exit 1
 
       - name: Deploy commit 739fee8 in paper mode
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-739fee8]') && !contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[arm-live]')
+        # Runs whenever the message contains this marker. The overlay step
+        # already stands down in that case, so a mention of the other marker
+        # must not skip this one too.
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-739fee8]') && !contains(github.event.head_commit.message, '[arm-live]')
         id: deploy739
         run: |
           set -euo pipefail
