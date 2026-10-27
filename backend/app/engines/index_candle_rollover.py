@@ -1,16 +1,17 @@
 """Block a side when today's index candles are stepping off the local extreme.
 
-Off by default. Only from 09:15 to 09:45 when the flag is on. After 09:45
-this check is idle and the composite chart gate stands on its own.
+On from 09:15 until 09:45 IST. After 09:45 this check is idle and the composite
+chart gate stands on its own.
 
 The 5-minute composite can stay bullish while price is already leaving the high.
 Oct 23 Nifty 22800 CE filled at 09:28 with a bullish 3-bar chart (+0.15%) and the
 open-side tape still above the open, while the index was stepping down off
-22,763. PR 676 has the same composite chart gate and no candle-by-candle check,
-so that fill would have passed there too.
+22,763. Oct 26 Nifty 22350 PE filled at 09:40 on a 5-bar bearish stamp while the
+cash tape was already lifting off the low.
 
-A call needs the last few session candles to stop making lower closes. A put is
-the mirror. First-lift and base-call waivers do not skip this.
+A call needs the last few session candles to still be holding the high. A put
+needs them still holding the low. First-lift, elite, and premium-rip waivers
+do not skip this.
 """
 
 from __future__ import annotations
@@ -155,11 +156,26 @@ def _inside_open_window(now: datetime, settings: Any) -> bool:
     return open_side_index_confirmation_window_active(now, settings)
 
 
+def cash_candle_side_window_active(
+    now: datetime | None = None,
+    settings: Any = None,
+) -> bool:
+    """True from the cash open until 09:45 IST (09:15:00–09:44:59)."""
+    settings = settings or get_settings()
+    current = (now or datetime.now(IST)).astimezone(IST)
+    minutes = current.hour * 60 + current.minute + current.second / 60.0
+    end = (
+        int(getattr(settings, "open_caution_until_hour", 9) or 9) * 60
+        + int(getattr(settings, "open_caution_until_minute", 45) or 45)
+    )
+    return _SESSION_OPEN_MINUTES <= minutes < end
+
+
 def open_caution_window_active(
     now: datetime | None = None,
     settings: Any = None,
 ) -> bool:
-    """True during the open-caution entry window (09:15–09:44:59 IST)."""
+    """True during macro open-side confirmation (default 09:25–09:44:59 IST)."""
     settings = settings or get_settings()
     current = (now or datetime.now(IST)).astimezone(IST)
     return _inside_open_window(current, settings)
@@ -176,16 +192,17 @@ def index_candle_rollover_blocked(
 ) -> tuple[bool, str, dict[str, Any]]:
     """Return (blocked, reason, meta). Either 1m or 5m stepping off the extreme blocks.
 
-    Active only from 09:15 until 09:45. The same decline after 09:45 does not block.
+    Active from 09:15 until 09:45. The same move after 09:45 does not block.
+    Callers must run this before first-lift and premium-rip bypasses.
     """
     settings = settings or get_settings()
-    if getattr(settings, "index_candle_rollover_block_enabled", False) is not True:
+    if getattr(settings, "index_candle_rollover_block_enabled", True) is not True:
         return False, "", {}
     side_v = _side_val(side)
     if side_v not in ("CALL", "PUT"):
         return False, "", {}
     now = (now or datetime.now(IST)).astimezone(IST)
-    if not _inside_open_window(now, settings):
+    if not cash_candle_side_window_active(now, settings):
         return False, "", {}
     steps = int(getattr(settings, "index_candle_rollover_steps", 3) or 3)
     min_giveback = float(

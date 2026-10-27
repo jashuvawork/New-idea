@@ -560,6 +560,7 @@ async def monitor_trade_chart_before_execution(
     index_chart = SpotChart(**meta["indexChartFull"])
     from app.engines.index_candle_rollover import index_candle_rollover_blocked
 
+    # 09:15–09:45 cash-candle side. Intentionally before first-lift and premium bypasses.
     candles_1m = meta.pop("_indexCandles1m", None)
     candles_5m = meta.pop("_indexCandles5m", None)
     roll_blocked, roll_reason, roll_meta = index_candle_rollover_blocked(

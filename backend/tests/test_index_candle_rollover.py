@@ -24,18 +24,18 @@ def _settings(**overrides) -> Settings:
     return settings
 
 
-def test_candle_confirmation_is_off_by_default():
+def test_cash_candle_side_block_is_on_by_default():
     candles = [
         _bar(26, 22760, 22761, 22752, 22754),
         _bar(27, 22754, 22755, 22746, 22748),
         _bar(28, 22748, 22749, 22744, 22746),
     ]
-    assert Settings().index_candle_rollover_block_enabled is False
+    assert Settings().index_candle_rollover_block_enabled is True
     blocked, reason, _ = index_candle_rollover_blocked(
-        Side.CALL, candles, spot=22745.0, now=NOW,
+        Side.CALL, candles, spot=22745.0, now=NOW, settings=Settings(),
     )
-    assert blocked is False
-    assert reason == ""
+    assert blocked is True
+    assert reason == "index_falling_from_local_high"
 
 
 def test_call_blocked_when_each_minute_closes_lower_off_the_high():
@@ -180,17 +180,24 @@ def test_window_ends_at_0945_exactly():
     assert reason == "index_falling_from_local_high"
 
 
-def test_before_0925_side_confirm_window_does_not_block():
+def test_window_covers_0915_through_0944():
     candles = [
-        _bar(26, 22760, 22761, 22752, 22754),
-        _bar(27, 22754, 22755, 22746, 22748),
-        _bar(28, 22748, 22749, 22744, 22746),
+        _bar(15, 22760, 22763, 22752, 22758),
+        _bar(16, 22758, 22759, 22746, 22750),
+        _bar(17, 22750, 22751, 22744, 22746),
     ]
+    at_open = datetime(2026, 10, 23, 9, 15, 0, tzinfo=IST)
+    blocked, reason, _ = index_candle_rollover_blocked(
+        Side.CALL, candles, spot=22745.0, now=at_open, settings=_settings(),
+    )
+    assert blocked is True
+    assert reason == "index_falling_from_local_high"
     pre_confirm = datetime(2026, 10, 23, 9, 22, 0, tzinfo=IST)
-    blocked, _, _ = index_candle_rollover_blocked(
+    blocked_early, reason_early, _ = index_candle_rollover_blocked(
         Side.CALL, candles, spot=22745.0, now=pre_confirm, settings=_settings(),
     )
-    assert blocked is False
+    assert blocked_early is True
+    assert reason_early == "index_falling_from_local_high"
 
 
 def test_before_0915_does_not_block():
