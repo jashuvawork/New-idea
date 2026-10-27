@@ -37,6 +37,10 @@ forced = {
     "COMMIT_SHA": "8400308e",
     "FALLBACK_CAPITAL_INR": "200000",
     "MAX_SIZING_CAPITAL_INR": "200000",
+    "ENTRY_EARLIEST_HOUR": "9",
+    "ENTRY_EARLIEST_MINUTE": "20",
+    "EXPLOSION_ENTRY_EARLIEST_HOUR": "9",
+    "EXPLOSION_ENTRY_EARLIEST_MINUTE": "20",
 }
 lines = env_path.read_text().splitlines() if env_path.exists() else []
 seen = set()

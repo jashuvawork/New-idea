@@ -497,6 +497,8 @@ jobs:
               raise SystemExit('paper mode is not on')
           if float(f.get('fallbackCapitalInr') or 0) != 200000 or float(f.get('maxSizingCapitalInr') or 0) != 200000:
               raise SystemExit('PR 794 capital book is not 200000')
+          if f.get('entryEarliestIst') != '09:20':
+              raise SystemExit('entryEarliestIst must be 09:20')
           "; then
               exit 0
             fi
