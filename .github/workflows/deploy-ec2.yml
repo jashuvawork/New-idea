@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-739fee8]') && !contains(github.event.head_commit.message, '[deploy-802-paper]'))
+        if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[deploy-776-paper]')
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -31,18 +31,18 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Install backend dependencies
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-739fee8]') && !contains(github.event.head_commit.message, '[deploy-802-paper]'))
+        if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[deploy-776-paper]')
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt pytest
 
       - name: Run pytest before deploy
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-739fee8]') && !contains(github.event.head_commit.message, '[deploy-802-paper]'))
+        if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[deploy-776-paper]')
         working-directory: backend
         run: python -m pytest tests/ -q --tb=no
 
       - name: Set up Node
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-739fee8]') && !contains(github.event.head_commit.message, '[deploy-802-paper]'))
+        if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[deploy-776-paper]')
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -50,7 +50,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend before deploy
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-739fee8]') && !contains(github.event.head_commit.message, '[deploy-802-paper]'))
+        if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[deploy-776-paper]')
         working-directory: frontend
         run: |
           npm ci
@@ -87,7 +87,7 @@ jobs:
 
       - name: Deploy NexusQuant on EC2 via SSM
         id: deploy
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[deploy-739fee8]') && !contains(github.event.head_commit.message, '[deploy-802-paper]'))
+        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[deploy-776-paper]'))
         run: |
           set -euo pipefail
           CMD_ID=$(aws ssm send-command \
@@ -212,7 +212,7 @@ jobs:
           exit 1
 
       - name: Deploy PR 676 commit in paper mode
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[deploy-739fee8]') && !contains(github.event.head_commit.message, '[deploy-802-paper]')
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[deploy-776-paper]')
         id: deploy676
         run: |
           set -euo pipefail
@@ -270,7 +270,7 @@ jobs:
           exit 1
 
       - name: Verify public deployment status
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[deploy-739fee8]') && !contains(github.event.head_commit.message, '[deploy-802-paper]'))
+        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[deploy-776-paper]'))
         run: |
           set -euo pipefail
           EXPECTED=$(git rev-parse --short HEAD)
@@ -296,7 +296,7 @@ jobs:
           curl -sf --connect-timeout 5 --max-time 20 "$API/api/deployment/status" | python3 -m json.tool
 
       - name: Verify PR 676 paper
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[deploy-739fee8]') && !contains(github.event.head_commit.message, '[deploy-802-paper]')
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[deploy-776-paper]')
         run: |
           set -euo pipefail
           EXPECTED=$(git rev-parse --short HEAD)
@@ -336,112 +336,28 @@ jobs:
           curl -sf --max-time 20 "$API/api/deployment/status" | python3 -m json.tool
           exit 1
 
-      - name: Deploy commit 739fee8 in paper mode
-        # Runs whenever the message contains this marker. The overlay step
-        # already stands down in that case, so a mention of the other marker
-        # must not skip this one too.
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-739fee8]') && !contains(github.event.head_commit.message, '[arm-live]')
-        id: deploy739
+      - name: Deploy PR 776 commit in paper mode
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-776-paper]') && !contains(github.event.head_commit.message, '[arm-live]')
+        id: deploy776
         run: |
           set -euo pipefail
-          B64=$(base64 -w0 deploy/checkout-739fee8-paper.sh)
+          B64=$(base64 -w0 deploy/checkout-776-paper.sh)
           CMD_ID=$(aws ssm send-command \
             --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
             --timeout-seconds 1800 \
-            --comment "Detach EC2 at 739fee8 with paper on" \
-            --parameters "{\"commands\":[\"echo $B64 | base64 -d > /tmp/checkout-739fee8-paper.sh\",\"bash /tmp/checkout-739fee8-paper.sh\"]}" \
+            --comment "Detach EC2 at PR 776 merge with paper on" \
+            --parameters "{\"commands\":[\"echo $B64 | base64 -d > /tmp/checkout-776-paper.sh\",\"bash /tmp/checkout-776-paper.sh\"]}" \
             --query Command.CommandId \
             --output text)
           echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
-          echo "SSM 739fee8 command: $CMD_ID"
+          echo "SSM 776 command: $CMD_ID"
 
-      - name: Wait for 739fee8 deploy
-        if: steps.deploy739.outputs.command_id != ''
+      - name: Wait for PR 776 deploy
+        if: steps.deploy776.outputs.command_id != ''
         run: |
           set -euo pipefail
-          CMD_ID="${{ steps.deploy739.outputs.command_id }}"
-          for i in $(seq 1 100); do
-            STATUS=$(aws ssm get-command-invocation \
-              --command-id "$CMD_ID" \
-              --instance-id "${{ env.EC2_INSTANCE_ID }}" \
-              --query Status \
-              --output text 2>/dev/null || echo Pending)
-            echo "Attempt $i: $STATUS"
-            if [ "$STATUS" = "Success" ]; then
-              aws ssm get-command-invocation \
-                --command-id "$CMD_ID" \
-                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
-                --query StandardOutputContent \
-                --output text | tail -80
-              exit 0
-            fi
-            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
-              aws ssm get-command-invocation \
-                --command-id "$CMD_ID" \
-                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
-                --output json
-              exit 1
-            fi
-            sleep 15
-          done
-          echo "739fee8 SSM wait timed out"
-          exit 1
-
-      - name: Verify commit 739fee8 paper
-        if: steps.deploy739.outputs.command_id != ''
-        run: |
-          set -euo pipefail
-          API="${{ env.PUBLIC_API_URL }}"
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -sf --connect-timeout 5 --max-time 20 \
-              "$API/api/deployment/status" | python3 -c "
-          import json, sys
-          d = json.load(sys.stdin)
-          f = d.get('flags') or {}
-          commit = str(d.get('commit') or '')
-          print(json.dumps({
-              'commit': commit,
-              'paperTrading': f.get('paperTrading'),
-              'enableLiveTrading': f.get('enableLiveTrading'),
-          }, indent=2))
-          if d.get('status') != 'ok':
-              raise SystemExit('status not ok')
-          if not commit.startswith('739fee8'):
-              raise SystemExit('commit mismatch: ' + commit)
-          if f.get('paperTrading') is not True or f.get('enableLiveTrading') is not False:
-              raise SystemExit('paper mode is not on')
-          "; then
-              exit 0
-            fi
-            echo "verify attempt $i failed — waiting"
-            sleep 10
-          done
-          curl -sf --max-time 20 "$API/api/deployment/status" | python3 -m json.tool || true
-          exit 1
-
-      - name: Deploy PR 802 commit in paper mode
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-802-paper]') && !contains(github.event.head_commit.message, '[arm-live]')
-        id: deploy802
-        run: |
-          set -euo pipefail
-          B64=$(base64 -w0 deploy/checkout-802-paper.sh)
-          CMD_ID=$(aws ssm send-command \
-            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --timeout-seconds 1800 \
-            --comment "Detach EC2 at PR 802 merge with paper on" \
-            --parameters "{\"commands\":[\"echo $B64 | base64 -d > /tmp/checkout-802-paper.sh\",\"bash /tmp/checkout-802-paper.sh\"]}" \
-            --query Command.CommandId \
-            --output text)
-          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
-          echo "SSM 802 command: $CMD_ID"
-
-      - name: Wait for PR 802 deploy
-        if: steps.deploy802.outputs.command_id != ''
-        run: |
-          set -euo pipefail
-          CMD_ID="${{ steps.deploy802.outputs.command_id }}"
+          CMD_ID="${{ steps.deploy776.outputs.command_id }}"
           for i in $(seq 1 120); do
             STATUS=$(aws ssm get-command-invocation \
               --command-id "$CMD_ID" \
@@ -466,11 +382,11 @@ jobs:
             fi
             sleep 15
           done
-          echo "PR 802 SSM wait timed out"
+          echo "PR 776 SSM wait timed out"
           exit 1
 
-      - name: Verify PR 802 paper
-        if: steps.deploy802.outputs.command_id != ''
+      - name: Verify PR 776 paper
+        if: steps.deploy776.outputs.command_id != ''
         run: |
           set -euo pipefail
           API="${{ env.PUBLIC_API_URL }}"
@@ -490,12 +406,12 @@ jobs:
           }, indent=2))
           if d.get('status') != 'ok':
               raise SystemExit('status not ok')
-          if not commit.startswith('8d16503'):
+          if not commit.startswith('96f262a'):
               raise SystemExit('commit mismatch: ' + commit)
           if f.get('paperTrading') is not True or f.get('enableLiveTrading') is not False:
               raise SystemExit('paper mode is not on')
-          if float(f.get('fallbackCapitalInr') or 0) != 275000 or float(f.get('maxSizingCapitalInr') or 0) != 275000:
-              raise SystemExit('PR 802 capital book is not 275000')
+          if float(f.get('fallbackCapitalInr') or 0) != 100000 or float(f.get('maxSizingCapitalInr') or 0) != 100000:
+              raise SystemExit('PR 776 capital book is not 100000')
           "; then
               exit 0
             fi

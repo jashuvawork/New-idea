@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Detach the EC2 checkout at the original PR #676 merge (739fee8) and
-# recreate the backend with paper on and live off.
+# Detach the EC2 checkout at the PR #776 merge (96f262a) and recreate the
+# backend with paper on and live off. That commit's production template arms
+# live trading, so this script pins paper after the checkout.
 # Do not call deploy/ec2-update.sh: that script resets to BRANCH (default main).
 set -euo pipefail
 
@@ -9,20 +10,14 @@ export GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/root/.gitconfig}"
 
 REPO=/opt/nexusquant/New-idea
 ENV_FILE=/opt/nexusquant/env
-SHA=739fee8ed8578ce2a18dc21ee46d108adfc95e55
-SHORT=739fee8
-PIN_REF=cursor/pr-676-sha-3b1b
+SHA=96f262a0b5af67a8cb12c3c241dd55353d6db055
+SHORT=96f262a
 
 git config --global --add safe.directory "$REPO" || true
 git config --global --add safe.directory /opt/nexusquant || true
 
 cd "$REPO"
-git fetch origin "$PIN_REF"
-PINNED="$(git rev-parse "origin/${PIN_REF}")"
-if [ "$PINNED" != "$SHA" ]; then
-  echo "ERROR: origin/${PIN_REF} is $PINNED, expected $SHA"
-  exit 1
-fi
+git fetch origin main
 git checkout --detach "$SHA"
 test "$(git rev-parse HEAD)" = "$SHA"
 echo "Detached at $(git rev-parse --short HEAD)"
@@ -37,7 +32,9 @@ forced = {
     "PAPER_TRADING": "true",
     "PAPER_SLIPPAGE_ENABLED": "true",
     "PAPER_SIMULATE_BROKER_ORDERS": "true",
-    "COMMIT_SHA": "739fee8",
+    "COMMIT_SHA": "96f262a",
+    "FALLBACK_CAPITAL_INR": "100000",
+    "MAX_SIZING_CAPITAL_INR": "100000",
 }
 lines = env_path.read_text().splitlines() if env_path.exists() else []
 seen = set()
