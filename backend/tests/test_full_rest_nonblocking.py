@@ -46,3 +46,52 @@ def test_full_rest_backoff_after_slow_cycle():
             assert market.full_rest_rebuild_due() is False
         with patch.object(market.time, "monotonic", return_value=80.0):
             assert market.full_rest_rebuild_due() is True
+
+
+def test_chain_refresh_does_not_run_a_second_trader_pass():
+    async def _exercise():
+        market._full_rest_task = None
+        market._build_in_progress = False
+        with patch.object(market, "get_multi_snapshot", new=AsyncMock()) as snap:
+            started = market.schedule_chain_refresh(broadcast=False)
+            assert started is True
+            await market._full_rest_task
+            snap.assert_awaited()
+            assert snap.await_args.kwargs["run_trader"] is False
+
+    asyncio.run(_exercise())
+
+
+def test_overlapping_trader_pass_returns_without_waiting():
+    from app.engines import auto_trader
+    from app.models.schemas import AutoTraderState
+
+    async def _exercise():
+        auto_trader._process_lock = asyncio.Lock()
+        auto_trader._state_loaded = True
+        auto_trader._auto_trader_state = AutoTraderState()
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _slow(snapshots, news=None, client=None):
+            started.set()
+            await release.wait()
+            return auto_trader.get_state()
+
+        with patch.object(auto_trader, "_process_locked", side_effect=_slow):
+            first = asyncio.create_task(auto_trader.process({}))
+            await started.wait()
+            second = await auto_trader.process({})
+            assert second is auto_trader._auto_trader_state
+            release.set()
+            await first
+
+        auto_trader._auto_trader_state = None
+        auto_trader._state_loaded = False
+
+    try:
+        asyncio.run(_exercise())
+    finally:
+        auto_trader._process_lock = asyncio.Lock()
+        auto_trader._auto_trader_state = None
+        auto_trader._state_loaded = False

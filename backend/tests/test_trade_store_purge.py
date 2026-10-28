@@ -142,3 +142,79 @@ def test_trade_close_is_persisted_exactly_once(isolated_store):
         and event.get("tradeId") == trade.id
     ]
     assert len(closes) == 1
+
+
+def test_closed_trade_restart_keeps_points_and_peak(isolated_store):
+    from app.engines import auto_trader
+
+    opened = datetime.now(IST)
+    trade = PaperTrade(
+        id="5708f6d3",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=22050,
+        entryPremium=585.93,
+        currentPremium=585.93,
+        lots=6,
+        openedAt=opened,
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={"selectionMode": "explosion"},
+    )
+    trade_store.record_trade_opened(trade, trade.entryContext)
+    trade.currentPremium = 597.75
+    trade.pnlPoints = 9.528897435897436
+    trade.pnlInr = 3716.27
+    trade.bestPnlPoints = 29.62
+    trade.maxLtp = 615.55
+    trade.maxLtpAt = datetime.now(IST)
+    trade.status = "CLOSED"
+    trade.exitReason = "explosion_tp_rung_floor"
+    trade.closedAt = datetime.now(IST)
+    assert trade_store.record_trade_closed(trade, trade.entryContext) is True
+
+    auto_trader._auto_trader_state = None
+    auto_trader._state_loaded = False
+    state = auto_trader.get_state()
+    restored = next(row for row in state.closedPaperTrades if row.id == "5708f6d3")
+
+    assert restored.pnlInr == pytest.approx(3716.27)
+    assert restored.pnlPoints == pytest.approx(9.528897435897436)
+    assert restored.bestPnlPoints == pytest.approx(29.62)
+    assert restored.maxLtp == pytest.approx(615.55)
+    assert restored.maxLtpAt is not None
+    assert restored.exitReason == "explosion_tp_rung_floor"
+
+
+def test_closed_trade_restart_fills_points_when_archive_omits_them(isolated_store):
+    from app.engines import auto_trader
+
+    now = datetime.now(IST)
+    day = now.strftime("%Y-%m-%d")
+    trade_store._save_day(day, {
+        "date": day,
+        "trades": [{
+            "id": "legacy-close",
+            "symbol": "NIFTY",
+            "side": "CALL",
+            "strike": 22050,
+            "entryPremium": 100.0,
+            "currentPremium": 112.5,
+            "lots": 1,
+            "pnlInr": 812.5,
+            "status": "CLOSED",
+            "exitReason": "target",
+            "strategyType": "EXPLOSIVE",
+            "openedAt": now.isoformat(),
+            "closedAt": now.isoformat(),
+            "entryContext": {"bestPnlPoints": 18.0},
+        }],
+        "events": [],
+    })
+
+    auto_trader._auto_trader_state = None
+    auto_trader._state_loaded = False
+    state = auto_trader.get_state()
+    restored = next(row for row in state.closedPaperTrades if row.id == "legacy-close")
+
+    assert restored.pnlPoints == pytest.approx(12.5)
+    assert restored.bestPnlPoints == pytest.approx(18.0)

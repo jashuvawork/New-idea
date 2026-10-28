@@ -49,7 +49,7 @@ async def _background_monitor():
         run_entry_scan_on_cache,
         run_tick_fast_cycle,
         run_ws_overlay_cycle,
-        schedule_full_rest_rebuild,
+        schedule_chain_refresh,
         ws_overlay_due,
     )
     from app.services.tick_store import set_tick_wake_event
@@ -111,10 +111,7 @@ async def _background_monitor():
                         if ws:
                             # Never await full REST on this loop — 30–90s builds freeze overlays.
                             if full_rest_rebuild_due() and not full_rest_rebuild_running():
-                                schedule_full_rest_rebuild(
-                                    broadcast=True,
-                                    run_trader=rest_ok,
-                                )
+                                schedule_chain_refresh(broadcast=True)
                             if full_rest_rebuild_running():
                                 await run_building_ltp_entry_cycle(
                                     broadcast=True,

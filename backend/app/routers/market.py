@@ -185,6 +185,16 @@ def rebuild_load_active() -> bool:
     return _build_in_progress or full_rest_rebuild_running() or _build_lock.locked()
 
 
+def schedule_chain_refresh(*, broadcast: bool = True) -> bool:
+    """Refresh the REST chain without a second trader pass.
+
+    The monitor loop already runs entries on the live websocket path. A trader
+    pass inside this rebuild holds the build lock and stacks on that pass, which
+    stalls the entry scan for the length of both.
+    """
+    return schedule_full_rest_rebuild(broadcast=broadcast, run_trader=False)
+
+
 def schedule_full_rest_rebuild(*, broadcast: bool = True, run_trader: bool = True) -> bool:
     """
     Start a full REST rebuild as a background task.
