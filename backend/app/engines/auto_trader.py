@@ -134,9 +134,13 @@ _exit_claims: dict[str, object] = {}
 _exit_claims_guard = threading.Lock()
 _entry_claims: dict[str, object] = {}
 _entry_claims_guard = threading.Lock()
-# One trader pass at a time. A second pass must not wait — the monitor loop
-# stays free to keep the entry scan and radar heartbeat moving.
-_process_lock = asyncio.Lock()
+# One trader pass at a time. A second pass returns immediately so the monitor
+# loop can keep the entry scan and radar heartbeat moving.
+# The flag is set before any await. An asyncio.Lock yields inside acquire, so
+# several passes started in the same beat all see it free and then wait. The
+# in-flight pass then waits for claim conflicts those waiters never log, and
+# the backend job sits until the 15-minute timeout cancels it.
+_process_running: bool = False
 
 
 def _release_exit_claim(trade_id: str, token: object) -> None:
@@ -4385,14 +4389,15 @@ async def process(
     client: Optional[UpstoxClient] = None,
 ) -> AutoTraderState:
     """Process open/update/close trades from snapshot candidates."""
-    if _process_lock.locked():
+    global _process_running
+    if _process_running:
         logger.info("Skipping overlapping trader pass")
         return get_state()
-    await _process_lock.acquire()
+    _process_running = True
     try:
         return await _process_locked(snapshots, news=news, client=client)
     finally:
-        _process_lock.release()
+        _process_running = False
 
 
 async def _process_locked(

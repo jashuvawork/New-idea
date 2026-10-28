@@ -67,7 +67,7 @@ def test_overlapping_trader_pass_returns_without_waiting():
     from app.models.schemas import AutoTraderState
 
     async def _exercise():
-        auto_trader._process_lock = asyncio.Lock()
+        auto_trader._process_running = False
         auto_trader._state_loaded = True
         auto_trader._auto_trader_state = AutoTraderState()
         started = asyncio.Event()
@@ -92,6 +92,34 @@ def test_overlapping_trader_pass_returns_without_waiting():
     try:
         asyncio.run(_exercise())
     finally:
-        auto_trader._process_lock = asyncio.Lock()
+        auto_trader._process_running = False
+        auto_trader._auto_trader_state = None
+        auto_trader._state_loaded = False
+
+
+def test_trader_pass_runs_again_on_a_new_event_loop():
+    """A pass on one loop must not leave the next loop waiting."""
+    from app.engines import auto_trader
+    from app.models.schemas import AutoTraderState
+
+    async def _once():
+        auto_trader._state_loaded = True
+        auto_trader._auto_trader_state = AutoTraderState()
+        with patch.object(
+            auto_trader,
+            "_process_locked",
+            new=AsyncMock(return_value=auto_trader._auto_trader_state),
+        ):
+            return await auto_trader.process({})
+
+    try:
+        auto_trader._process_running = False
+        first = asyncio.run(_once())
+        second = asyncio.run(_once())
+        assert first is not None
+        assert second is not None
+        assert auto_trader._process_running is False
+    finally:
+        auto_trader._process_running = False
         auto_trader._auto_trader_state = None
         auto_trader._state_loaded = False
