@@ -1613,6 +1613,50 @@ class Settings(BaseSettings):
     moment_stage_count: int = 8
     moment_stage_min_size: float = 5.0
     moment_stage_max_size: float = 55.0
+    # Max-profit legs stamped with a large projectedMaxTp (e.g. 700+) must not use 75%
+    # peak-keep at +15–20pt while stage 1 (stageSize) is still building — Oct 21 live
+    # NIFTY PUT 22700 exited at +10pt with projected 703. Cheap Oct12 runners (projected
+    # ~258) still use modest peak-keep via unified ladder / ftv_runner_pct_trail.
+    stage_runner_defer_pct_keep_min_projected_tp: float = 400.0
+    # Below this best-pts, defer 75% keep on mega projected runners (Oct21 +21pt);
+    # Sep2 +31pt at 11.7% still arms once best ≥ this.
+    stage_runner_defer_pct_keep_min_best_points: float = 28.0
+    # Mega projected runners (800+): arm unified 75% peak-keep at this gain % — Oct 21
+    # SENSEX 73400 PE peaked +47.7pt (+14.0%) but missed the default 15% ladder arm.
+    stage_runner_unified_ladder_arm_gain_pct: float = 14.0
+    # After best ≥ min best, a pullback that holes through the 75% FTV line still books
+    # remaining green (Oct 21 73400: +47pt → +10pt hole, not −₹9k giveback).
+    stage_runner_mega_hole_exit_enabled: bool = True
+    stage_runner_mega_hole_exit_min_best_points: float = 28.0
+    stage_runner_mega_hole_exit_min_remain_points: float = 6.0
+    # Once a mega peak matured, do not ride a 75% hole into red — scratch near BE.
+    stage_runner_mega_red_giveback_enabled: bool = True
+    stage_runner_mega_red_giveback_min_best_points: float = 28.0
+    # After a mega peak, book a near-scratch when most of the move is gone (Sep2 +31→+1pt).
+    stage_runner_mega_scratch_max_points: float = 2.0
+    stage_runner_mega_scratch_min_giveback_frac: float = 0.70
+    # TP rung ladder — single exit owner for mega projected stage-ladder legs.
+    tp_rung_ladder_exit_enabled: bool = True
+    tp_rung_ladder_min_projected_tp: float = 400.0
+    tp_rung_ladder_min_best_to_arm_exits: float = 28.0
+    tp_rung_ladder_min_rung_points: float = 4.0
+    tp_rung_ladder_max_rungs: int = 24
+    tp_rung_ladder_confirm_slip_points: float = 0.25
+    tp_rung_ladder_floor_slip_points: float = 1.0
+    tp_rung_ladder_floor_touch_points: float = 2.0
+    tp_rung_ladder_approach_buffer_points: float = 4.0
+    tp_rung_ladder_fade_min_giveback_points: float = 2.0
+    tp_rung_ladder_min_hold_seconds: float = 45.0
+    tp_rung_ladder_hot_defer_velocity_3s: float = 2.5
+    tp_rung_ladder_red_min_best_points: float = 20.0
+    # Mega stage-ladder legs (projectedMaxTp ≥ min) — patience before between-rung fade.
+    tp_rung_ladder_mega_fade_min_giveback_points: float = 12.0
+    tp_rung_ladder_mega_hot_defer_velocity_3s: float = 4.0
+    tp_rung_ladder_mega_approach_buffer_points: float = 7.0
+    tp_rung_ladder_mega_fall_min_seconds_after_peak: float = 75.0
+    # Above this best, skip between-rung fade; use 75% ladder / rung floor / mega hole.
+    tp_rung_ladder_mega_disable_between_fade_min_best_points: float = 55.0
+    tp_rung_ladder_mega_ladder_first_min_best_points: float = 55.0
     # FTV runner %-of-peak-gain trailing floor. V/FTV moments run in big % from the local
     # base (e.g. Rs68 -> Rs140 = +106%). The absolute stage ladder is tuned for mega point
     # moves and under-protects modest-but-real % moves (a +40% peak can give back to +4%).
@@ -1652,10 +1696,33 @@ class Settings(BaseSettings):
     unified_profit_ladder_multiple_min_giveback_pct_of_peak: float = 5.0
     unified_profit_ladder_fast_fade_velocity_3s: float = 2.0
     unified_profit_ladder_hot_defer_velocity_3s: float = 2.0
-    # Sell the 75% line only while price is still on it. A print already through
-    # that line is a hold until it comes back and turns down. Oct 21 NIFTY 22700
-    # PE peaked at 161.50 (floor ~156) and was sold at 150.38.
+    # A flat or rising print more than this far under the 75% line is a hold.
+    # A falling print at or under the line is a sale. Oct 21 SENSEX 73400 PE
+    # peaked at 388 (+₹24,788) and the old hole-hold rode it to the −₹21,029 stop.
     unified_profit_ladder_floor_touch_points: float = 2.0
+    # A fall through the 75% line does not wait out the full 3 minutes. 45s skips
+    # the 12s dip that sold SENSEX 74200 before that put ran to ~855.
+    unified_profit_ladder_fall_min_hold_seconds: float = 60.0
+    unified_profit_ladder_fall_min_seconds_after_peak: float = 45.0
+    # Runner profit guard — a tiered keep-of-peak floor with no after-peak wait
+    # and no touch band. The 75% layers above still book first on a slow fade;
+    # this catches the bleed through them (Oct 21 SENSEX 73400 PE: +47.7pt →
+    # −40pt stop; 73300 PE replays to the stop on the same tape).
+    # Floor = best × keep for the highest tier reached. Only a print that stays
+    # under the floor for confirm_seconds sells — there is no instant sale.
+    runner_profit_guard_enabled: bool = True
+    # Cheap premiums: a +6% wiggle on ₹60 is noise, not a run to protect.
+    runner_profit_guard_min_best_points: float = 4.0
+    # One-print shakeouts right after a high recover (Oct 21 NIFTY 22700 PE).
+    runner_profit_guard_confirm_seconds: float = 30.0
+    runner_profit_guard_tier1_gain_pct: float = 5.0
+    runner_profit_guard_tier1_keep_ratio: float = 0.20
+    runner_profit_guard_tier2_gain_pct: float = 12.0
+    runner_profit_guard_tier2_keep_ratio: float = 0.35
+    runner_profit_guard_tier3_gain_pct: float = 25.0
+    runner_profit_guard_tier3_keep_ratio: float = 0.55
+    runner_profit_guard_tier4_gain_pct: float = 50.0
+    runner_profit_guard_tier4_keep_ratio: float = 0.70
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.
@@ -1871,6 +1938,11 @@ class Settings(BaseSettings):
     # the old Jul29 protective soft-cap behavior.
     explosion_post_win_same_strike_lot_cap_enabled: bool = False
     explosion_post_win_same_strike_lot_cap: int = 6
+    # One same-strike reentry after a win, only while that premium is rising off a
+    # fresh post-close base inside the pad. Clears near-miss and elite chase stamps.
+    # A fading print, the opposite side, a second leg, or a lift already past the
+    # pad stays blocked. Oct 21 SENSEX 74200 PUT sold near 315 and ran to 1029.
+    same_strike_post_win_fresh_base_reentry_enabled: bool = True
     # Session mode feedback — promote/demote modes from today's PF (closes learning loop).
     session_mode_feedback_enabled: bool = True
     session_mode_feedback_min_trades: int = 2
@@ -2976,12 +3048,19 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
-    # 09:16 → 09:45: side must match today's index tape. The first minute (09:15)
-    # is blocked so a blind open print cannot pick the wrong side (Oct 13 22300 PE).
+    # Macro side check 09:25–09:45. Idle before 09:25 and after 09:45.
+    # The cash-candle hold covers 09:15–09:45. The first order stays 09:20.
     open_side_confirmation_enabled: bool = True
+    open_side_confirmation_start_hour: int = 9
+    open_side_confirmation_start_minute: int = 25
     open_side_confirmation_min_minutes: float = 1.0
     open_side_confirmation_min_index_move_pct: float = 0.10
     open_side_confirmation_min_range_position: float = 0.6
+    # 09:15–09:45. A call must still be holding the cash high. A put must still
+    # be holding the low. First-lift and premium-rip waivers do not skip this.
+    index_candle_rollover_block_enabled: bool = True
+    index_candle_rollover_steps: int = 3
+    index_candle_rollover_min_giveback_pct: float = 0.04
     open_caution_min_explosion_score: int = 45
     open_caution_score_bonus: int = 0
     open_caution_min_rank_score: float = 55.0

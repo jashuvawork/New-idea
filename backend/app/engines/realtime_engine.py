@@ -465,6 +465,51 @@ def _build_explosion_suggestions(
     return trades
 
 
+def _today_cash_ohlc(candles: list) -> dict[str, float]:
+    """Open/high/low from today's 09:15 IST cash bars only.
+
+    The chart series also holds yesterday. Its first bar is not today's open.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    ist = ZoneInfo("Asia/Kolkata")
+    today = datetime.now(ist).date()
+    rows: list[tuple[datetime, float, float, float]] = []
+    for candle in candles or []:
+        ts = None
+        opened = high = low = 0.0
+        if isinstance(candle, list) and len(candle) >= 4:
+            ts = candle[0]
+            opened, high, low = float(candle[1] or 0), float(candle[2] or 0), float(candle[3] or 0)
+        elif isinstance(candle, dict):
+            ts = candle.get("timestamp") or candle.get("ts") or candle.get("time")
+            opened = float(candle.get("open") or 0)
+            high = float(candle.get("high") or 0)
+            low = float(candle.get("low") or 0)
+        if not ts or opened <= 0:
+            continue
+        try:
+            stamp = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=ist)
+        else:
+            stamp = stamp.astimezone(ist)
+        if stamp.date() != today or stamp.hour * 60 + stamp.minute < 9 * 60 + 15:
+            continue
+        rows.append((stamp, opened, high, low))
+    if not rows:
+        return {}
+    rows.sort(key=lambda row: row[0])
+    return {
+        "dayOpen": rows[0][1],
+        "dayHigh": max(row[2] for row in rows),
+        "dayLow": min(row[3] for row in rows),
+    }
+
+
 async def build_symbol_snapshot(
     symbol: str,
     client: Optional[UpstoxClient] = None,
@@ -541,6 +586,7 @@ async def build_symbol_snapshot(
 
         chart_analysis = None
         day_from_open_pct = 0.0
+        qctx: dict = {}
         try:
             from app.engines.chart_advanced_analysis import build_chart_analysis
             from app.engines.spot_direction import _candle_rows, pro_index_quote_context
@@ -555,11 +601,18 @@ async def build_symbol_snapshot(
                 day_from_open_pct = float(qctx.get("fromOpenPct") or 0)
             except Exception:
                 _, highs, lows, closes = _candle_rows(candles_1m)
-                if highs and lows:
-                    day_high = max(highs)
-                    day_low = min(lows)
                 if closes:
                     prev_close = closes[0]
+
+            if float(qctx.get("dayOpen") or 0) <= 0:
+                cash = _today_cash_ohlc(candles_1m)
+                if cash:
+                    qctx = {**qctx, **cash}
+                    day_high = float(cash["dayHigh"])
+                    day_low = float(cash["dayLow"])
+                    if spot > 0 and cash["dayOpen"] > 0:
+                        day_from_open_pct = (spot - cash["dayOpen"]) / cash["dayOpen"] * 100.0
+                        qctx["fromOpenPct"] = day_from_open_pct
 
             chart_analysis = build_chart_analysis(
                 candles_1m,
@@ -571,6 +624,12 @@ async def build_symbol_snapshot(
                 day_low=day_low,
                 symbol=symbol,
             )
+            if chart_analysis is not None and float(qctx.get("dayOpen") or 0) > 0:
+                inst = dict(chart_analysis.institutional or {})
+                inst["dayOpen"] = qctx["dayOpen"]
+                inst["dayHigh"] = float(qctx.get("dayHigh") or day_high or 0)
+                inst["dayLow"] = float(qctx.get("dayLow") or day_low or 0)
+                chart_analysis.institutional = inst
         except Exception as exc:
             logger.debug("Chart analysis skipped for %s: %s", symbol, exc)
 

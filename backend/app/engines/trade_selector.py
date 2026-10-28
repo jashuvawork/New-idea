@@ -359,6 +359,34 @@ def _explosion_candidates(
                 state=state,
                 readiness_reason=first_lift_readiness_reason,
             )
+        if not pad_lane_waive and side_u in ("CALL", "PUT"):
+            from app.engines.session_mode_feedback import (
+                same_strike_post_win_fresh_base_reentry,
+            )
+
+            try:
+                fresh_strike = float(alert.get("strike") or 0)
+            except (TypeError, ValueError):
+                fresh_strike = 0.0
+            try:
+                fresh_prem = float(alert.get("premium") or 0)
+            except (TypeError, ValueError):
+                fresh_prem = 0.0
+            try:
+                fresh_v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
+            except (TypeError, ValueError):
+                fresh_v3 = 0.0
+            fresh_ok, _fresh_meta = same_strike_post_win_fresh_base_reentry(
+                state,
+                symbol=symbol,
+                side=side_u,
+                strike=fresh_strike,
+                premium=fresh_prem,
+                velocity_3s=fresh_v3,
+                alert=alert if isinstance(alert, dict) else None,
+            )
+            if fresh_ok:
+                pad_lane_waive = True
         lift_ready = first_lift_ready or early_pad or coil_pad or pad_lane_waive
         slow_grind_trough = bool(
             alert.get("slowGrindArmedTrough")

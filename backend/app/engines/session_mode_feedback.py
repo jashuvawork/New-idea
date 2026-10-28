@@ -402,6 +402,246 @@ def cap_opposite_side_flip_after_win(
     return capped, meta
 
 
+def _latest_same_strike_win_close(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    max_age_seconds: float,
+) -> tuple[Any | None, float]:
+    """Latest profitable explosion close on exact strike within max_age_seconds."""
+    if state is None or max_age_seconds <= 0:
+        return None, 0.0
+    sym = str(symbol or "").upper()
+    side_v = _side_key(side)
+    strike_f = float(strike or 0)
+    prior: Any | None = None
+    latest_ts = None
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if str(getattr(t, "symbol", "") or "").upper() != sym:
+            continue
+        if _side_key(getattr(t, "side", "")) != side_v:
+            continue
+        if abs(float(getattr(t, "strike", 0) or 0) - strike_f) > 0.01:
+            continue
+        ctx = getattr(t, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or getattr(t, "mode", "") or "").lower()
+        st = str(getattr(t, "strategyType", "") or "")
+        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+        if mode != "explosion" and st_u != "EXPLOSIVE":
+            continue
+        pnl = float(getattr(t, "pnlInr", 0) or getattr(t, "pnl_inr", 0) or 0)
+        if pnl <= 0:
+            continue
+        ts = getattr(t, "closedAt", None) or getattr(t, "openedAt", None)
+        if ts is None:
+            continue
+        if prior is None or (latest_ts is None or ts > latest_ts):
+            prior = t
+            latest_ts = ts
+
+    if prior is None or getattr(prior, "closedAt", None) is None:
+        return None, 0.0
+    now = datetime.now(_IST)
+    closed_at = prior.closedAt
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    age = max(0.0, (now - closed_at.astimezone(_IST)).total_seconds())
+    if age > max_age_seconds:
+        return None, age
+    return prior, age
+
+
+def _same_strike_legs_after_close(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    closed_at: datetime,
+) -> int:
+    """Count explosion legs opened on this strike after a reference close."""
+    if state is None:
+        return 0
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+
+    sym = str(symbol or "").upper()
+    side_u = _side_key(side)
+    strike_f = float(strike or 0)
+    count = 0
+    ref = closed_at.astimezone(_IST)
+
+    def _count_trade(trade: Any) -> None:
+        nonlocal count
+        if str(getattr(trade, "symbol", "") or "").upper() != sym:
+            return
+        if _side_key(getattr(trade, "side", "")) != side_u:
+            return
+        if abs(float(getattr(trade, "strike", 0) or 0) - strike_f) > 0.01:
+            return
+        ctx = getattr(trade, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or getattr(trade, "mode", "") or "").lower()
+        st = str(getattr(trade, "strategyType", "") or "")
+        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+        if mode != "explosion" and st_u != "EXPLOSIVE":
+            return
+        opened = getattr(trade, "openedAt", None)
+        if opened is None:
+            return
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=_IST)
+        if opened.astimezone(_IST) > ref:
+            count += 1
+
+    for bucket in (
+        getattr(state, "closedPaperTrades", None) or [],
+        getattr(state, "openPaperTrades", None) or [],
+    ):
+        for trade in bucket:
+            _count_trade(trade)
+    return count
+
+
+def _alert_premium_already_fading(
+    alert: dict[str, Any] | None,
+    velocity_3s: float,
+) -> bool:
+    """True when the live print is flat or already rolling over."""
+    try:
+        v3 = float(velocity_3s or 0)
+    except (TypeError, ValueError):
+        v3 = 0.0
+    if v3 <= 0:
+        return True
+    if not isinstance(alert, dict):
+        return False
+
+    def _negative(raw: Any) -> bool:
+        if raw is None or raw == "":
+            return False
+        try:
+            return float(raw) < 0
+        except (TypeError, ValueError):
+            return False
+
+    for key in (
+        "premiumMomentum3Pct",
+        "premiumMomentum5Pct",
+        "momentum3Pct",
+        "momentum5Pct",
+    ):
+        if _negative(alert.get(key)):
+            return True
+    chart = alert.get("premiumChart") or alert.get("premium_chart") or {}
+    if isinstance(chart, dict):
+        for key in ("momentum3Pct", "momentum5Pct", "premiumMomentum3Pct", "premiumMomentum5Pct"):
+            if _negative(chart.get(key)):
+                return True
+    return False
+
+
+def same_strike_post_win_fresh_base_reentry(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    premium: float,
+    velocity_3s: float,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, dict[str, Any]]:
+    """
+    One same-strike reentry after a win, only off a fresh post-close base.
+
+    The premium must still be rising, and the lift off that new base must sit
+    inside the post-win pad. A flat or fading print, the opposite side, a second
+    leg, and a move already past the pad stay blocked.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"sameStrikePostWinFreshBase": False}
+    if not bool(getattr(settings, "same_strike_post_win_fresh_base_reentry_enabled", True)):
+        meta["reason"] = "disabled"
+        return False, meta
+    lookback = float(
+        getattr(settings, "post_win_late_reentry_waive_lookback_seconds", 14400) or 14400
+    )
+    prior, age = _latest_same_strike_win_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        max_age_seconds=lookback,
+    )
+    if prior is None:
+        meta["reason"] = "no_same_strike_win"
+        return False, meta
+    meta["priorWinTradeId"] = getattr(prior, "id", None)
+    meta["priorWinPnlInr"] = round(
+        float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0), 2,
+    )
+    meta["secondsSinceWinClose"] = round(age, 1)
+    closed_at = prior.closedAt
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    legs_after = _same_strike_legs_after_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        closed_at=closed_at,
+    )
+    meta["sameStrikeLegsAfterWin"] = legs_after
+    if legs_after >= 1:
+        meta["reason"] = "reentry_already_taken"
+        return False, meta
+    if _alert_premium_already_fading(alert, velocity_3s):
+        meta["reason"] = "premium_fading"
+        return False, meta
+
+    from app.engines.explosion_detector import post_close_base_reacceleration
+
+    reset, reset_meta = post_close_base_reacceleration(
+        symbol,
+        strike,
+        side,
+        closed_at=closed_at,
+        current_premium=float(premium or 0),
+        velocity_3s=float(velocity_3s or 0),
+        min_base_samples=int(
+            getattr(settings, "explosion_post_peak_reentry_base_samples", 3) or 3
+        ),
+        min_base_span_seconds=float(
+            getattr(settings, "explosion_post_peak_reentry_base_span_seconds", 6.0) or 6.0
+        ),
+        min_reacceleration_pct=float(
+            getattr(settings, "explosion_post_peak_reentry_min_reacceleration_pct", 8.0)
+            or 8.0
+        ),
+        min_velocity_3s=float(
+            getattr(settings, "explosion_post_peak_reentry_min_velocity_3s", 1.5) or 1.5
+        ),
+    )
+    meta["postCloseBase"] = reset_meta
+    if not reset:
+        meta["reason"] = "no_fresh_base"
+        return False, meta
+    try:
+        reaccel = float(reset_meta.get("reaccelerationPct") or 0)
+    except (TypeError, ValueError):
+        reaccel = 0.0
+    max_pad = float(
+        getattr(settings, "post_win_new_local_base_max_pad_pct", 22.0) or 22.0
+    )
+    if reaccel > max_pad + 1e-6:
+        meta["reason"] = "above_fresh_base_pad"
+        return False, meta
+    meta["sameStrikePostWinFreshBase"] = True
+    meta["reason"] = "fresh_base_reentry"
+    return True, meta
+
+
 def cap_same_strike_explosion_reentry_after_win(
     lots: int,
     state: AutoTraderState,

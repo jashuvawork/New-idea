@@ -37,25 +37,15 @@ def _session_extremes_and_spot(
     symbol: str,
     snap: SymbolSnapshot,
 ) -> tuple[float, float, float]:
-    """Session high, low, and live spot from tick tape or broker candles."""
-    from app.engines.index_tick_helpers import (
-        _snap_session_extremes,
-        index_session_extremes,
+    """Today's high, low, and live spot. The chart session window is not today's range."""
+    from app.engines.index_tick_helpers import resolve_index_session
+
+    resolved = resolve_index_session(symbol, snap)
+    return (
+        float(resolved.get("hi") or 0),
+        float(resolved.get("lo") or 0),
+        float(resolved.get("last") or getattr(snap, "spot", 0) or 0),
     )
-
-    sym = symbol.upper()
-    ext = index_session_extremes(sym)
-    hi = float(ext.get("hi") or 0)
-    lo = float(ext.get("lo") or 0)
-    spot = float(getattr(snap, "spot", 0) or 0) or float(ext.get("last") or 0)
-
-    snap_hi, snap_lo = _snap_session_extremes(snap)
-    if snap_hi > 0:
-        hi = max(hi, snap_hi)
-    if snap_lo > 0:
-        lo = min(lo, snap_lo) if lo > 0 else snap_lo
-
-    return hi, lo, spot
 
 
 def index_rally_metrics(
