@@ -3064,6 +3064,14 @@ class Settings(BaseSettings):
     open_caution_min_explosion_score: int = 45
     open_caution_score_bonus: int = 0
     open_caution_min_rank_score: float = 55.0
+    # 09:20–09:45 index open lanes (idle after open_caution_until — normal CE/PE book).
+    open_index_lane_enabled: bool = True
+    open_sensex_call_lane_enabled: bool = True
+    open_nifty_put_lane_enabled: bool = False
+    open_index_lane_require_first_lift: bool = True
+    open_index_lane_min_elite_score: float = 90.0
+    open_index_lane_max_local_base_pct: float = 15.0
+    open_index_lane_allowed_setups_csv: str = "FTV,V"
     primary_window_start_hour: int = 10
     primary_window_start_minute: int = 0
 
