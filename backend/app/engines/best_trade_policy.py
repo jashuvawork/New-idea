@@ -1307,7 +1307,12 @@ def call_atm_itm_base_waives_structured_failed_launch(
     in_window: bool = True,
     settings: Any = None,
 ) -> tuple[bool, str]:
-    """True when #676 rank arm should not hard-block on structured FAILED_LAUNCH."""
+    """True when a #676 base should not hard-block on structured FAILED_LAUNCH.
+
+    Fully eligible (call, or the put mirror) is an allow. The pad alone, still
+    inside the ceiling, is the existing cold-base lot cap. A print past the
+    pad is not waived.
+    """
     from app.config import get_settings
 
     settings = settings or get_settings()
@@ -1317,20 +1322,32 @@ def call_atm_itm_base_waives_structured_failed_launch(
         return False, ""
     side_v = getattr(event, "side", "")
     side = side_v.value if hasattr(side_v, "value") else str(side_v or "").upper()
-    if side != "CALL":
+    if side not in ("CALL", "PUT"):
         return False, ""
     candidate = explosion_candidate_from_timing_context(event, ict=ict, snap=snap)
+    alert = call_alert_from_timing_context(event, ict=ict, snap=snap)
+    strike = float(getattr(candidate, "strike", 0) or 0)
+    if side == "PUT":
+        ok, _ = put_atm_itm_base_capture_mirror_eligible(
+            candidate, snap, state=state, settings=settings,
+        )
+        if ok:
+            return True, "eligible"
+        if put_atm_itm_near_base_pad(
+            alert, snap, side="PUT", strike=strike, settings=settings,
+        ):
+            return True, "near_base_pad"
+        return False, ""
     ok, _ = call_atm_itm_base_capture_eligible(
         candidate, snap, state=state, settings=settings,
     )
     if ok:
         return True, "eligible"
-    alert = call_alert_from_timing_context(event, ict=ict, snap=snap)
     if call_atm_itm_near_base_pad(
         alert,
         snap,
         side="CALL",
-        strike=float(getattr(candidate, "strike", 0) or 0),
+        strike=strike,
         settings=settings,
     ):
         return True, "near_base_pad"

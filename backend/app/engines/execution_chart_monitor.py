@@ -515,7 +515,10 @@ async def monitor_trade_chart_before_execution(
 
         from types import SimpleNamespace
 
-        from app.engines.best_trade_policy import call_atm_itm_base_capture_eligible
+        from app.engines.best_trade_policy import (
+            call_atm_itm_base_capture_eligible,
+            put_atm_itm_base_capture_mirror_eligible,
+        )
 
         lift_lane = bool(
             strict_first_lift_bypass
@@ -532,9 +535,15 @@ async def monitor_trade_chart_before_execution(
                 pretrade_meta={},
                 snap=snap,
             )
-            atm_ok, _ = call_atm_itm_base_capture_eligible(
-                cand_probe, snap, state=state, settings=settings,
-            )
+            side_u = str(getattr(side, "value", side) or "").upper()
+            if side_u == "PUT":
+                atm_ok, _ = put_atm_itm_base_capture_mirror_eligible(
+                    cand_probe, snap, state=state, settings=settings,
+                )
+            else:
+                atm_ok, _ = call_atm_itm_base_capture_eligible(
+                    cand_probe, snap, state=state, settings=settings,
+                )
             lift_lane = atm_ok
 
         if lift_lane:

@@ -1753,13 +1753,20 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         score += 3.0
         reasons.append("exploding_signal")
 
-    from app.engines.best_trade_policy import call_atm_itm_near_base_pad
+    from app.engines.best_trade_policy import (
+        atm_itm_676_base_pad,
+        call_atm_itm_near_base_pad,
+    )
 
-    near_base_call = call_atm_itm_near_base_pad(evidence)
+    side_u = str(evidence.get("side") or "").upper()
+    if side_u in ("CALL", "PUT"):
+        near_base_pad = atm_itm_676_base_pad(evidence, side=side_u)
+    else:
+        near_base_pad = call_atm_itm_near_base_pad(evidence)
     if v3 > 0:
         score += min(10.0, v3 * 3.0)
         reasons.append(f"positive_v3_{v3:.2f}")
-    elif v3 < 0 and near_base_call:
+    elif v3 < 0 and near_base_pad:
         penalties.append({"code": "atm_itm_base_cold_velocity", "points": 0.0, "value": round(v3, 2)})
     elif v3 < 0:
         pad_flat = _pad_lane_cold_velocity_ok(evidence, v3, v9)
@@ -1857,7 +1864,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     if timing == "FAILED_LAUNCH" or timing_action == "block" and v3 < 0:
         if not (
             bool(evidence.get("callAtmItmBase676Waive"))
-            or near_base_call
+            or near_base_pad
         ):
             rejected = True
             penalties.append({"code": "failed_launch", "points": 45.0})
@@ -1866,7 +1873,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         v3 < 0
         and not micro_pullback
         and not _pad_lane_cold_velocity_ok(evidence, v3, v9)
-        and not near_base_call
+        and not near_base_pad
     ):
         rejected = True
     if exhausted:
@@ -1947,7 +1954,7 @@ def rank_trade_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
         )
         and (
             v3 > 0
-            or near_base_call
+            or near_base_pad
             or flat_velocity_lag
             or _pad_lane_cold_velocity_ok(evidence, v3, v9)
             or (fast_bullish_local_base and v3 >= 0)

@@ -534,6 +534,108 @@ def test_after_open_window_chart_fetch_failure_blocks_not_snapshot_fallback():
     assert meta["openCautionWindow"] is False
 
 
+def test_after_open_window_put_676_base_uses_snapshot_when_fetch_fails():
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=-0.12,
+        momentum15Pct=-0.10,
+        trendStrength=40,
+        spot=24000,
+    )
+    snap = _snap(chart)
+
+    with (
+        patch(
+            "app.engines.execution_chart_monitor.get_settings",
+            return_value=_settings(),
+        ),
+        patch(
+            "app.engines.execution_chart_monitor.fetch_live_trade_charts",
+            AsyncMock(side_effect=RuntimeError("upstox down")),
+        ),
+        patch(
+            "app.engines.index_candle_rollover.open_caution_window_active",
+            return_value=False,
+        ),
+        patch(
+            "app.engines.best_trade_policy.put_atm_itm_base_capture_mirror_eligible",
+            return_value=(True, {"moneyness": "ITM"}),
+        ),
+        patch(
+            "app.engines.execution_chart_monitor.chart_blocks_side",
+            return_value=(False, ""),
+        ),
+    ):
+        passed, reason, meta = asyncio.run(
+            monitor_trade_chart_before_execution(
+                AsyncMock(),
+                "SENSEX",
+                Side.PUT,
+                73200,
+                snap,
+                trade_score=80,
+                mode="explosion",
+                alert={
+                    "side": "PUT",
+                    "tier": "ELITE",
+                    "moneyness": "ITM",
+                    "localBaseMovePct": 8.0,
+                },
+            )
+        )
+
+    assert passed is True
+    assert reason == "ok"
+    assert meta.get("liftCaptureSnapshotFallback") is True
+
+
+def test_open_window_still_requires_a_live_chart_for_a_676_put():
+    chart = SpotChart(
+        direction="BEARISH",
+        momentum5Pct=-0.12,
+        momentum15Pct=-0.10,
+        trendStrength=40,
+        spot=24000,
+    )
+    snap = _snap(chart)
+
+    with (
+        patch(
+            "app.engines.execution_chart_monitor.get_settings",
+            return_value=_settings(),
+        ),
+        patch(
+            "app.engines.execution_chart_monitor.fetch_live_trade_charts",
+            AsyncMock(side_effect=RuntimeError("upstox down")),
+        ),
+        patch(
+            "app.engines.index_candle_rollover.open_caution_window_active",
+            return_value=True,
+        ),
+    ):
+        passed, reason, meta = asyncio.run(
+            monitor_trade_chart_before_execution(
+                AsyncMock(),
+                "SENSEX",
+                Side.PUT,
+                73200,
+                snap,
+                trade_score=80,
+                mode="explosion",
+                alert={
+                    "side": "PUT",
+                    "tier": "ELITE",
+                    "moneyness": "ITM",
+                    "localBaseMovePct": 8.0,
+                },
+            )
+        )
+
+    assert passed is False
+    assert reason == "exec_live_chart_required_open_window"
+    assert meta.get("openCautionWindow") is True
+
+
 def test_fetch_live_trade_charts_includes_quote_context():
     with patch("app.engines.execution_chart_monitor.get_settings") as mock_settings:
         mock_settings.return_value = _settings()

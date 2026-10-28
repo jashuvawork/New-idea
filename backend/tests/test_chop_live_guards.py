@@ -230,6 +230,39 @@ def test_chop_live_waives_premium_5m_fade_at_call_base(mock_eligible, mock_setti
 
 
 @patch("app.engines.chop_live_guards.get_settings")
+@patch("app.engines.pad_lane_capture.local_base_premium_fade_bypass", return_value=False)
+@patch("app.engines.best_trade_policy.put_atm_itm_base_capture_mirror_eligible")
+def test_chop_live_waives_premium_fade_at_put_676_base(
+    mock_eligible, _mock_fade, mock_settings,
+):
+    from app.engines.chop_live_guards import _chop_live_near_base_fade_waive
+
+    mock_settings.return_value = _settings(chop_live_near_base_fade_waive_enabled=True)
+    mock_eligible.return_value = (True, {"moneyness": "ITM"})
+    assert _chop_live_near_base_fade_waive(
+        _candidate(side=Side.PUT, base_move=8.0),
+        _snap(),
+    ) is True
+    mock_eligible.assert_called_once()
+
+
+@patch("app.engines.chop_live_guards.get_settings")
+@patch("app.engines.pad_lane_capture.local_base_premium_fade_bypass", return_value=False)
+@patch("app.engines.best_trade_policy.put_atm_itm_base_capture_mirror_eligible")
+def test_chop_live_does_not_waive_put_off_the_676_base(
+    mock_eligible, _mock_fade, mock_settings,
+):
+    from app.engines.chop_live_guards import _chop_live_near_base_fade_waive
+
+    mock_settings.return_value = _settings(chop_live_near_base_fade_waive_enabled=True)
+    mock_eligible.return_value = (False, {})
+    assert _chop_live_near_base_fade_waive(
+        _candidate(side=Side.PUT, base_move=28.0),
+        _snap(),
+    ) is False
+
+
+@patch("app.engines.chop_live_guards.get_settings")
 def test_broker_adopted_bad_row_blocks_profit_exit(mock_settings):
     mock_settings.return_value = _settings()
     trade = PaperTrade(

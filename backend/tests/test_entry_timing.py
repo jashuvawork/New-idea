@@ -240,6 +240,104 @@ def test_call_atm_itm_base_waives_structured_failed_launch(
     assert blocked is False
 
 
+@patch("app.config.get_settings")
+@patch("app.engines.entry_timing.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_put_atm_itm_base_waives_structured_failed_launch(
+    mock_guards, mock_timing, mock_config,
+):
+    """Put mirror of the #676 allow: eligible ATM/ITM base, cold tape, full size."""
+    from tests.mock_defaults import settings_mock
+
+    s = settings_mock()
+    mock_guards.return_value = s
+    mock_timing.return_value = s
+    mock_config.return_value = s
+    event = _call_event(v3=-0.6)
+    event.side = Side.PUT
+    timing = assess_entry_timing(
+        event,
+        ict=_call_base_ict(),
+        snap=_call_snap(),
+        midday_chop=True,
+    )
+    assert timing["assessment"] == "OK"
+    assert timing["action"] == "allow"
+    assert timing.get("callAtmItmBase676WaiveMode") == "eligible"
+    blocked, _ = timing_blocks_entry(timing)
+    assert blocked is False
+
+
+@patch("app.config.get_settings")
+@patch("app.engines.entry_timing.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_put_pad_only_failed_launch_stays_lot_capped(
+    mock_guards, mock_timing, mock_config,
+):
+    """On the pad but not fully eligible: same cold-base lot cap as the call."""
+    from tests.mock_defaults import settings_mock
+
+    s = settings_mock(ict_structured_early_min_move_pct=10.0)
+    mock_guards.return_value = s
+    mock_timing.return_value = s
+    mock_config.return_value = s
+    event = _call_event(v3=-0.6)
+    event.side = Side.PUT
+    ict = ICTBreakoutSignal(
+        active=True,
+        pattern="watch",
+        score=70.0,
+        reasons=["v_rip"],
+        session_move_pct=40.0,
+        base_relative_move_pct=11.0,
+        local_swing_base=True,
+        volume_awakening=True,
+        v_rip_ready=True,
+        flat_then_vertical=False,
+        displacement=False,
+        armed_base_launch=False,
+        first_lift=False,
+    )
+    timing = assess_entry_timing(
+        event,
+        ict=ict,
+        snap=_call_snap(),
+        midday_chop=True,
+    )
+    assert timing["assessment"] == "COLD_BASE"
+    assert timing["action"] == "lot_cap"
+    assert timing.get("callAtmItmBase676WaiveMode") == "near_base_pad"
+    assert timing["lotCap"] == int(timing["entryDayPolicy"]["coldBaseLotCap"])
+
+
+@patch("app.config.get_settings")
+@patch("app.engines.entry_timing.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+def test_put_past_the_676_pad_stays_failed_launch(
+    mock_guards, mock_timing, mock_config,
+):
+    from tests.mock_defaults import settings_mock
+
+    s = settings_mock()
+    mock_guards.return_value = s
+    mock_timing.return_value = s
+    mock_config.return_value = s
+    event = _call_event(v3=-0.6)
+    event.side = Side.PUT
+    ict = _call_base_ict()
+    ict.base_relative_move_pct = 28.0
+    ict.armed_base_launch = False
+    timing = assess_entry_timing(
+        event,
+        ict=ict,
+        snap=_call_snap(),
+        midday_chop=False,
+    )
+    assert timing["assessment"] == "FAILED_LAUNCH"
+    assert timing["action"] == "block"
+    assert timing.get("callAtmItmBase676Waive") is False
+
+
 @patch("app.engines.entry_timing.get_settings")
 @patch("app.engines.explosion_entry_guards.get_settings")
 def test_cold_unstructured_still_blocked_on_chop(mock_g1, mock_g2):

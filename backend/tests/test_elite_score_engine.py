@@ -284,6 +284,44 @@ def test_elite_entry_blocks_v_rip_without_first_lift_even_with_breakout():
     assert reason == "elite_v_rip_shallow_first_lift_blocked"
 
 
+def test_put_on_676_pad_is_not_a_shallow_v_rip_miss():
+    from app.engines.elite_score_engine import elite_v_rip_shallow_lift_blocked
+
+    blocked, reason = elite_v_rip_shallow_lift_blocked(
+        {
+            "side": "PUT",
+            "tier": "ELITE",
+            "moneyness": "ITM",
+            "localBaseMovePct": 8.0,
+            "vRipReady": True,
+            "firstLift": False,
+            "armedBaseLaunch": False,
+        },
+        {"setup": "V", "localBasePct": 8.0},
+    )
+    assert blocked is False
+    assert reason == ""
+
+
+def test_put_off_the_676_pad_stays_a_shallow_v_rip_miss():
+    from app.engines.elite_score_engine import elite_v_rip_shallow_lift_blocked
+
+    blocked, reason = elite_v_rip_shallow_lift_blocked(
+        {
+            "side": "PUT",
+            "tier": "BUILDING",
+            "moneyness": "ITM",
+            "localBaseMovePct": 6.5,
+            "vRipReady": True,
+            "firstLift": False,
+            "armedBaseLaunch": False,
+        },
+        {"setup": "V", "localBasePct": 6.5},
+    )
+    assert blocked is True
+    assert reason == "elite_v_rip_shallow_first_lift_blocked"
+
+
 def test_elite_entry_allows_v_rip_when_ict_first_lift_set():
     ok, reason, _ = elite_entry_allowed(
         _v_evidence(

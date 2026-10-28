@@ -88,6 +88,51 @@ def test_aug17_historical_patterns_receive_honest_causal_grades(
     assert "pnl" not in ranking["evidence"]
 
 
+def test_put_on_676_pad_keeps_a_zero_cold_velocity_penalty():
+    on_pad = rank_trade_evidence(
+        {
+            "mode": "explosion",
+            "side": "PUT",
+            "tier": "ELITE",
+            "moneyness": "ITM",
+            "symbol": "SENSEX",
+            "strike": 73200,
+            "explosionScore": 80.0,
+            "tqs": 40.0,
+            "chartConfidence": 50.0,
+            "velocity3s": -0.4,
+            "velocity9s": -0.2,
+            "localBaseMovePct": 8.0,
+            "vRipReady": True,
+        }
+    )
+    codes = {row["code"]: row["points"] for row in on_pad["penalties"]}
+    assert codes.get("atm_itm_base_cold_velocity") == 0.0
+    assert "negative_velocity" not in codes
+    assert on_pad["grade"] != "REJECT"
+
+    extended = rank_trade_evidence(
+        {
+            "mode": "explosion",
+            "side": "PUT",
+            "tier": "ELITE",
+            "moneyness": "ITM",
+            "symbol": "SENSEX",
+            "strike": 73200,
+            "explosionScore": 80.0,
+            "tqs": 40.0,
+            "chartConfidence": 50.0,
+            "velocity3s": -0.4,
+            "velocity9s": -0.2,
+            "localBaseMovePct": 28.0,
+        }
+    )
+    extended_codes = {row["code"]: row["points"] for row in extended["penalties"]}
+    assert "atm_itm_base_cold_velocity" not in extended_codes
+    assert extended_codes.get("negative_velocity") == 30.0
+    assert extended["grade"] == "REJECT"
+
+
 def test_negative_velocity_extended_trade_cannot_beat_clean_fresh_launch():
     failed = rank_trade_evidence(AUG17_PATTERNS[2][1])
     fresh = rank_trade_evidence(

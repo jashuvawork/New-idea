@@ -212,6 +212,13 @@ def _chop_live_near_base_fade_waive(candidate: Any, snap: SymbolSnapshot) -> boo
 
         ok, _ = call_atm_itm_base_capture_eligible(candidate, snap, settings=settings)
         return ok
+    if side_v == "PUT":
+        from app.engines.best_trade_policy import put_atm_itm_base_capture_mirror_eligible
+
+        ok, _ = put_atm_itm_base_capture_mirror_eligible(
+            candidate, snap, settings=settings,
+        )
+        return ok
     return False
 
 
