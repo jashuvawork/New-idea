@@ -2133,8 +2133,8 @@ def first_lift_entry_readiness(
                 row=row,
                 symbol=_sym,
             )
-        if not structure_bypass and _side == "CALL":
-            from app.engines.best_trade_policy import call_atm_itm_near_base_pad
+        if not structure_bypass and _side in ("CALL", "PUT"):
+            from app.engines.best_trade_policy import atm_itm_676_base_pad
 
             shape_evidence = {
                 **(row if isinstance(row, dict) else {}),
@@ -2151,8 +2151,8 @@ def first_lift_entry_readiness(
                 "ictVRipReady": bool(v_rip_ready or row.get("ictVRipReady")),
                 "momentType": row.get("momentType"),
             }
-            structure_bypass = call_atm_itm_near_base_pad(
-                shape_evidence, snap, settings=settings,
+            structure_bypass = atm_itm_676_base_pad(
+                shape_evidence, snap, side=_side, settings=settings,
             )
         if not structure_bypass:
             return False, "first_lift_structure_not_confirmed"
@@ -2340,6 +2340,44 @@ def first_lift_entry_readiness(
         if first_lift and not strict_armed_path and not v_rip_lane:
             if not grade_a_lane and not top_ftv_v_lane:
                 min_move = min(min_move, bd_floors["minMove"])
+    from app.engines.best_trade_policy import (
+        atm_itm_676_base_pad,
+        effective_near_base_max_local_pct,
+    )
+
+    _676_side = str(
+        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
+        or row.get("side")
+        or ""
+    ).upper()
+    _676_evidence = {
+        **(row if isinstance(row, dict) else {}),
+        "side": _676_side,
+        "tier": str(getattr(event, "tier", "") or row.get("tier") or ""),
+        "strike": float(getattr(event, "strike", 0) or row.get("strike") or 0),
+        "localBaseMovePct": base_move
+        or row.get("localBaseMovePct")
+        or row.get("ictBaseRelativeMovePct")
+        or 0,
+        "ictBaseRelativeMovePct": row.get("ictBaseRelativeMovePct") or base_move,
+        "armedBaseLaunch": bool(armed_launch or row.get("armedBaseLaunch")),
+        "ictArmedBaseLaunch": bool(armed_launch or row.get("ictArmedBaseLaunch")),
+        "vRipReady": bool(v_rip_ready or row.get("vRipReady")),
+        "ictVRipReady": bool(v_rip_ready or row.get("ictVRipReady")),
+        "eliteBaseReady": bool(elite_base_ready or row.get("eliteBaseReady")),
+        "ictEliteBaseReady": bool(elite_base_ready or row.get("ictEliteBaseReady")),
+        "firstLift": bool(first_lift or row.get("firstLift")),
+        "ictFirstLift": bool(first_lift or row.get("ictFirstLift")),
+        "ictBaseArmed": row.get("ictBaseArmed"),
+        "momentType": row.get("momentType"),
+    }
+    if atm_itm_676_base_pad(
+        _676_evidence, snap, side=_676_side, settings=settings,
+    ):
+        # #676 pad is the window. The elite 2–5% cap and the 15% first-lift
+        # floor both reject this base.
+        min_move = 0.0
+        max_move = max(max_move, effective_near_base_max_local_pct(settings))
     if not (min_move <= base_move <= max_move):
         return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
 
@@ -2524,14 +2562,14 @@ def first_lift_entry_readiness(
     live_v3, live_v9 = _raw_tape_velocity(event, alert if isinstance(alert, dict) else None)
     v3 = max(v3, float(persisted.get("velocity3s") or 0))
     v9 = max(v9, float(persisted.get("velocity9s") or 0))
-    from app.engines.best_trade_policy import call_atm_itm_near_base_pad
+    from app.engines.best_trade_policy import atm_itm_676_base_pad
 
     shape_side = str(
         getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
         or row.get("side")
         or ""
     ).upper()
-    atm_itm_base_pad = call_atm_itm_near_base_pad(
+    atm_itm_base_pad = atm_itm_676_base_pad(
         {
             **row,
             "side": shape_side,

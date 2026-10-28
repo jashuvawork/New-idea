@@ -195,6 +195,75 @@ def call_atm_itm_near_base_pad(
     ) in ("ATM", "ITM")
 
 
+def put_atm_itm_near_base_pad(
+    evidence: Mapping[str, Any] | None,
+    snap: Any = None,
+    *,
+    side: str = "",
+    strike: float = 0.0,
+    settings: Any = None,
+) -> bool:
+    """#676 put mirror of the call pad: ELITE/EXPLODING PUT, ATM or ITM, still on the base."""
+    from app.config import get_settings
+    from app.models.schemas import Side
+
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "call_atm_itm_base_capture_enabled", True)):
+        return False
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    side_u = _side_value(side or evidence.get("side"))
+    if side_u != "PUT":
+        return False
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    if not _atm_itm_base_moment(evidence):
+        return False
+    if not _call_pad_within_atm_itm_ceiling(evidence, snap, settings=settings):
+        return False
+
+    money = str(evidence.get("moneyness") or "").upper()
+    if money in ("ATM", "ITM"):
+        return True
+    stk = float(strike or _number(evidence.get("strike")))
+    spot = float(_number(evidence.get("spot")) or _number(getattr(snap, "spot", 0)))
+    if stk <= 0 or spot <= 0:
+        return False
+    from app.engines.moneyness import classify_moneyness
+
+    atm = float(
+        _number(evidence.get("atmStrike")) or _number(getattr(snap, "atmStrike", 0))
+    )
+    sym = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "")
+    return classify_moneyness(
+        Side.PUT,
+        stk,
+        spot,
+        symbol=sym,
+        atm=atm or None,
+    ) in ("ATM", "ITM")
+
+
+def atm_itm_676_base_pad(
+    evidence: Mapping[str, Any] | None,
+    snap: Any = None,
+    *,
+    side: str = "",
+    strike: float = 0.0,
+    settings: Any = None,
+) -> bool:
+    """#676 base, either side: ATM/ITM and still inside the near-base pad."""
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    side_u = _side_value(side or evidence.get("side"))
+    if side_u == "PUT":
+        return put_atm_itm_near_base_pad(
+            evidence, snap, side=side_u, strike=strike, settings=settings,
+        )
+    return call_atm_itm_near_base_pad(
+        evidence, snap, side=side_u or "CALL", strike=strike, settings=settings,
+    )
+
+
 def _moment_text_blob(
     evidence: Mapping[str, Any],
     alert: Mapping[str, Any] | None = None,
@@ -1059,6 +1128,12 @@ def put_atm_itm_base_capture_mirror_eligible(
         return False, meta
 
     sym = str(getattr(candidate, "symbol", "") or evidence.get("symbol") or "").upper()
+    # Same bar as the call: a cold print still inside the pad is the base.
+    # The 2% off-high floor only applies when that pad is not already proven.
+    on_base_pad = (
+        _atm_itm_base_moment(evidence)
+        and _call_pad_within_atm_itm_ceiling(evidence, snap, settings=settings)
+    )
     if state is not None:
         from app.engines.put_slide_ce_mirror import put_pe_base_context_armed
 
@@ -1070,9 +1145,9 @@ def put_atm_itm_base_capture_mirror_eligible(
             readiness_reason=readiness_reason,
             settings=settings,
         )
-        if not armed:
+        if not armed and not on_base_pad:
             return False, {**meta, "reason": reason or "put_base_not_armed"}
-    elif max(
+    elif not on_base_pad and max(
         _number(evidence.get("offHighMovePct")),
         _number(evidence.get("localBaseMovePct")),
     ) < float(getattr(settings, "put_premium_local_base_min_off_high_pct", 2.0) or 2.0) - 1e-6:
@@ -1884,6 +1959,17 @@ def best_trade_chop_deep_chase_blocked(
             candidate, snap, settings=settings,
         )
         if armed:
+            return False, ""
+
+    if (
+        bool(getattr(settings, "call_atm_itm_base_waive_chop_deep_itm", True))
+        and _side_value(getattr(candidate, "side", "")) == "PUT"
+    ):
+        snap = getattr(candidate, "snap", None)
+        put_base, _ = put_atm_itm_base_capture_mirror_eligible(
+            candidate, snap, settings=settings,
+        )
+        if put_base:
             return False, ""
 
     mode_u = str(day_mode or (elite_assessment or {}).get("dayMode") or "").upper()

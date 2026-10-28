@@ -369,12 +369,9 @@ def test_stored_arm_velocity_cannot_hide_a_live_drop(_open, side):
     assert fading["ictArmedEvidence"]["velocity9s"] > 0
     assert fading["velocity9s"] < 0
     assert ready is False
-    if side == Side.CALL:
-        # The ATM/ITM call pad waives the generic negative-velocity block.
-        # The stamp still requires a live lift, so the stored +2 print cannot authorize it.
-        assert reason == "preauthorized_stamp_needs_confirmed_base_lift"
-    else:
-        assert reason == "first_lift_live_velocity9s_negative"
+    # #676 ATM/ITM pad (call or put) waives the generic negative-velocity block.
+    # The stamp still requires a live lift, so the stored +2 print cannot authorize it.
+    assert reason == "preauthorized_stamp_needs_confirmed_base_lift"
     assert selected is None
 
 

@@ -495,8 +495,8 @@ class Settings(BaseSettings):
     sep917_live_checklist_enforcement_enabled: bool = False
     # Persist radar archive + premium tape on WS overlay (9:15+), not only on entry scan.
     radar_record_on_ws_overlay_enabled: bool = True
-    # On. Deep ITM chop/trap chase is refused. The #676 base-call path
-    # (call_atm_itm_base_waive_chop_deep_itm) is the only waiver.
+    # On. Deep ITM chop/trap chase is refused. The #676 ATM/ITM base
+    # (call pad, and the put mirror) is the waiver.
     best_trade_block_chop_deep_chase_enabled: bool = True
     best_trade_deep_chase_min_premium_inr: float = 120.0
     best_trade_deep_chase_max_local_pct: float = 18.0
