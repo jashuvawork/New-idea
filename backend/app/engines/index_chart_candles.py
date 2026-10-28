@@ -3,13 +3,53 @@
 from __future__ import annotations
 
 import logging
+from time import monotonic
 from typing import Any
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.engines.mtf_chart_analysis import resample_candles
 from app.services.upstox import INDEX_KEYS, UpstoxClient
 
 logger = logging.getLogger(__name__)
+
+# Last good index OHLC from snapshot refresh — used when execution-chart fetch fails.
+_snapshot_candle_cache: dict[str, tuple[float, list[Any], list[Any]]] = {}
+
+
+def remember_snapshot_index_candles(
+    symbol: str,
+    candles_5m: list[Any],
+    candles_1m: list[Any],
+) -> None:
+    """Store recent index candles for cash-candle rollover when live chart fetch fails."""
+    sym = str(symbol or "").upper()
+    if not sym:
+        return
+    c5 = list(candles_5m or [])
+    c1 = list(candles_1m or [])
+    if not c5 and not c1:
+        return
+    _snapshot_candle_cache[sym] = (monotonic(), c5, c1)
+
+
+def cached_snapshot_index_candles(
+    symbol: str,
+    *,
+    settings: Settings | None = None,
+) -> tuple[list[Any], list[Any]]:
+    """Return (candles_5m, candles_1m) from the last snapshot refresh, or empty if stale."""
+    sym = str(symbol or "").upper()
+    row = _snapshot_candle_cache.get(sym)
+    if not row:
+        return [], []
+    s = settings or get_settings()
+    ttl = float(
+        getattr(s, "index_candle_snapshot_cache_ttl_seconds", 180.0) or 180.0
+    )
+    ts, c5, c1 = row
+    if ttl > 0 and (monotonic() - ts) > ttl:
+        return [], []
+    return list(c5), list(c1)
 
 
 async def fetch_index_chart_candles(

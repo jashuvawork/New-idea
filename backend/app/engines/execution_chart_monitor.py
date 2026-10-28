@@ -183,6 +183,47 @@ def _is_scalp_mode(mode: str) -> bool:
     return (mode or "").lower() in {"scalp", "quick_sideways", "slow_bounce"}
 
 
+def index_candle_rollover_gate(
+    side: Side,
+    *,
+    symbol: str = "",
+    snap: SymbolSnapshot | None = None,
+    candles_1m: list[Any] | None = None,
+    candles_5m: list[Any] | None = None,
+    spot: float = 0.0,
+    settings: Any = None,
+    now: Optional[datetime] = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Cash-candle side gate. Returns (blocked, reason, meta).
+
+    Uses explicit 1m/5m series when provided; otherwise the snapshot candle cache.
+    """
+    from app.engines.index_candle_rollover import index_candle_rollover_blocked
+    from app.engines.index_chart_candles import cached_snapshot_index_candles
+
+    settings = settings or get_settings()
+    c1 = list(candles_1m or [])
+    c5 = list(candles_5m or [])
+    if not c1 and not c5 and symbol:
+        c5, c1 = cached_snapshot_index_candles(symbol, settings=settings)
+    if not c1 and not c5:
+        return False, "", {}
+    spot_v = float(spot or 0)
+    if spot_v <= 0 and snap is not None:
+        spot_v = float(getattr(snap, "spot", 0) or 0)
+    blocked, reason, meta = index_candle_rollover_blocked(
+        side,
+        c1,
+        c5,
+        spot=spot_v,
+        now=(now or datetime.now(IST)).astimezone(IST),
+        settings=settings,
+    )
+    if blocked:
+        meta = {**(meta or {}), "source": meta.get("source") or "index_candle_gate"}
+    return blocked, reason, meta
+
+
 def validate_execution_charts(
     side: Side,
     index_chart: SpotChart,
@@ -462,14 +503,6 @@ async def monitor_trade_chart_before_execution(
         )
     except Exception as exc:
         logger.warning("Execution chart fetch failed for %s — using snapshot: %s", symbol, exc)
-        blocked, reason = chart_blocks_side(
-            side, snap.spotChart, trade_score=trade_score,
-            breadth_aligned_bypass=breadth_bypass,
-            premium_led_bypass=structure_chart_bypass,
-            expiry_explosion_bypass=expiry_chart_bypass,
-            strict_first_lift_bypass=strict_chart_bypass,
-            index_trough_bypass=index_trough_bypass,
-        )
         fallback = {
             "enabled": True,
             "source": "snapshot_fallback",
@@ -479,22 +512,41 @@ async def monitor_trade_chart_before_execution(
             "firstLiftBypass": first_lift_bypass,
             "padLaneChartBypass": pad_lane_chart_bypass,
         }
+        roll_blocked, roll_reason, roll_meta = index_candle_rollover_gate(
+            side,
+            symbol=symbol,
+            snap=snap,
+            settings=settings,
+        )
+        if roll_blocked:
+            fallback["indexCandleRollover"] = roll_meta
+            fallback["passed"] = False
+            fallback["blockReason"] = f"exec_{roll_reason}"
+            return False, f"exec_{roll_reason}", fallback
+        blocked, reason = chart_blocks_side(
+            side, snap.spotChart, trade_score=trade_score,
+            breadth_aligned_bypass=breadth_bypass,
+            premium_led_bypass=structure_chart_bypass,
+            expiry_explosion_bypass=expiry_chart_bypass,
+            strict_first_lift_bypass=strict_chart_bypass,
+            index_trough_bypass=index_trough_bypass,
+        )
         if blocked:
             return False, f"exec_{reason}", fallback
         return True, "ok", fallback
 
     index_chart = SpotChart(**meta["indexChartFull"])
-    from app.engines.index_candle_rollover import index_candle_rollover_blocked
 
     # 09:15–09:45 cash-candle side. Intentionally before first-lift and premium bypasses.
     candles_1m = meta.pop("_indexCandles1m", None)
     candles_5m = meta.pop("_indexCandles5m", None)
-    roll_blocked, roll_reason, roll_meta = index_candle_rollover_blocked(
+    roll_blocked, roll_reason, roll_meta = index_candle_rollover_gate(
         side,
-        candles_1m,
-        candles_5m,
+        symbol=symbol,
+        snap=snap,
+        candles_1m=candles_1m,
+        candles_5m=candles_5m,
         spot=float(meta.get("spot") or getattr(snap, "spot", 0) or 0),
-        now=datetime.now(IST),
         settings=settings,
     )
     if roll_blocked:

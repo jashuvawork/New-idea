@@ -642,6 +642,49 @@ def same_strike_post_win_fresh_base_reentry(
     return True, meta
 
 
+def fresh_base_pretrade_meta_from_alert(alert: Any) -> dict[str, Any]:
+    """Copy fresh-base reentry stamp from a radar alert into candidate pretrade_meta."""
+    if not isinstance(alert, dict) or not alert.get("sameStrikePostWinFreshBase"):
+        return {}
+    stamp = alert.get("sameStrikePostWinFreshBaseMeta")
+    return {
+        "sameStrikePostWinFreshBase": True,
+        "sameStrikePostWinFreshBaseMeta": dict(stamp) if isinstance(stamp, dict) else {},
+    }
+
+
+def fresh_base_funnel_fields(
+    *,
+    pretrade_meta: Optional[dict[str, Any]] = None,
+    entry_context: Optional[dict[str, Any]] = None,
+    elite_assessment: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Fields for funnel events / HUD when a same-strike fresh-base reentry is active."""
+    pre = pretrade_meta or {}
+    ctx = entry_context or {}
+    assessment = elite_assessment or {}
+    active = bool(
+        pre.get("sameStrikePostWinFreshBase")
+        or ctx.get("sameStrikePostWinFreshBase")
+        or assessment.get("sameStrikePostWinFreshBase")
+    )
+    if not active:
+        return {}
+    meta = (
+        pre.get("sameStrikePostWinFreshBaseMeta")
+        or ctx.get("sameStrikePostWinFreshBaseMeta")
+        or {}
+    )
+    if not isinstance(meta, dict):
+        meta = {}
+    return {
+        "sameStrikePostWinFreshBase": True,
+        "freshBaseReentryReason": meta.get("reason") or "fresh_base_reentry",
+        "priorWinTradeId": meta.get("priorWinTradeId"),
+        "sameStrikeLegsAfterWin": meta.get("sameStrikeLegsAfterWin"),
+    }
+
+
 def cap_same_strike_explosion_reentry_after_win(
     lots: int,
     state: AutoTraderState,

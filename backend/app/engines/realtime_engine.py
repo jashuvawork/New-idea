@@ -567,6 +567,9 @@ async def build_symbol_snapshot(
         candles_5m, candles_1m = await fetch_index_chart_candles(client, symbol)
         if not candles_1m:
             candles_1m = await client.get_candles(symbol)
+        from app.engines.index_chart_candles import remember_snapshot_index_candles
+
+        remember_snapshot_index_candles(symbol, candles_5m, candles_1m)
         candles = candles_1m
 
         if not chain:

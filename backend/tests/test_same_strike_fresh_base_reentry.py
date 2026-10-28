@@ -6,7 +6,11 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from app.config import Settings
-from app.engines.session_mode_feedback import same_strike_post_win_fresh_base_reentry
+from app.engines.session_mode_feedback import (
+    fresh_base_funnel_fields,
+    fresh_base_pretrade_meta_from_alert,
+    same_strike_post_win_fresh_base_reentry,
+)
 from app.engines.trade_selector import _explosion_candidates
 from app.models.schemas import (
     AutoTraderState,
@@ -54,6 +58,21 @@ def _call(**kwargs):
     settings = kwargs.pop("settings", Settings())
     with patch("app.engines.session_mode_feedback.get_settings", return_value=settings):
         return same_strike_post_win_fresh_base_reentry(**kwargs)
+
+
+def test_alert_stamp_flows_to_pretrade_and_funnel_meta():
+    alert = {
+        "sameStrikePostWinFreshBase": True,
+        "sameStrikePostWinFreshBaseMeta": {
+            "reason": "fresh_base_reentry",
+            "priorWinTradeId": "win-1",
+        },
+    }
+    pre = fresh_base_pretrade_meta_from_alert(alert)
+    assert pre["sameStrikePostWinFreshBase"] is True
+    funnel = fresh_base_funnel_fields(pretrade_meta=pre)
+    assert funnel["freshBaseReentryReason"] == "fresh_base_reentry"
+    assert funnel["priorWinTradeId"] == "win-1"
 
 
 def test_fresh_base_reentry_allows_rising_pad_after_same_strike_win():

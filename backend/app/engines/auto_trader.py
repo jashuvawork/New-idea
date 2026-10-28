@@ -1869,6 +1869,18 @@ async def _open_from_candidate(
         if live_blocked:
             return False, live_reason
         trade_score = candidate_trade_score(candidate)
+        if settings.execution_chart_gate_enabled and not client:
+            from app.engines.execution_chart_monitor import index_candle_rollover_gate
+
+            roll_blocked, roll_reason, roll_meta = index_candle_rollover_gate(
+                candidate.side,
+                symbol=symbol,
+                snap=snap,
+                settings=settings,
+            )
+            if roll_blocked:
+                live_score_meta["indexCandleRollover"] = roll_meta
+                return False, f"exec_{roll_reason}"
 
     if settings.execution_chart_gate_enabled:
         if client:
@@ -2983,6 +2995,23 @@ async def _open_from_candidate(
                     return False, budget_reason
                 ctx_extra["eliteAssessment"] = assessment
                 ctx_extra["eliteTradeBudget"] = assessment.get("mustTake")
+                if assessment.get("sameStrikePostWinFreshBase"):
+                    ctx_extra["sameStrikePostWinFreshBase"] = True
+                    pre_fb = (candidate.pretrade_meta or {}).get(
+                        "sameStrikePostWinFreshBaseMeta"
+                    )
+                    if isinstance(pre_fb, dict):
+                        ctx_extra["sameStrikePostWinFreshBaseMeta"] = pre_fb
+                alert_fb = (
+                    candidate.alert
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else None
+                )
+                if alert_fb and alert_fb.get("sameStrikePostWinFreshBase"):
+                    ctx_extra.setdefault("sameStrikePostWinFreshBase", True)
+                    meta_fb = alert_fb.get("sameStrikePostWinFreshBaseMeta")
+                    if isinstance(meta_fb, dict):
+                        ctx_extra.setdefault("sameStrikePostWinFreshBaseMeta", meta_fb)
                 if candidate.mode == "explosion" and candidate.explosion_event:
                     from app.engines.elite_runner_exit_bundle import (
                         apply_elite_runner_exit_bundle,
@@ -4874,6 +4903,17 @@ async def _process_locked(
                     continue
                 entry_abort_recorded = False
                 try:
+                    from app.engines.session_mode_feedback import fresh_base_funnel_fields
+
+                    fresh_fb = fresh_base_funnel_fields(
+                        pretrade_meta=(best.pretrade_meta or {}),
+                        elite_assessment=(
+                            ((best.pretrade_meta or {}).get("topMomentGate") or {}).get(
+                                "eliteAssessment"
+                            )
+                            or {}
+                        ),
+                    )
                     await _record_funnel_event_safe({
                         "event": "SELECTED",
                         "key": radar_key,
@@ -4894,7 +4934,19 @@ async def _process_locked(
                         "allocationBudgetInr": (
                             round(allocation.budgetInr, 2) if allocation else None
                         ),
+                        **fresh_fb,
                     })
+                    if fresh_fb.get("sameStrikePostWinFreshBase"):
+                        await _record_funnel_event_safe({
+                            "event": "FRESH_BASE_REENTRY",
+                            "key": radar_key,
+                            "symbol": best.symbol.upper(),
+                            "side": best.side.value,
+                            "strike": best.strike,
+                            "stage": "selector",
+                            "cycleId": cycle_id,
+                            **fresh_fb,
+                        })
                     try:
                         opened, reason = await _open_from_candidate(
                             best,

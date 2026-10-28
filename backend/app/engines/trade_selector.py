@@ -306,6 +306,9 @@ def _explosion_candidates(
     settings,
 ) -> list[EntryCandidate]:
     from app.engines.explosion_detector import ExplosionEvent, effective_explosion_min_score
+    from app.engines.session_mode_feedback import (
+        fresh_base_pretrade_meta_from_alert as _fresh_base_pretrade_from_alert,
+    )
 
     out: list[EntryCandidate] = []
     for alert in snap.explosionAlerts or []:
@@ -387,6 +390,8 @@ def _explosion_candidates(
             )
             if fresh_ok:
                 pad_lane_waive = True
+                alert["sameStrikePostWinFreshBase"] = True
+                alert["sameStrikePostWinFreshBaseMeta"] = dict(_fresh_meta)
         lift_ready = first_lift_ready or early_pad or coil_pad or pad_lane_waive
         slow_grind_trough = bool(
             alert.get("slowGrindArmedTrough")
@@ -1260,6 +1265,7 @@ def _explosion_candidates(
                     alert.get("ictBaseRelativeMovePct") or 0
                 ),
                 "ictBaseArmedAt": alert.get("ictBaseArmedAt"),
+                **_fresh_base_pretrade_from_alert(alert),
             },
         ))
     return out

@@ -19,6 +19,10 @@ When changing **session gates, directional lock, breadth blocks, bypasses, or si
 
 Reference: `backend/app/engines/index_rally_side_flip.py` (`_call_rally_bypass` / `_put_slide_bypass`).
 
+## #676 pad policy (frozen unless user asks)
+
+Do **not** change the deployed **#676 near-base pad book** unless the user explicitly requests a pad/ranking change. That includes `backend/app/engines/best_trade_policy.py` (e.g. `call_atm_itm_base_capture_eligible`, +44 CE / −36 PE rank nudge, chop waivers, local-base caps) and production thresholds that mirror `ef333c95`. Entry/exit infra, replay, funnel, and cash-candle gates may change without touching pad ranking math.
+
 ## Stabilization playbook (owner mindset)
 
 **Goal:** Stop daily firefighting. Tune on **evidence**, deploy **once**, protect production uptime. Rule changes are expensive — default to **no change** unless the bar below is met.

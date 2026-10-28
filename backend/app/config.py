@@ -3068,6 +3068,7 @@ class Settings(BaseSettings):
     index_candle_rollover_block_enabled: bool = True
     index_candle_rollover_steps: int = 3
     index_candle_rollover_min_giveback_pct: float = 0.04
+    index_candle_snapshot_cache_ttl_seconds: float = 180.0
     open_caution_min_explosion_score: int = 45
     open_caution_score_bonus: int = 0
     open_caution_min_rank_score: float = 55.0
