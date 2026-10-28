@@ -327,7 +327,14 @@ def evaluate_local_base_entry(
 ) -> tuple[bool, str, Optional[str], dict[str, Any]]:
     """Return (allowed, reason, moment_type, ranking) for one radar alert."""
     s = settings or get_settings()
-    if bool(getattr(s, "top_moments_only_enabled", True)):
+    candidate = _candidate_from_alert(alert, snap)
+    when = getattr(snap, "timestamp", None)
+    from app.engines.open_index_lane import open_index_lane_qualified
+
+    lane_pass, _lane_reason, lane_meta = open_index_lane_qualified(
+        candidate, settings=s, when=when,
+    )
+    if bool(getattr(s, "top_moments_only_enabled", True)) and not lane_pass:
         if not explosion_alert_is_top_moment(alert):
             return False, "not_top_moment_radar", None, {}
 
@@ -339,6 +346,9 @@ def evaluate_local_base_entry(
     pad_lane_waive = pad_lane_early_near_miss_waive(
         alert, readiness_reason=lift_reason, snap=snap,
     )
+    if lane_pass and bool(lane_meta.get("firstLift")):
+        ready = True
+        lift_reason = lift_reason or "open_index_lane_first_lift"
 
     evidence = _alert_evidence(alert, snap)
     from app.engines.index_confirmed_local_base import enrich_evidence_index_confirmed
@@ -353,12 +363,15 @@ def evaluate_local_base_entry(
         top_moments_only_enabled=bool(getattr(s, "top_moments_only_enabled", True)),
         min_grade=str(getattr(s, "top_moments_min_grade", "A") or "A"),
         day_mode=day_mode,
-        readiness_reason=lift_reason if (ready or pad_lane_waive) else "",
+        readiness_reason=lift_reason if (ready or pad_lane_waive or lane_pass) else "",
     )
-    if not allowed:
+    if not allowed and not lane_pass:
         return False, reason, moment, ranking
+    if not allowed and lane_pass:
+        reason = lift_reason or "open_index_lane"
+        moment = moment or str(lane_meta.get("setup") or "FTV")
 
-    if not ready and not pad_lane_waive:
+    if not ready and not pad_lane_waive and not lane_pass:
         return False, lift_reason, moment, ranking
     if pad_lane_waive:
         lift_reason = pad_lane_ready_reason(
@@ -368,8 +381,7 @@ def evaluate_local_base_entry(
     from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_capture
     from app.engines.explosion_entry_guards import tier_promotion_pad_chase_blocked
 
-    if not alert_has_early_radar_pad_capture(alert):
-        candidate = _candidate_from_alert(alert, snap)
+    if not lane_pass and not alert_has_early_radar_pad_capture(alert):
         from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
 
         ict_ev = analyze_explosion_event_ict(candidate.explosion_event, snap)
@@ -385,7 +397,10 @@ def evaluate_local_base_entry(
     tier = str(alert.get("tier") or "")
     vol = _f(alert.get("volumeSurge"))
     entry_min, chase_max = local_base_entry_window(tier, vol)
-    if base_rel > 0 and not (entry_min <= base_rel <= chase_max):
+    lane_max_local = float(getattr(s, "open_index_lane_max_local_base_pct", 15.0) or 15.0)
+    if lane_pass and base_rel > lane_max_local + 1e-6:
+        return False, "open_index_lane_local_base_chase", moment, ranking
+    if base_rel > 0 and not lane_pass and not (entry_min <= base_rel <= chase_max):
         # Armed/elite/v-rip paths already checked tighter windows inside first_lift.
         if lift_reason not in (
             "v_rip_session_low_ready",
@@ -418,7 +433,10 @@ def evaluate_local_base_entry(
     if prem < min_prem:
         return False, f"premium_below_{min_prem:g}", moment, ranking
 
-    return True, lift_reason, moment, ranking
+    if lane_pass:
+        ranking = dict(ranking or {})
+        ranking["openIndexLane"] = lane_meta
+    return True, lift_reason or "open_index_lane", moment, ranking
 
 
 def evaluate_replay_structural_gates(
@@ -488,6 +506,16 @@ def evaluate_replay_structural_gates(
             return False, reason
 
     if not structural:
+        return True, "ok"
+
+    from app.engines.open_index_lane import open_index_lane_qualified
+
+    lane_pass, _, _ = open_index_lane_qualified(
+        candidate,
+        settings=s,
+        when=getattr(snap, "timestamp", None),
+    )
+    if lane_pass:
         return True, "ok"
 
     if str(getattr(candidate, "mode", "") or "") != "explosion":
@@ -767,6 +795,15 @@ def evaluate_replay_live_gates(
     from app.models.schemas import AutoTraderState
 
     candidate = _candidate_from_alert(alert, snap)
+    from app.engines.open_index_lane import open_index_lane_qualified
+
+    lane_pass, _, _ = open_index_lane_qualified(
+        candidate,
+        settings=s,
+        when=getattr(snap, "timestamp", None),
+    )
+    if lane_pass:
+        return True, "ok"
 
     if in_power_hour_window():
         if not skip_session_gate:
@@ -875,6 +912,58 @@ def _contract_key(symbol: str, side: str, strike: float) -> str:
     return f"{symbol.upper()}:{side.upper()}:{strike:g}"
 
 
+def _merge_open_lane_contract_alerts(
+    sym: str,
+    snap: SymbolSnapshot,
+    symbol_state: dict[tuple[float, str], dict[str, Any]],
+    ts: datetime,
+    *,
+    settings: Any = None,
+) -> list[dict[str, Any]]:
+    """During 09:20–09:45, add lane-qualified tape contracts missing from explosion alerts."""
+    from app.engines.open_index_lane import (
+        in_open_caution_window_at,
+        open_index_lane_qualified,
+    )
+
+    s = settings or get_settings()
+    alerts = list(snap.explosionAlerts or [])
+    if not in_open_caution_window_at(ts):
+        return alerts
+
+    sym_u = str(sym or "").upper()
+    if "SENSEX" in sym_u:
+        required_side = "CALL" if bool(getattr(s, "open_sensex_call_lane_enabled", True)) else None
+    elif "NIFTY" in sym_u and "BANK" not in sym_u:
+        required_side = "PUT" if bool(getattr(s, "open_nifty_put_lane_enabled", True)) else None
+    else:
+        return alerts
+    if not required_side or not bool(getattr(s, "open_index_lane_enabled", True)):
+        return alerts
+
+    seen = {
+        (_f(a.get("strike")), str(a.get("side") or "").upper())
+        for a in alerts
+    }
+    for (strike_v, side_name), contract in symbol_state.items():
+        side_u = str(side_name or "").upper()
+        if side_u != required_side or strike_v <= 0:
+            continue
+        if (strike_v, side_u) in seen:
+            continue
+        alert_eval = _enrich_alert_from_contract(
+            {**contract, "symbol": sym_u, "side": side_u},
+            contract,
+        )
+        cand = _candidate_from_alert(alert_eval, snap)
+        lane_ok, _, _ = open_index_lane_qualified(cand, settings=s, when=ts)
+        if not lane_ok:
+            continue
+        alerts.append(alert_eval)
+        seen.add((strike_v, side_u))
+    return alerts
+
+
 _PAD_LANE_REASONS = frozenset({
     "building_coil_pad_ready",
     "building_armed_prelaunch_ready",
@@ -901,7 +990,7 @@ def _eod_replay_quality_blocks_entry(
     """Extra full-tape filters to drop BUILDING pad chase / low-score bypass entries."""
     tier_u = str(alert.get("tier") or "").upper()
     if bool(getattr(settings, "eod_replay_require_elite_or_exploding_tier", True)):
-        if tier_u not in {"ELITE", "EXPLODING"}:
+        if tier_u not in {"ELITE", "EXPLODING"} and not assessment.get("openIndexLane"):
             return False, "eod_replay_building_tier_blocked"
 
     base_rel = _f(alert.get("ictBaseRelativeMovePct") or alert.get("localBaseMovePct"))
@@ -1370,7 +1459,10 @@ def replay_local_base_day(
             ranked_candidates: list[dict[str, Any]] = []
             for sym, snap in batch_snapshots.items():
                 symbol_state = state[sym]
-                for alert in snap.explosionAlerts or []:
+                batch_alerts = _merge_open_lane_contract_alerts(
+                    sym, snap, symbol_state, ts, settings=s,
+                )
+                for alert in batch_alerts:
                     strike_v = _f(alert.get("strike"))
                     side = str(alert.get("side") or "").upper()
                     if strike_v <= 0 or side not in {"CALL", "PUT"}:
@@ -1444,15 +1536,32 @@ def replay_local_base_day(
                     assessment: dict[str, Any] = {}
                     if elite_engine:
                         from app.engines.elite_trade_budget import elite_budget_blocks_entry
+                        from app.engines.open_index_lane import open_index_lane_qualified
 
-                        blocked, budget_reason, assessment = elite_budget_blocks_entry(
-                            replay_state,
-                            ranking.get("evidence") or _alert_evidence(alert_eval, snap),
-                            ranking,
+                        lane_pass, _, lane_meta = open_index_lane_qualified(
+                            _candidate_from_alert(alert_eval, snap),
                             settings=s,
-                            snapshots=batch_snapshots,
-                            day_mode=batch_day_mode,
+                            when=ts,
                         )
+                        if lane_pass:
+                            assessment = {
+                                **lane_meta,
+                                "openIndexLane": True,
+                                "eliteScore": lane_meta.get("eliteScore"),
+                                "eliteBand": lane_meta.get("eliteBand"),
+                                "setup": lane_meta.get("setup"),
+                                "stage": lane_meta.get("stage"),
+                            }
+                            blocked, budget_reason = False, "ok"
+                        else:
+                            blocked, budget_reason, assessment = elite_budget_blocks_entry(
+                                replay_state,
+                                ranking.get("evidence") or _alert_evidence(alert_eval, snap),
+                                ranking,
+                                settings=s,
+                                snapshots=batch_snapshots,
+                                day_mode=batch_day_mode,
+                            )
                         if blocked:
                             gate_stats[budget_reason] += 1
                             if len(signal_rows) < 500:

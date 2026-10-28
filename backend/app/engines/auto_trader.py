@@ -846,6 +846,7 @@ async def _open_from_candidate(
                     settings=settings,
                     snapshots=snapshots,
                     day_mode=resolve_policy_day_mode(state),
+                    candidate=candidate,
                 )
                 if blocked:
                     return False, budget_reason
@@ -2976,6 +2977,7 @@ async def _open_from_candidate(
                     settings=settings,
                     snapshots=snapshots,
                     day_mode=resolve_policy_day_mode(state),
+                    candidate=candidate,
                 )
                 if blocked:
                     return False, budget_reason

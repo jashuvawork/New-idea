@@ -1,7 +1,8 @@
 """09:20–09:45 IST index-specific open lanes (then normal book after open caution ends).
 
-Research-backed defaults: SENSEX CALL + first lift ON; NIFTY PUT OFF until validated on
-option tape. Does not waive cash-candle hold, open macro, or premium band.
+Research-backed defaults on main: SENSEX CALL + first lift ON; NIFTY PUT opt-in via
+``open_nifty_put_lane_enabled``. Does not waive cash-candle hold, open macro, or premium band.
+Replay uses ``resolve_lane_when`` (snap timestamp, not wall clock).
 """
 
 from __future__ import annotations
@@ -36,10 +37,24 @@ def _side_value(side: Any) -> str:
 def in_open_caution_window_at(when: datetime) -> bool:
     """Same window as session_timing.in_open_caution_window, for replay/tests."""
     settings = get_settings()
+    if not isinstance(when, datetime):
+        return False
     local = when.astimezone(IST)
-    current = local.hour * 60 + local.minute
-    earliest = settings.entry_earliest_hour * 60 + settings.entry_earliest_minute
-    end = settings.open_caution_until_hour * 60 + settings.open_caution_until_minute
+    try:
+        current = int(local.hour) * 60 + int(local.minute)
+    except (TypeError, ValueError):
+        return False
+
+    def _clock_minutes(hour_attr: str, min_attr: str, default_h: int, default_m: int) -> int:
+        try:
+            h = int(getattr(settings, hour_attr, default_h))
+            m = int(getattr(settings, min_attr, default_m))
+            return h * 60 + m
+        except (TypeError, ValueError):
+            return default_h * 60 + default_m
+
+    earliest = _clock_minutes("entry_earliest_hour", "entry_earliest_minute", 9, 20)
+    end = _clock_minutes("open_caution_until_hour", "open_caution_until_minute", 9, 45)
     return earliest <= current < end
 
 
@@ -128,6 +143,41 @@ def _lane_quality_ok(candidate: Any, settings: Any) -> tuple[bool, str, dict[str
     return True, "ok", meta
 
 
+def resolve_lane_when(
+    candidate: Any,
+    when: Optional[datetime] = None,
+) -> datetime:
+    """Replay/live clock: prefer explicit when, then candidate.snap.timestamp, then now."""
+    if when is not None and isinstance(when, datetime):
+        ts = when
+    else:
+        snap = getattr(candidate, "snap", None)
+        raw = getattr(snap, "timestamp", None) if snap is not None else None
+        ts = raw if isinstance(raw, datetime) else None
+    if ts is None:
+        return datetime.now(IST)
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=IST)
+    return ts.astimezone(IST)
+
+
+def open_index_lane_qualified(
+    candidate: Any,
+    *,
+    settings: Any = None,
+    when: Optional[datetime] = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """True when open caution window + index lane side + lane quality all pass."""
+    ok, reason, meta = validate_open_index_lane(
+        candidate, settings=settings, when=resolve_lane_when(candidate, when),
+    )
+    if not ok:
+        return False, reason, meta
+    if meta.get("openIndexLanePassed"):
+        return True, "ok", meta
+    return False, "lane_idle", meta
+
+
 def validate_open_index_lane(
     candidate: Any,
     *,
@@ -141,7 +191,7 @@ def validate_open_index_lane(
     if not bool(getattr(settings, "open_index_lane_enabled", True)):
         return True, "ok", {}
 
-    when = when or datetime.now(IST)
+    when = resolve_lane_when(candidate, when)
     if not in_open_caution_window_at(when):
         return True, "ok", {}
 
