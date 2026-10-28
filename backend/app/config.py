@@ -1938,6 +1938,11 @@ class Settings(BaseSettings):
     # the old Jul29 protective soft-cap behavior.
     explosion_post_win_same_strike_lot_cap_enabled: bool = False
     explosion_post_win_same_strike_lot_cap: int = 6
+    # One same-strike reentry after a win, only while that premium is rising off a
+    # fresh post-close base inside the pad. Clears near-miss and elite chase stamps.
+    # A fading print, the opposite side, a second leg, or a lift already past the
+    # pad stays blocked. Oct 21 SENSEX 74200 PUT sold near 315 and ran to 1029.
+    same_strike_post_win_fresh_base_reentry_enabled: bool = True
     # Session mode feedback — promote/demote modes from today's PF (closes learning loop).
     session_mode_feedback_enabled: bool = True
     session_mode_feedback_min_trades: int = 2
@@ -3043,9 +3048,11 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
-    # 09:16 → 09:45: side must match today's index tape. The first minute (09:15)
-    # is blocked so a blind open print cannot pick the wrong side (Oct 13 22300 PE).
+    # Macro side check 09:25–09:45. Idle before 09:25 and after 09:45.
+    # The cash-candle hold covers 09:15–09:45. The first order stays 09:20.
     open_side_confirmation_enabled: bool = True
+    open_side_confirmation_start_hour: int = 9
+    open_side_confirmation_start_minute: int = 25
     open_side_confirmation_min_minutes: float = 1.0
     open_side_confirmation_min_index_move_pct: float = 0.10
     open_side_confirmation_min_range_position: float = 0.6

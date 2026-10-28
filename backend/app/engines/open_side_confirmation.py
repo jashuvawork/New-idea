@@ -5,7 +5,9 @@ built from the previous session's bars, while NIFTY V-reversed up off the open a
 22300 CE ran +194%. During the open window the side must be confirmed by *today's*
 index tape: price moved away from the session open in the trade's direction and sits
 in that side's half of the session range. CALL and PUT are exact mirrors.
-The first minute stays blocked, so the earliest order is 09:16.
+
+The macro side check runs 09:25–09:45 so the 09:15–09:45 cash-candle hold votes first.
+Before 09:25 and at or after 09:45 this check is idle. The first order stays 09:20.
 """
 
 from __future__ import annotations
@@ -46,16 +48,26 @@ def open_side_confirmation(
         return False, "", {}
     now = (now or datetime.now(IST)).astimezone(IST)
     minutes = now.hour * 60 + now.minute + now.second / 60.0
+    start = (
+        int(_cfg_float(settings, "open_side_confirmation_start_hour", 9)) * 60
+        + int(_cfg_float(settings, "open_side_confirmation_start_minute", 25))
+    )
     until = (
         int(_cfg_float(settings, "open_caution_until_hour", 9)) * 60
         + int(_cfg_float(settings, "open_caution_until_minute", 45))
     )
-    if minutes < MARKET_OPEN_MINUTES or minutes >= until:
+    # Idle before 09:25 and at/after 09:45. The cash-candle hold covers 09:15–09:45.
+    if minutes < start or minutes >= until:
         return False, "", {}
 
     side_v = _side_val(side)
     min_wait = _cfg_float(settings, "open_side_confirmation_min_minutes", 1.0)
-    if minutes < MARKET_OPEN_MINUTES + min_wait:
+    # Only when the window still includes the opening minute. A 09:25 start
+    # never reaches this, so the cash hold owns 09:15–09:24.
+    if (
+        start < MARKET_OPEN_MINUTES + min_wait
+        and minutes < MARKET_OPEN_MINUTES + min_wait
+    ):
         return True, "open_side_unconfirmed_first_bar", {
             "minutesSinceOpen": round(minutes - MARKET_OPEN_MINUTES, 2),
         }

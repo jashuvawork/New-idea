@@ -44,21 +44,37 @@ def _tape(symbol: str, *, open_: float, hi: float, lo: float, last: float):
 
 
 @pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
-def test_first_bar_blocks_both_sides(side):
-    """Oct 13 22300 PE entered 09:15:37 — neither side is confirmed in the first minute."""
+def test_macro_idle_before_0925(side):
+    """09:15–09:24 belongs to the cash-candle hold. The macro does not vote yet."""
     snap = _tape("NIFTY", open_=22300.0, hi=22310.0, lo=22290.0, last=22308.6)
+    for clock in (_at(9, 15, 37), _at(9, 16, 18), _at(9, 20, 10)):
+        blocked, reason, _ = open_side_confirmation(
+            "NIFTY", side, snap, now=clock, settings=_settings(),
+        )
+        assert blocked is False
+        assert reason == ""
+
+
+@pytest.mark.parametrize("side", [Side.CALL, Side.PUT])
+def test_first_bar_still_blocks_when_window_includes_the_open(side):
+    """A start pulled back to 09:15 still refuses the unconfirmed first minute."""
+    snap = _tape("NIFTY", open_=22300.0, hi=22310.0, lo=22290.0, last=22308.6)
+    s = _settings(
+        open_side_confirmation_start_hour=9,
+        open_side_confirmation_start_minute=15,
+    )
     blocked, reason, _ = open_side_confirmation(
-        "NIFTY", side, snap, now=_at(9, 15, 37), settings=_settings(),
+        "NIFTY", side, snap, now=_at(9, 15, 37), settings=s,
     )
     assert blocked and reason == "open_side_unconfirmed_first_bar"
 
 
 def test_oct13_rally_off_open_blocks_pe_allows_ce():
-    """NIFTY V-up off the open: CE confirmed, PE blocked."""
+    """NIFTY V-up off the open: from 09:25, CE confirmed, PE blocked."""
     snap = _tape("NIFTY", open_=22300.0, hi=22410.0, lo=22285.0, last=22395.0)
     s = _settings()
-    put_blocked, put_reason, _ = open_side_confirmation("NIFTY", Side.PUT, snap, now=_at(9, 16, 18), settings=s)
-    call_blocked, _, meta = open_side_confirmation("NIFTY", Side.CALL, snap, now=_at(9, 16, 18), settings=s)
+    put_blocked, put_reason, _ = open_side_confirmation("NIFTY", Side.PUT, snap, now=_at(9, 25), settings=s)
+    call_blocked, _, meta = open_side_confirmation("NIFTY", Side.CALL, snap, now=_at(9, 25), settings=s)
     assert put_blocked and put_reason == "open_side_put_index_not_below_open"
     assert call_blocked is False
     assert meta["movePct"] > 0.10
@@ -67,8 +83,8 @@ def test_oct13_rally_off_open_blocks_pe_allows_ce():
 def test_slide_off_open_allows_pe_blocks_ce():
     snap = _tape("SENSEX", open_=72812.0, hi=72840.0, lo=72610.0, last=72625.0)
     s = _settings()
-    put_blocked, _, _ = open_side_confirmation("SENSEX", Side.PUT, snap, now=_at(9, 20, 10), settings=s)
-    call_blocked, call_reason, _ = open_side_confirmation("SENSEX", Side.CALL, snap, now=_at(9, 20, 10), settings=s)
+    put_blocked, _, _ = open_side_confirmation("SENSEX", Side.PUT, snap, now=_at(9, 26), settings=s)
+    call_blocked, call_reason, _ = open_side_confirmation("SENSEX", Side.CALL, snap, now=_at(9, 26), settings=s)
     assert put_blocked is False
     assert call_blocked and call_reason == "open_side_call_index_not_above_open"
 
@@ -104,13 +120,18 @@ def test_after_open_window_not_applied_ce_pe(side):
 def test_enabled_at_one_minute_by_default():
     s = Settings()
     assert s.open_side_confirmation_enabled is True
+    assert s.open_side_confirmation_start_minute == 25
     assert s.open_side_confirmation_min_minutes == 1.0
+    assert s.entry_earliest_minute == 20
     assert s.explosion_entry_earliest_minute == 20
     snap = _tape("NIFTY", open_=22300.0, hi=22410.0, lo=22285.0, last=22395.0)
-    blocked15, reason15, _ = open_side_confirmation("NIFTY", Side.PUT, snap, now=_at(9, 15, 37), settings=s)
-    blocked16, _, _ = open_side_confirmation("NIFTY", Side.CALL, snap, now=_at(9, 16, 18), settings=s)
-    assert blocked15 and reason15 == "open_side_unconfirmed_first_bar"
-    assert blocked16 is False
+    for clock in (_at(9, 15, 37), _at(9, 16, 18), _at(9, 20, 0)):
+        blocked, reason, _ = open_side_confirmation("NIFTY", Side.CALL, snap, now=clock, settings=s)
+        assert blocked is False
+        assert reason == ""
+    call_blocked, _, meta = open_side_confirmation("NIFTY", Side.CALL, snap, now=_at(9, 25), settings=s)
+    assert call_blocked is False
+    assert meta["movePct"] > 0.10
 
 
 def test_confirmation_uses_live_day_open_not_the_preopen_tick():
