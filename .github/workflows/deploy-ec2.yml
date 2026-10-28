@@ -110,7 +110,8 @@ jobs:
               "  if grep -q \"^${k}=\" $ENV; then sed -i \"s|^${k}=.*|${k}=${val}|\" $ENV; else echo \"${k}=${val}\" >> $ENV; fi",
               "  echo synced $k=$val",
               "done",
-              "bash deploy/ec2-update.sh"
+              "bash deploy/ec2-update.sh",
+              "sudo ENV_FILE=$ENV REPO_DIR=$REPO bash deploy/set-execution-mode.sh --paper"
             ]' \
             --query Command.CommandId \
             --output text)
@@ -219,6 +220,13 @@ jobs:
               raise SystemExit('deployment status not ok')
           if commit != '$EXPECTED':
               raise SystemExit(f'commit mismatch: live {commit!r} != expected $EXPECTED!r')
+          f = d.get('flags') or {}
+          if f.get('paperTrading') is not True:
+              raise SystemExit('paperTrading must be true')
+          if f.get('enableLiveTrading') is not False:
+              raise SystemExit('enableLiveTrading must be false')
+          if f.get('entryEarliestIst') != '09:20':
+              raise SystemExit('entryEarliestIst must be 09:20, got ' + repr(f.get('entryEarliestIst')))
           "; then
               exit 0
             fi
