@@ -134,6 +134,9 @@ _exit_claims: dict[str, object] = {}
 _exit_claims_guard = threading.Lock()
 _entry_claims: dict[str, object] = {}
 _entry_claims_guard = threading.Lock()
+# One trader pass at a time. A second pass must not wait — the monitor loop
+# stays free to keep the entry scan and radar heartbeat moving.
+_process_lock = asyncio.Lock()
 
 
 def _release_exit_claim(trade_id: str, token: object) -> None:
@@ -201,6 +204,50 @@ async def refresh_trading_capital(client, *, force: bool = False) -> None:
 _state_loaded: bool = False
 
 
+def _closed_trade_from_store_row(
+    row: dict,
+    *,
+    fallback_id: str,
+    session_date: str,
+) -> PaperTrade:
+    """Rebuild a closed paper trade without dropping the peak the gates read.
+
+    A restart used to keep pnlInr and forget pnlPoints, bestPnlPoints, and
+    maxLtp. Same-strike reentry and peak-fade then treated a real winner as flat.
+    """
+    raw = dict(row)
+    raw["id"] = str(raw.get("id") or fallback_id)
+    raw["status"] = "CLOSED"
+    raw["sessionDate"] = str(raw.get("sessionDate") or session_date)
+    if not raw.get("side"):
+        raw["side"] = "CALL"
+    if not raw.get("strategyType"):
+        raw["strategyType"] = "EXPLOSIVE"
+    if not isinstance(raw.get("entryContext"), dict):
+        raw["entryContext"] = {}
+    try:
+        entry = float(raw.get("entryPremium") or 0)
+    except (TypeError, ValueError):
+        entry = 0.0
+    try:
+        current = float(raw.get("currentPremium") or raw.get("exitPremium") or entry)
+    except (TypeError, ValueError):
+        current = entry
+    if raw.get("currentPremium") is None:
+        raw["currentPremium"] = current
+    if raw.get("pnlPoints") is None:
+        raw["pnlPoints"] = current - entry
+    if raw.get("bestPnlPoints") is None:
+        ctx_best = raw["entryContext"].get("bestPnlPoints")
+        try:
+            raw["bestPnlPoints"] = float(ctx_best) if ctx_best is not None else float(raw["pnlPoints"])
+        except (TypeError, ValueError):
+            raw["bestPnlPoints"] = float(raw["pnlPoints"] or 0)
+    if raw.get("lots") in (None, ""):
+        raw["lots"] = 1
+    return PaperTrade.model_validate(raw)
+
+
 def _ensure_state_loaded() -> None:
     """Restore open + today's closed paper trades from persistent store after restart."""
     global _auto_trader_state, _state_loaded
@@ -252,25 +299,15 @@ def _ensure_state_loaded() -> None:
                 except ValueError:
                     pass
             try:
-                side_raw = str(row.get("side", "CALL")).upper()
-                _auto_trader_state.closedPaperTrades.append(PaperTrade(
-                    id=tid or f"restored-{restored_closed}",
-                    symbol=str(row.get("symbol", "")),
-                    side=Side(side_raw),
-                    strike=float(row.get("strike") or 0),
-                    entryPremium=float(row.get("entryPremium") or 0),
-                    currentPremium=float(row.get("currentPremium") or row.get("exitPremium") or row.get("entryPremium") or 0),
-                    lots=int(row.get("lots") or 1),
-                    exitPremium=float(row.get("exitPremium") or row.get("entryPremium") or 0),
-                    pnlInr=float(row.get("pnlInr") or 0),
-                    openedAt=datetime.fromisoformat(str(row.get("openedAt"))) if row.get("openedAt") else datetime.now(IST),
-                    closedAt=datetime.fromisoformat(str(closed_raw)) if closed_raw else None,
-                    status="CLOSED",
-                    exitReason=exit_reason,
-                    strategyType=StrategyType(str(row.get("strategyType") or "EXPLOSIVE")),
-                    sessionDate=today,
-                    entryContext=row.get("entryContext") if isinstance(row.get("entryContext"), dict) else {},
-                ))
+                if not row.get("exitReason"):
+                    row = {**row, "exitReason": exit_reason}
+                _auto_trader_state.closedPaperTrades.append(
+                    _closed_trade_from_store_row(
+                        row,
+                        fallback_id=tid or f"restored-{restored_closed}",
+                        session_date=today,
+                    )
+                )
                 restored_closed += 1
             except Exception as e:
                 logger.warning("Failed to restore closed trade %s: %s", tid, e)
@@ -4348,6 +4385,21 @@ async def process(
     client: Optional[UpstoxClient] = None,
 ) -> AutoTraderState:
     """Process open/update/close trades from snapshot candidates."""
+    if _process_lock.locked():
+        logger.info("Skipping overlapping trader pass")
+        return get_state()
+    await _process_lock.acquire()
+    try:
+        return await _process_locked(snapshots, news=news, client=client)
+    finally:
+        _process_lock.release()
+
+
+async def _process_locked(
+    snapshots: dict[str, SymbolSnapshot],
+    news: Optional[list[dict[str, Any]]] = None,
+    client: Optional[UpstoxClient] = None,
+) -> AutoTraderState:
     state = get_state()
     settings = get_settings()
     skipped: list[dict[str, Any]] = []
