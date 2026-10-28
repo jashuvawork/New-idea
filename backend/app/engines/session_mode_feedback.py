@@ -112,12 +112,8 @@ def session_has_green_mode(
     for t in trades:
         if _mode_of(t) != mode:
             continue
-        pnl = float(
-            getattr(t, "pnl_inr", 0) or getattr(t, "pnlInr", 0) or 0
-        )
-        best = float(
-            getattr(t, "best_pnl_points", 0) or getattr(t, "bestPnlPoints", 0) or 0
-        )
+        pnl = float(getattr(t, "pnl_inr", 0) or 0)
+        best = float(getattr(t, "best_pnl_points", 0) or 0)
         if pnl > 0:
             return True
         if not require_win and best >= 1.0:
@@ -170,93 +166,6 @@ def cap_lots_until_first_green(lots: int, state: AutoTraderState, *, mode: str =
 
 def _side_key(side: Any) -> str:
     return side.value if hasattr(side, "value") else str(side or "").upper()
-
-
-def _parse_ist_datetime(raw: Any) -> datetime | None:
-    if raw is None:
-        return None
-    if isinstance(raw, datetime):
-        dt = raw
-    else:
-        try:
-            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=_IST)
-    return dt.astimezone(_IST)
-
-
-def _explosion_on_strike_match(
-    *,
-    symbol: str,
-    side: Any,
-    strike: float,
-    trade_symbol: str,
-    trade_side: Any,
-    trade_strike: float,
-    selection_mode: str,
-    strategy_type: str,
-) -> bool:
-    sym = str(symbol or "").upper()
-    side_u = _side_key(side)
-    strike_f = float(strike or 0)
-    if str(trade_symbol or "").upper() != sym:
-        return False
-    if _side_key(trade_side) != side_u:
-        return False
-    if abs(float(trade_strike or 0) - strike_f) > 0.01:
-        return False
-    mode = str(selection_mode or "").lower()
-    st_u = str(strategy_type or "").upper()
-    return mode == "explosion" or st_u == "EXPLOSIVE"
-
-
-def _archived_session_trade_rows(state: AutoTraderState | None) -> list[dict[str, Any]]:
-    """Today's closed/open rows from trade_store not already in paper closed book."""
-    if state is None:
-        return []
-    seen = {
-        str(getattr(t, "id", "") or "")
-        for t in getattr(state, "closedPaperTrades", None) or []
-        if getattr(t, "id", None)
-    }
-    for t in getattr(state, "openPaperTrades", None) or []:
-        tid = str(getattr(t, "id", "") or "")
-        if tid:
-            seen.add(tid)
-    rows: list[dict[str, Any]] = []
-    try:
-        from app.services import trade_store
-
-        reset_at = trade_store.get_session_reset_at()
-        today = datetime.now(_IST).strftime("%Y-%m-%d")
-        day = trade_store.get_day_detail(today)
-        for row in day.get("trades", []) or []:
-            if not isinstance(row, dict):
-                continue
-            tid = str(row.get("id", "") or "")
-            if tid and tid in seen:
-                continue
-            status = str(row.get("status") or "").upper()
-            if status not in ("CLOSED", "OPEN"):
-                continue
-            exit_reason = str(row.get("exitReason") or "")
-            if exit_reason in ("SESSION_RESET", "manual_reset"):
-                continue
-            closed_raw = row.get("closedAt")
-            if reset_at and closed_raw:
-                closed_at = _parse_ist_datetime(closed_raw)
-                if closed_at is not None and closed_at <= reset_at.astimezone(_IST):
-                    continue
-            from app.engines.session_trade_integrity import is_phantom_trade_row
-
-            if is_phantom_trade_row(row):
-                continue
-            rows.append(row)
-    except Exception:
-        pass
-    return rows
 
 
 def _latest_same_strike_explosion_close(
@@ -728,93 +637,6 @@ def _prior_session_explosion_closes(
     return closes
 
 
-def _ce_momentum_reading(
-    alert: dict[str, Any],
-    *,
-    velocity_3s: float,
-    premium_momentum_pct: float,
-) -> tuple[float, float]:
-    """Live call momentum: 3s tape velocity, or premium momentum when the tape is flat."""
-    try:
-        v3 = float(velocity_3s or 0)
-    except (TypeError, ValueError):
-        v3 = 0.0
-    if v3 <= 0:
-        try:
-            v3 = float(
-                alert.get("velocity3s")
-                or alert.get("velocity_3s")
-                or alert.get("liveVelocity3s")
-                or 0
-            )
-        except (TypeError, ValueError):
-            v3 = 0.0
-    try:
-        mom = float(premium_momentum_pct or 0)
-    except (TypeError, ValueError):
-        mom = 0.0
-    if mom <= 0:
-        prem = alert.get("premiumChart") or alert.get("premium_chart") or {}
-        raw = (
-            alert.get("momentum5Pct")
-            or alert.get("premiumMomentum5Pct")
-            or alert.get("premiumMomentumPct")
-            or (prem.get("momentum5Pct") if isinstance(prem, dict) else 0)
-            or (prem.get("momentum3Pct") if isinstance(prem, dict) else 0)
-            or 0
-        )
-        try:
-            mom = float(raw or 0)
-        except (TypeError, ValueError):
-            mom = 0.0
-    return v3, mom
-
-
-def ce_momentum_new_base_is_fresh_entry(
-    *,
-    side: Any,
-    alert: Optional[dict[str, Any]] = None,
-    velocity_3s: float = 0.0,
-    premium_momentum_pct: float = 0.0,
-    settings: Any = None,
-) -> bool:
-    """CALL or PUT lifting off a newly formed base is a fresh entry, not a reentry.
-
-    26 Oct NIFTY 22500 CE rebuilt a base after the morning win and the premium
-    was already moving. The same print on a put is a new entry too. The reentry
-    ML floor does not apply. A chase with no new base, on either side, stays a reentry.
-    """
-    settings = settings or get_settings()
-    if not bool(getattr(settings, "ce_new_base_fresh_entry_enabled", True)):
-        return False
-    side_v = side.value if hasattr(side, "value") else str(side or "").upper()
-    if side_v not in ("CALL", "PUT"):
-        return False
-    alert_d = alert if isinstance(alert, dict) else {}
-    v3, mom = _ce_momentum_reading(
-        alert_d,
-        velocity_3s=velocity_3s,
-        premium_momentum_pct=premium_momentum_pct,
-    )
-    if v3 <= 0 and mom <= 0:
-        return False
-    try:
-        if _alert_post_win_new_local_base(alert_d, settings=settings):
-            return True
-        from app.engines.best_trade_policy import (
-            symmetric_new_base_moment_evidence,
-            symmetric_structural_base_evidence,
-        )
-
-        if symmetric_structural_base_evidence(alert_d, settings=settings):
-            return True
-        if symmetric_new_base_moment_evidence(alert_d, alert_d, settings=settings):
-            return True
-    except (TypeError, ValueError):
-        return False
-    return False
-
-
 def reentry_ml_win_prob_blocked(
     state: AutoTraderState,
     *,
@@ -823,15 +645,11 @@ def reentry_ml_win_prob_blocked(
     strike: float,
     snap: Any,
     confidence: float = 70.0,
-    alert: Optional[dict[str, Any]] = None,
-    velocity_3s: float = 0.0,
-    premium_momentum_pct: float = 0.0,
 ) -> tuple[bool, dict[str, Any]]:
     """Block session / same-strike re-entries when ML win probability is too low.
 
     Aug28: winners ~56% ML, 24050 post-win/post-loss re-entries ~41-43%.
     First entries (no prior closes on symbol+side) are not gated.
-    A call or put with momentum off a newly formed base is a new entry, not a reentry.
     """
     settings = get_settings()
     meta: dict[str, Any] = {"applied": False}
@@ -847,49 +665,6 @@ def reentry_ml_win_prob_blocked(
     )
     if not prior_closes and same_strike_prior is None:
         return False, meta
-
-    if ce_momentum_new_base_is_fresh_entry(
-        side=side,
-        alert=alert,
-        velocity_3s=velocity_3s,
-        premium_momentum_pct=premium_momentum_pct,
-        settings=settings,
-    ):
-        side_v = side.value if hasattr(side, "value") else str(side or "").upper()
-        meta.update(
-            {
-                "applied": False,
-                "freshEntry": True,
-                "reason": (
-                    "pe_new_base_fresh_entry"
-                    if side_v == "PUT"
-                    else "ce_new_base_fresh_entry"
-                ),
-            }
-        )
-        return False, meta
-
-    if isinstance(alert, dict):
-        from app.engines.best_trade_policy import base_capture_reentry_ml_waive_eligible
-
-        base_ok, base_reason = base_capture_reentry_ml_waive_eligible(
-            symbol=symbol,
-            side=side,
-            strike=strike,
-            snap=snap,
-            alert=alert,
-            state=state,
-            settings=settings,
-        )
-        if base_ok:
-            meta.update(
-                {
-                    "applied": False,
-                    "reentryMlBaseCaptureWaived": True,
-                    "reentryMlBaseCaptureWaiveReason": base_reason,
-                }
-            )
-            return False, meta
 
     session_min = float(
         getattr(settings, "explosion_reentry_ml_win_prob_min", 0.52) or 0.52
@@ -911,45 +686,7 @@ def reentry_ml_win_prob_blocked(
         reentry_kind = "session"
         prior = prior_closes[-1]
 
-    prior_pnl = float(
-        getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0
-    )
     side_val = side.value if hasattr(side, "value") else str(side or "PUT").upper()
-    alert_d = alert if isinstance(alert, dict) else {}
-    # Main #849: same-strike CE uses ce_new_base_fresh_entry + ML; all PUT reentries stay on ML.
-    passport_scope_ok = side_val != "PUT" and not (
-        same_strike_prior is not None
-        and side_val == "CALL"
-        and bool(getattr(settings, "ce_new_base_fresh_entry_enabled", True))
-    )
-    if passport_scope_ok and (
-        alert_d or bool(getattr(settings, "quality_moment_passport_enabled", True))
-    ):
-        from app.engines.best_trade_policy import quality_moment_passport_active
-
-        passport_ok, passport_mode = quality_moment_passport_active(
-            alert_d, settings=settings, snap=snap,
-        )
-        if passport_ok:
-            waive_after_win = bool(
-                getattr(settings, "quality_moment_waive_reentry_ml_after_win", True)
-            )
-            waive_after_loss = bool(
-                getattr(settings, "quality_moment_waive_reentry_ml_after_loss", False)
-            )
-            if (prior_pnl > 0 and waive_after_win) or (prior_pnl <= 0 and waive_after_loss):
-                meta.update(
-                    {
-                        "applied": True,
-                        "reentryKind": reentry_kind,
-                        "qualityMomentPassport": True,
-                        "qualityMomentPassportMode": passport_mode,
-                        "priorPnlInr": round(prior_pnl, 2),
-                        "reason": "quality_moment_passport_waive_reentry_ml",
-                    }
-                )
-                return False, meta
-
     from app.engines.adaptive_exits import predict_entry_ml_win_prob
 
     ml_prob = predict_entry_ml_win_prob(
@@ -1002,498 +739,6 @@ def _first_strike_launch_waive_alert(alert: Optional[dict[str, Any]]) -> bool:
     )
 
 
-def _latest_same_strike_win_close(
-    state: AutoTraderState | None,
-    *,
-    symbol: str,
-    side: Any,
-    strike: float,
-    max_age_seconds: float,
-) -> tuple[Any | None, float]:
-    """Latest profitable explosion close on exact strike within max_age_seconds."""
-    if state is None or max_age_seconds <= 0:
-        return None, 0.0
-    sym = str(symbol or "").upper()
-    side_v = _side_key(side)
-    strike_f = float(strike or 0)
-    prior: Any | None = None
-    latest_ts = None
-    for t in getattr(state, "closedPaperTrades", []) or []:
-        if str(getattr(t, "symbol", "") or "").upper() != sym:
-            continue
-        if _side_key(getattr(t, "side", "")) != side_v:
-            continue
-        if abs(float(getattr(t, "strike", 0) or 0) - strike_f) > 0.01:
-            continue
-        ctx = getattr(t, "entryContext", None) or {}
-        mode = str(ctx.get("selectionMode") or getattr(t, "mode", "") or "").lower()
-        st = str(getattr(t, "strategyType", "") or "")
-        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
-        if mode != "explosion" and st_u != "EXPLOSIVE":
-            continue
-        pnl = float(getattr(t, "pnlInr", 0) or getattr(t, "pnl_inr", 0) or 0)
-        if pnl <= 0:
-            continue
-        ts = getattr(t, "closedAt", None) or getattr(t, "openedAt", None)
-        if ts is None:
-            continue
-        if prior is None or (latest_ts is None or ts > latest_ts):
-            prior = t
-            latest_ts = ts
-
-    for row in _archived_session_trade_rows(state):
-        ctx = row.get("entryContext") or {}
-        mode = str(
-            row.get("selectionMode")
-            or (ctx.get("selectionMode") if isinstance(ctx, dict) else "")
-            or ""
-        )
-        if not _explosion_on_strike_match(
-            symbol=sym,
-            side=side_v,
-            strike=strike_f,
-            trade_symbol=str(row.get("symbol", "")),
-            trade_side=row.get("side", ""),
-            trade_strike=float(row.get("strike") or 0),
-            selection_mode=mode,
-            strategy_type=str(row.get("strategyType") or ""),
-        ):
-            continue
-        pnl = float(row.get("pnlInr") or 0)
-        if pnl <= 0:
-            continue
-        ts = _parse_ist_datetime(row.get("closedAt")) or _parse_ist_datetime(
-            row.get("openedAt")
-        )
-        if ts is None:
-            continue
-        if prior is None or (latest_ts is None or ts > latest_ts):
-            from types import SimpleNamespace
-
-            prior = SimpleNamespace(
-                id=row.get("id"),
-                symbol=row.get("symbol"),
-                side=row.get("side"),
-                strike=row.get("strike"),
-                pnlInr=pnl,
-                closedAt=ts,
-                entryContext={"selectionMode": "explosion"},
-            )
-            latest_ts = ts
-
-    if prior is None or getattr(prior, "closedAt", None) is None:
-        return None, 0.0
-    now = datetime.now(_IST)
-    closed_at = prior.closedAt
-    if closed_at.tzinfo is None:
-        closed_at = closed_at.replace(tzinfo=_IST)
-    age = max(0.0, (now - closed_at.astimezone(_IST)).total_seconds())
-    if age > max_age_seconds:
-        return None, age
-    return prior, age
-
-
-def _same_strike_legs_after_close(
-    state: AutoTraderState | None,
-    *,
-    symbol: str,
-    side: Any,
-    strike: float,
-    closed_at: datetime,
-) -> int:
-    """Count explosion legs opened on this strike after a reference close."""
-    if state is None:
-        return 0
-    if closed_at.tzinfo is None:
-        closed_at = closed_at.replace(tzinfo=_IST)
-
-    sym = str(symbol or "").upper()
-    side_u = _side_key(side)
-    strike_f = float(strike or 0)
-    count = 0
-    ref = closed_at.astimezone(_IST)
-
-    def _count_trade(trade: Any) -> None:
-        nonlocal count
-        if str(getattr(trade, "symbol", "") or "").upper() != sym:
-            return
-        if _side_key(getattr(trade, "side", "")) != side_u:
-            return
-        if abs(float(getattr(trade, "strike", 0) or 0) - strike_f) > 0.01:
-            return
-        ctx = getattr(trade, "entryContext", None) or {}
-        mode = str(ctx.get("selectionMode") or getattr(trade, "mode", "") or "").lower()
-        st = str(getattr(trade, "strategyType", "") or "")
-        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
-        if mode != "explosion" and st_u != "EXPLOSIVE":
-            return
-        opened = getattr(trade, "openedAt", None)
-        if opened is None:
-            return
-        if opened.tzinfo is None:
-            opened = opened.replace(tzinfo=_IST)
-        if opened.astimezone(_IST) > ref:
-            count += 1
-
-    for bucket in (
-        getattr(state, "closedPaperTrades", None) or [],
-        getattr(state, "openPaperTrades", None) or [],
-    ):
-        for trade in bucket:
-            _count_trade(trade)
-
-    for row in _archived_session_trade_rows(state):
-        ctx = row.get("entryContext") or {}
-        mode = str(
-            row.get("selectionMode")
-            or (ctx.get("selectionMode") if isinstance(ctx, dict) else "")
-            or ""
-        )
-        if not _explosion_on_strike_match(
-            symbol=sym,
-            side=side_u,
-            strike=strike_f,
-            trade_symbol=str(row.get("symbol", "")),
-            trade_side=row.get("side", ""),
-            trade_strike=float(row.get("strike") or 0),
-            selection_mode=mode,
-            strategy_type=str(row.get("strategyType") or ""),
-        ):
-            continue
-        opened = _parse_ist_datetime(row.get("openedAt"))
-        if opened is None:
-            continue
-        if opened > ref:
-            count += 1
-    return count
-
-
-def _alert_post_win_new_local_base(
-    alert: dict[str, Any] | None,
-    *,
-    settings: Any = None,
-) -> bool:
-    """ICT re-base on the pad after a win — not a blind session-peak chase."""
-    settings = settings or get_settings()
-    alert_d = alert if isinstance(alert, dict) else {}
-    from app.engines.best_trade_policy import symmetric_structural_base_evidence
-
-    if not symmetric_structural_base_evidence(alert_d, settings=settings):
-        return False
-    armed = bool(
-        alert_d.get("ictBaseArmed")
-        or alert_d.get("armedBaseLaunch")
-        or alert_d.get("ictArmedBaseLaunch")
-        or alert_d.get("eliteBaseReady")
-        or alert_d.get("vRipReady")
-        or alert_d.get("ictVRipReady")
-    )
-    if not armed:
-        return False
-    local = max(
-        float(alert_d.get("localBaseMovePct") or 0),
-        float(alert_d.get("ictBaseRelativeMovePct") or 0),
-    )
-    max_pad = float(
-        getattr(settings, "post_win_new_local_base_max_pad_pct", 22.0) or 22.0
-    )
-    return 0 < local <= max_pad + 1e-6
-
-
-def same_strike_post_win_active(
-    state: AutoTraderState | None,
-    *,
-    symbol: str,
-    side: Any,
-    strike: float,
-) -> tuple[bool, Any | None]:
-    """Post-win FOMO traps apply only after a recent win on this exact strike."""
-    settings = get_settings()
-    raw_lb = getattr(settings, "post_win_late_reentry_waive_lookback_seconds", 14400)
-    try:
-        lookback = float(raw_lb if raw_lb is not None else 14400)
-    except (TypeError, ValueError):
-        lookback = 14400.0
-    if lookback <= 0:
-        lookback = 14400.0
-    prior, _age = _latest_same_strike_win_close(
-        state,
-        symbol=symbol,
-        side=side,
-        strike=strike,
-        max_age_seconds=lookback,
-    )
-    return prior is not None, prior
-
-
-def post_win_session_late_reentry_waive(
-    state: AutoTraderState | None,
-    *,
-    symbol: str,
-    side: Any,
-    strike: float,
-    premium: float,
-    velocity_3s: float,
-    alert: Optional[dict[str, Any]] = None,
-) -> tuple[bool, str, dict[str, Any]]:
-    """
-    Waive late_reentry_near_session_peak after a same-strike win when:
-    1) post-close base reacceleration or fresh ICT local base on the pad, or
-    2) one continuation leg with hot v3 (capped lots separately — not #676 rank).
-    """
-    settings = get_settings()
-    meta: dict[str, Any] = {"postWinLateReentryWaive": False}
-    if not bool(getattr(settings, "post_win_late_reentry_waive_enabled", True)):
-        return False, "", meta
-    lookback = float(
-        getattr(settings, "post_win_late_reentry_waive_lookback_seconds", 14400) or 14400
-    )
-    prior, age = _latest_same_strike_win_close(
-        state,
-        symbol=symbol,
-        side=side,
-        strike=strike,
-        max_age_seconds=lookback,
-    )
-    if prior is None:
-        return False, "", meta
-    meta["priorWinTradeId"] = getattr(prior, "id", None)
-    meta["priorWinPnlInr"] = round(
-        float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0), 2,
-    )
-    meta["secondsSinceWinClose"] = round(age, 1)
-    closed_at = prior.closedAt
-    if closed_at.tzinfo is None:
-        closed_at = closed_at.replace(tzinfo=_IST)
-
-    from app.engines.explosion_detector import post_close_base_reacceleration
-
-    reset, reset_meta = post_close_base_reacceleration(
-        symbol,
-        strike,
-        side,
-        closed_at=closed_at,
-        current_premium=float(premium or 0),
-        velocity_3s=float(velocity_3s or 0),
-        min_base_samples=int(
-            getattr(settings, "explosion_post_peak_reentry_base_samples", 3) or 3
-        ),
-        min_base_span_seconds=float(
-            getattr(settings, "explosion_post_peak_reentry_base_span_seconds", 6.0) or 6.0
-        ),
-        min_reacceleration_pct=float(
-            getattr(settings, "explosion_post_peak_reentry_min_reacceleration_pct", 8.0)
-            or 8.0
-        ),
-        min_velocity_3s=float(
-            getattr(settings, "explosion_post_peak_reentry_min_velocity_3s", 1.5) or 1.5
-        ),
-    )
-    meta["postCloseBase"] = reset_meta
-    if reset or _alert_post_win_new_local_base(alert, settings=settings):
-        meta["postWinLateReentryWaive"] = True
-        meta["postWinLateReentryWaiveMode"] = "new_local_base"
-        return True, "new_local_base", meta
-
-    legs_after = _same_strike_legs_after_close(
-        state,
-        symbol=symbol,
-        side=side,
-        strike=strike,
-        closed_at=closed_at,
-    )
-    meta["sameStrikeLegsAfterWin"] = legs_after
-    if legs_after >= 1:
-        return False, "", meta
-
-    if not bool(getattr(settings, "post_win_continuation_leg_enabled", True)):
-        return False, "", meta
-    min_v3 = float(
-        getattr(settings, "post_win_continuation_leg_min_velocity_3s", 2.0) or 2.0
-    )
-    v3 = float(velocity_3s or 0)
-    if v3 + 1e-9 < min_v3:
-        return False, "", meta
-    meta["postWinLateReentryWaive"] = True
-    meta["postWinLateReentryWaiveMode"] = "continuation_leg"
-    return True, "continuation_leg", meta
-
-
-def _alert_premium_already_fading(
-    alert: dict[str, Any] | None,
-    velocity_3s: float,
-) -> bool:
-    """True when the live print is flat or already rolling over."""
-    try:
-        v3 = float(velocity_3s or 0)
-    except (TypeError, ValueError):
-        v3 = 0.0
-    if v3 <= 0:
-        return True
-    if not isinstance(alert, dict):
-        return False
-
-    def _negative(raw: Any) -> bool:
-        if raw is None or raw == "":
-            return False
-        try:
-            return float(raw) < 0
-        except (TypeError, ValueError):
-            return False
-
-    for key in (
-        "premiumMomentum3Pct",
-        "premiumMomentum5Pct",
-        "momentum3Pct",
-        "momentum5Pct",
-    ):
-        if _negative(alert.get(key)):
-            return True
-    chart = alert.get("premiumChart") or alert.get("premium_chart") or {}
-    if isinstance(chart, dict):
-        for key in ("momentum3Pct", "momentum5Pct", "premiumMomentum3Pct", "premiumMomentum5Pct"):
-            if _negative(chart.get(key)):
-                return True
-    return False
-
-
-def same_strike_post_win_fresh_base_reentry(
-    state: AutoTraderState | None,
-    *,
-    symbol: str,
-    side: Any,
-    strike: float,
-    premium: float,
-    velocity_3s: float,
-    alert: Optional[dict[str, Any]] = None,
-) -> tuple[bool, dict[str, Any]]:
-    """
-    One same-strike reentry after a win, only off a fresh post-close base.
-
-    The premium must still be rising, and the lift off that new base must sit
-    inside the post-win pad. A flat or fading print, the opposite side, a second
-    leg, and a move already past the pad stay blocked.
-    """
-    settings = get_settings()
-    meta: dict[str, Any] = {"sameStrikePostWinFreshBase": False}
-    if not bool(getattr(settings, "same_strike_post_win_fresh_base_reentry_enabled", True)):
-        meta["reason"] = "disabled"
-        return False, meta
-    lookback = float(
-        getattr(settings, "post_win_late_reentry_waive_lookback_seconds", 14400) or 14400
-    )
-    prior, age = _latest_same_strike_win_close(
-        state,
-        symbol=symbol,
-        side=side,
-        strike=strike,
-        max_age_seconds=lookback,
-    )
-    if prior is None:
-        meta["reason"] = "no_same_strike_win"
-        return False, meta
-    meta["priorWinTradeId"] = getattr(prior, "id", None)
-    meta["priorWinPnlInr"] = round(
-        float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0), 2,
-    )
-    meta["secondsSinceWinClose"] = round(age, 1)
-    closed_at = prior.closedAt
-    if closed_at.tzinfo is None:
-        closed_at = closed_at.replace(tzinfo=_IST)
-    legs_after = _same_strike_legs_after_close(
-        state,
-        symbol=symbol,
-        side=side,
-        strike=strike,
-        closed_at=closed_at,
-    )
-    meta["sameStrikeLegsAfterWin"] = legs_after
-    if legs_after >= 1:
-        meta["reason"] = "reentry_already_taken"
-        return False, meta
-    if _alert_premium_already_fading(alert, velocity_3s):
-        meta["reason"] = "premium_fading"
-        return False, meta
-
-    from app.engines.explosion_detector import post_close_base_reacceleration
-
-    reset, reset_meta = post_close_base_reacceleration(
-        symbol,
-        strike,
-        side,
-        closed_at=closed_at,
-        current_premium=float(premium or 0),
-        velocity_3s=float(velocity_3s or 0),
-        min_base_samples=int(
-            getattr(settings, "explosion_post_peak_reentry_base_samples", 3) or 3
-        ),
-        min_base_span_seconds=float(
-            getattr(settings, "explosion_post_peak_reentry_base_span_seconds", 6.0) or 6.0
-        ),
-        min_reacceleration_pct=float(
-            getattr(settings, "explosion_post_peak_reentry_min_reacceleration_pct", 8.0)
-            or 8.0
-        ),
-        min_velocity_3s=float(
-            getattr(settings, "explosion_post_peak_reentry_min_velocity_3s", 1.5) or 1.5
-        ),
-    )
-    meta["postCloseBase"] = reset_meta
-    if not reset:
-        meta["reason"] = "no_fresh_base"
-        return False, meta
-    try:
-        reaccel = float(reset_meta.get("reaccelerationPct") or 0)
-    except (TypeError, ValueError):
-        reaccel = 0.0
-    max_pad = float(
-        getattr(settings, "post_win_new_local_base_max_pad_pct", 22.0) or 22.0
-    )
-    if reaccel > max_pad + 1e-6:
-        meta["reason"] = "above_fresh_base_pad"
-        return False, meta
-    meta["sameStrikePostWinFreshBase"] = True
-    meta["reason"] = "fresh_base_reentry"
-    return True, meta
-
-
-def cap_post_win_continuation_leg_lots(
-    lots: int,
-    state: AutoTraderState | None,
-    *,
-    symbol: str,
-    side: Any,
-    strike: float,
-    premium: float,
-    velocity_3s: float,
-    alert: Optional[dict[str, Any]] = None,
-) -> tuple[int, dict[str, Any]]:
-    """Cap lots for the single post-win continuation leg (not #676 full rank)."""
-    settings = get_settings()
-    waived, mode, meta = post_win_session_late_reentry_waive(
-        state,
-        symbol=symbol,
-        side=side,
-        strike=strike,
-        premium=premium,
-        velocity_3s=velocity_3s,
-        alert=alert,
-    )
-    if not waived or mode != "continuation_leg":
-        return lots, meta
-    cap = int(getattr(settings, "post_win_continuation_leg_lot_cap", 4) or 4)
-    capped = min(max(0, lots), max(1, cap))
-    applied = capped < lots
-    meta["applied"] = applied
-    meta["reentryKind"] = "post_win_continuation_leg"
-    meta["uncappedLots"] = lots
-    meta["lotCap"] = cap
-    meta["postWinContinuationLegCapApplied"] = applied
-    meta["postWinContinuationLegCap"] = cap
-    meta["cappedLots"] = capped
-    return capped, meta
-
-
 def _strike_has_session_trade(
     state: AutoTraderState | None,
     *,
@@ -1542,7 +787,7 @@ def session_peak_late_reentry_blocked(
     Fresh first-lift launches with real velocity may still pass.
     """
     settings = get_settings()
-    if not bool(getattr(settings, "explosion_late_reentry_block_enabled", False)):
+    if not bool(getattr(settings, "explosion_late_reentry_block_enabled", True)):
         return False, ""
 
     alert_pre = alert if isinstance(alert, dict) else {}
@@ -1703,59 +948,6 @@ def session_peak_late_reentry_blocked(
     except Exception:
         pass
 
-    min_peak_age = float(
-        getattr(settings, "explosion_post_peak_chase_min_peak_age_seconds", 45.0) or 45.0
-    )
-    if min_peak_age > 0:
-        try:
-            from app.engines.explosion_detector import prior_near_level_age_seconds
-
-            near_frac = max(0.0, near_peak_pct / 100.0)
-            age = prior_near_level_age_seconds(
-                symbol,
-                strike,
-                side,
-                sess_peak,
-                lookback_seconds=float(
-                    getattr(settings, "explosion_post_peak_chase_lookback_seconds", 900.0)
-                    or 900.0
-                ),
-                near_frac=near_frac,
-            )
-            if age is not None and age < min_peak_age:
-                return False, ""
-        except Exception:
-            pass
-
-    if state is not None:
-        waived, waive_mode, waive_meta = post_win_session_late_reentry_waive(
-            state,
-            symbol=symbol,
-            side=side,
-            strike=strike,
-            premium=prem,
-            velocity_3s=v3,
-            alert=alert_d,
-        )
-        if waived:
-            return False, f"post_win_late_reentry_waive_{waive_mode}"
-
-    if bool(getattr(settings, "quality_moment_passport_waives_entry_peak_chase", True)):
-        from app.engines.best_trade_policy import (
-            quality_moment_passport_active,
-            quality_moment_passport_waives_elite_entry,
-        )
-
-        passport_ok, passport_mode = quality_moment_passport_active(
-            alert_d, settings=settings, snap=snap,
-        )
-        if passport_ok and quality_moment_passport_waives_elite_entry(settings):
-            min_v3_passport = float(
-                getattr(settings, "explosion_late_reentry_min_velocity_3s", 1.2) or 1.2
-            )
-            if v3 + 1e-9 >= min_v3_passport:
-                return False, f"quality_moment_passport_waive_peak_{passport_mode}"
-
     return True, (
         f"late_reentry_near_session_peak_{sess_peak:.1f}"
         f"_pullback_{pullback_pct:.1f}pct_v3_{v3:.1f}"
@@ -1769,35 +961,15 @@ def win_reentry_velocity_blocked(
     side: Any,
     strike: float,
     velocity_3s: float,
-    premium: float = 0.0,
-    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str]:
     """After a winning close, the same CE/PE strike needs live velocity before reentry."""
     settings = get_settings()
-    if not bool(getattr(settings, "win_reentry_requires_velocity_enabled", False)):
+    if not bool(getattr(settings, "win_reentry_requires_velocity_enabled", True)):
         return False, ""
-    lookback = float(
-        getattr(settings, "post_win_late_reentry_waive_lookback_seconds", 14400) or 14400
-    )
-    prior, _age = _latest_same_strike_win_close(
-        state,
-        symbol=symbol,
-        side=side,
-        strike=strike,
-        max_age_seconds=lookback,
+    prior = _latest_same_strike_explosion_close(
+        state, symbol=symbol, side=side, strike=strike,
     )
     if prior is None or getattr(prior, "closedAt", None) is None:
-        return False, ""
-    waived, _mode, _meta = post_win_session_late_reentry_waive(
-        state,
-        symbol=symbol,
-        side=side,
-        strike=strike,
-        premium=float(premium or 0),
-        velocity_3s=float(velocity_3s or 0),
-        alert=alert,
-    )
-    if waived:
         return False, ""
     pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
     if pnl <= 0:
@@ -1822,26 +994,11 @@ def exhausted_ftv_reentry_blocked(
     strike: float,
     premium: float,
     velocity_3s: float,
-    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Block a spent FTV contract until a new post-close base accelerates."""
     settings = get_settings()
     meta: dict[str, Any] = {"applied": False}
     if not getattr(settings, "explosion_post_peak_reentry_guard_enabled", True):
-        return False, meta
-    lookback = float(
-        getattr(settings, "post_win_late_reentry_waive_lookback_seconds", 14400) or 14400
-    )
-    prior_win, _win_age = _latest_same_strike_win_close(
-        state,
-        symbol=symbol,
-        side=side,
-        strike=strike,
-        max_age_seconds=lookback,
-    )
-    if prior_win is not None and _alert_post_win_new_local_base(alert, settings=settings):
-        meta["postWinLateReentryWaive"] = True
-        meta["postWinLateReentryWaiveMode"] = "new_local_base"
         return False, meta
     prior = _latest_same_strike_explosion_close(
         state, symbol=symbol, side=side, strike=strike,

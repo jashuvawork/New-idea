@@ -2,7 +2,6 @@ name: Disarm to paper on push
 
 # Runs when a push to main includes [disarm-paper] in the commit message.
 # Flips ENABLE_LIVE_TRADING=false + PAPER_TRADING=true and restarts backend.
-# Manual operator action only — never tie this to daily loss stop or capital loss.
 
 on:
   push:
@@ -45,8 +44,7 @@ jobs:
               "git checkout main",
               "git pull --ff-only origin main || git reset --hard origin/main",
               "sudo bash deploy/set-execution-mode.sh --paper",
-              "curl -sf http://127.0.0.1:8000/api/deployment/status -o /tmp/nq-deploy-status.json",
-              "python3 -m json.tool /tmp/nq-deploy-status.json | head -40 || true"
+              "curl -sf http://127.0.0.1:8000/api/deployment/status | python3 -m json.tool | head -40"
             ]' \
             --query Command.CommandId \
             --output text)

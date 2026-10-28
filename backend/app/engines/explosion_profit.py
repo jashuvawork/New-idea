@@ -1090,57 +1090,22 @@ def _green_profit_hold_ready(
     return since_peak + 1e-6 >= min_after_peak
 
 
-def _falling_under_profit_floor(pnl_pts: float, floor_pts: float, live_v3: float) -> bool:
-    """True when price is at or under the 75% line and the tick is falling."""
-    return live_v3 < 0 and pnl_pts <= floor_pts + 1e-6
-
-
-def _profit_floor_exit_ready(
-    trade: PaperTrade,
-    hold_seconds: float,
-    settings: Any,
-    *,
-    falling_under: bool,
-) -> bool:
-    """A fall through the 75% line can sell before the full three-minute wait.
-
-    The short clock still skips a dip a few seconds after the high. A flat or
-    rising print keeps the normal hold.
-    """
-    if not falling_under:
-        return _green_profit_hold_ready(trade, hold_seconds, settings)
-    min_hold = _cfg_float(settings, "unified_profit_ladder_fall_min_hold_seconds", 60.0)
-    if hold_seconds < min_hold:
-        return False
-    min_after = _cfg_float(
-        settings, "unified_profit_ladder_fall_min_seconds_after_peak", 45.0
-    )
-    if min_after <= 0:
-        return True
-    since_peak = _seconds_since_peak(trade)
-    if since_peak is None:
-        return True
-    return since_peak + 1e-6 >= min_after
-
-
 def _profit_floor_touch_sell(
     pnl_pts: float,
     floor_pts: float,
     live_v3: float,
     settings: Any,
 ) -> bool:
-    """True when price should leave the 75% line.
+    """True when a green print is on the profit floor and not rising.
 
-    A falling tick at or under the line sells, including a print already well
-    through it. Oct 21 SENSEX 73400 PE peaked at 388 and the hole-hold rode
-    that fall into the loss stop. A flat or rising print sells only while it
-    is still within ``unified_profit_ladder_floor_touch_points`` of the line.
+    The floor is the line to sell. A price already well through it is a hold
+    until it trades back up to the line and turns down, or the loss stop hits.
+    Oct 21 NIFTY 22700 PE: 75% of the +21.5 peak was ~156, and the ladder sold
+    150.38 the moment the three-minute wait ended.
     """
+    touch = max(0.0, _cfg_float(settings, "unified_profit_ladder_floor_touch_points", 2.0))
     if pnl_pts > floor_pts + 1e-6:
         return False
-    if live_v3 < 0:
-        return True
-    touch = max(0.0, _cfg_float(settings, "unified_profit_ladder_floor_touch_points", 2.0))
     if pnl_pts < floor_pts - touch - 1e-6:
         return False
     return live_v3 <= 0
@@ -2235,9 +2200,9 @@ def unified_profit_ladder_exit_reason(
 ) -> Optional[str]:
     """Book when P&L is on the unified ladder floor, or on an N× fast fade.
 
-    Same rule for CALL and PUT. A falling tick at or under the 75% line sells,
-    even if the print is already through that line. A flat or rising print
-    sells only inside ``unified_profit_ladder_floor_touch_points`` of the line.
+    Same rule for CALL and PUT. Peak-keep and breakeven sell only inside
+    ``unified_profit_ladder_floor_touch_points`` of the floor, and only when
+    the tick is not rising. A print already through that band is a hold.
     The multiple lock still sells on a floor break. A hot tick (v3 ≥ +2)
     defers one evaluation but never lowers the floor.
     """
@@ -2249,13 +2214,9 @@ def unified_profit_ladder_exit_reason(
         return None
     floor_pts, layer = ladder
     pnl_pts = float(pnl_pts or 0)
-    live_v3, _ = _live_premium_heat(trade, live_velocity_3s=live_velocity_3s)
-    falling_under = _falling_under_profit_floor(pnl_pts, floor_pts, live_v3)
-    # A small peak that is simply red stays with the loss stop. A mega peak
-    # that has already fallen through its 75% line does not.
-    mega_best = _cfg_float(settings, "stage_runner_mega_red_giveback_min_best_points", 28.0)
-    if pnl_pts <= 0 and not (falling_under and float(best or 0) + 1e-6 >= mega_best):
+    if pnl_pts <= 0:
         return None
+    live_v3, _ = _live_premium_heat(trade, live_velocity_3s=live_velocity_3s)
     if live_v3 >= _cfg_float(settings, "unified_profit_ladder_hot_defer_velocity_3s", 2.0):
         return None
 
@@ -2275,181 +2236,11 @@ def unified_profit_ladder_exit_reason(
             return "explosion_profit_ladder_multiple"
         return None
 
-    if not _profit_floor_exit_ready(
-        trade, hold_seconds, settings, falling_under=falling_under
-    ):
+    if not _green_profit_hold_ready(trade, hold_seconds, settings):
         return None
     if not _profit_floor_touch_sell(pnl_pts, floor_pts, live_v3, settings):
         return None
     return f"explosion_profit_ladder_{layer}"
-
-
-def runner_profit_guard_floor(
-    trade: PaperTrade,
-    *,
-    settings: Any = None,
-    pnl_pts: float = 0.0,
-) -> Optional[float]:
-    """Locked profit points for a trade that has run, or None before tier 1.
-
-    Uses this contract's own observed peak, never a sibling's cycle gain.
-    Side-agnostic: CALL and PUT premiums both lock on their own rise.
-    """
-    s = settings or get_settings()
-    if not bool(getattr(s, "runner_profit_guard_enabled", True)):
-        return None
-    entry = float(trade.entryPremium or 0)
-    if entry <= 0:
-        return None
-    from app.engines.moment_stage_trail import _local_observed_best
-
-    best = _local_observed_best(trade, pnl_pts)
-    if best + 1e-9 < _cfg_float(s, "runner_profit_guard_min_best_points", 4.0):
-        return None
-    gain_pct = best / entry * 100.0
-    keep: Optional[float] = None
-    for tier in (1, 2, 3, 4):
-        arm = _cfg_float(s, f"runner_profit_guard_tier{tier}_gain_pct", 0.0)
-        if arm > 0 and gain_pct + 1e-9 >= arm:
-            keep = _cfg_float(s, f"runner_profit_guard_tier{tier}_keep_ratio", 0.0)
-    if keep is None:
-        return None
-    return best * keep
-
-
-def runner_profit_guard_exit_reason(
-    trade: PaperTrade,
-    *,
-    pnl_pts: float,
-    live_velocity_3s: float = 0.0,
-) -> Optional[str]:
-    """Sell a runner that stays under its guard floor.
-
-    A dip under the floor must persist ``runner_profit_guard_confirm_seconds``
-    before it sells — one-print shakeouts right after a high recover (Oct 21
-    NIFTY 22700 PE dipped to 148.95 after 160.5, then ran to 186.9). Rising
-    prints (v3 > 0) defer; a flat print counts as not rising, with no fallback
-    to the entry-time velocity.
-    """
-    settings = get_settings()
-    floor_pts = runner_profit_guard_floor(trade, settings=settings, pnl_pts=pnl_pts)
-    ctx = trade.entryContext if trade.entryContext is not None else {}
-    pnl = float(pnl_pts or 0)
-    if floor_pts is None or pnl > floor_pts + 1e-6:
-        ctx.pop("runnerGuardBelowSince", None)
-        return None
-    try:
-        live_v3 = float(live_velocity_3s or 0.0)
-    except (TypeError, ValueError):
-        live_v3 = 0.0
-    now = datetime.now(IST)
-    since_raw = ctx.get("runnerGuardBelowSince")
-    since: Optional[datetime] = None
-    if isinstance(since_raw, str) and since_raw:
-        try:
-            since = datetime.fromisoformat(since_raw)
-        except ValueError:
-            since = None
-    if since is None:
-        since = now
-        ctx["runnerGuardBelowSince"] = now.isoformat()
-        trade.entryContext = ctx
-    if live_v3 > 0:
-        return None
-    confirm = _cfg_float(settings, "runner_profit_guard_confirm_seconds", 0.0)
-    if since.tzinfo is None:
-        since = since.replace(tzinfo=IST)
-    if (now - since.astimezone(IST)).total_seconds() + 1e-6 < confirm:
-        return None
-    return "explosion_runner_profit_guard"
-
-
-def stage_runner_mega_pullback_exit_reason(
-    trade: PaperTrade,
-    *,
-    best: float,
-    pnl_pts: float,
-    hold_seconds: float,
-    live_velocity_3s: float = 0.0,
-) -> Optional[str]:
-    """Book mega stage-ladder rips that hole through the 75% line or fade to red.
-
-    Oct 21 SENSEX 73400 PE: +47pt peak, unified ladder missed 15% by 0.1%, FTV
-    floor sat at +35pt while stage-trail sells stay off — fast bleed to +10pt then
-    red had no exit. Touch-sell at the 75% line when price returns; hole-take and
-    red-giveback when it does not.
-    """
-    settings = get_settings()
-    from app.engines.ict_breakout_monitor import _ict_max_profit_trade
-    from app.engines.moment_stage_trail import ftv_runner_pct_floor, trade_uses_moment_stage_ladder
-
-    if not bool(getattr(settings, "stage_runner_mega_hole_exit_enabled", True)) and not bool(
-        getattr(settings, "stage_runner_mega_red_giveback_enabled", True)
-    ):
-        return None
-    if not _ict_max_profit_trade(trade) or not trade_uses_moment_stage_ladder(trade):
-        return None
-    ctx = trade.entryContext or {}
-    plan = ctx.get("exitPlan") or {}
-    projected = float(ctx.get("projectedMaxTp") or plan.get("projectedMaxTp") or 0)
-    if projected + 1e-6 < _cfg_float(settings, "stage_runner_defer_pct_keep_min_projected_tp", 400.0):
-        return None
-
-    best = float(best or 0)
-    pnl_pts = float(pnl_pts or 0)
-    if best <= 0:
-        return None
-
-    pct_floor = ftv_runner_pct_floor(trade, best, settings=settings)
-    if pct_floor is None:
-        return None
-
-    live_v3, _ = _live_premium_heat(trade, live_velocity_3s=live_velocity_3s)
-    if live_v3 >= _cfg_float(settings, "unified_profit_ladder_hot_defer_velocity_3s", 2.0):
-        return None
-
-    min_best_red = _cfg_float(settings, "stage_runner_mega_red_giveback_min_best_points", 28.0)
-    giveback = best - pnl_pts
-    falling_under = _falling_under_profit_floor(pnl_pts, pct_floor, live_v3)
-    mega_red = (
-        bool(getattr(settings, "stage_runner_mega_red_giveback_enabled", True))
-        and best + 1e-6 >= min_best_red
-        and pnl_pts <= 0
-        and live_v3 <= 0
-    )
-    if not _profit_floor_exit_ready(
-        trade,
-        hold_seconds,
-        settings,
-        falling_under=falling_under or mega_red,
-    ):
-        return None
-
-    touch = max(0.0, _cfg_float(settings, "unified_profit_ladder_floor_touch_points", 2.0))
-    min_best_hole = _cfg_float(settings, "stage_runner_mega_hole_exit_min_best_points", 28.0)
-    min_remain = _cfg_float(settings, "stage_runner_mega_hole_exit_min_remain_points", 6.0)
-
-    if (
-        bool(getattr(settings, "stage_runner_mega_hole_exit_enabled", True))
-        and best + 1e-6 >= min_best_hole
-        and pnl_pts + 1e-6 >= min_remain
-        and pnl_pts + 1e-6 < pct_floor - touch - 1e-6
-        and live_v3 <= 0
-    ):
-        return "explosion_stage_runner_hole_take"
-
-    scratch_max = _cfg_float(settings, "stage_runner_mega_scratch_max_points", 2.0)
-    scratch_gb = _cfg_float(settings, "stage_runner_mega_scratch_min_giveback_frac", 0.70)
-    if bool(getattr(settings, "stage_runner_mega_red_giveback_enabled", True)) and best + 1e-6 >= min_best_red:
-        if pnl_pts <= 0 and live_v3 <= 0:
-            return "explosion_stage_runner_red_giveback"
-        if (
-            pnl_pts + 1e-6 <= scratch_max
-            and giveback + 1e-6 >= best * scratch_gb
-            and live_v3 <= 0
-        ):
-            return "explosion_stage_runner_red_giveback"
-    return None
 
 
 def evaluate_explosion_exit(
@@ -2622,64 +2413,11 @@ def evaluate_explosion_exit(
     if halve_lock:
         return halve_lock, pnl_inr
 
-    from app.engines.tp_rung_ladder import (
-        tp_rung_mega_leg,
-        trade_uses_tp_rung_ladder,
-        tp_rung_exit_reason,
+    ladder_exit = unified_profit_ladder_exit_reason(
+        trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
     )
-
-    tp_rung_owned = trade_uses_tp_rung_ladder(trade, settings=settings)
-    tp_rung_armed = tp_rung_owned and best + 1e-6 >= _cfg_float(
-        settings, "tp_rung_ladder_min_best_to_arm_exits", 28.0
-    )
-    mega_ladder_first = (
-        tp_rung_armed
-        and tp_rung_mega_leg(trade, settings=settings)
-        and best + 1e-6
-        >= _cfg_float(settings, "tp_rung_ladder_mega_ladder_first_min_best_points", 55.0)
-    )
-    if mega_ladder_first:
-        ladder_exit = unified_profit_ladder_exit_reason(
-            trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
-        )
-        if ladder_exit:
-            return ladder_exit, pnl_inr
-        mega_pullback = stage_runner_mega_pullback_exit_reason(
-            trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
-        )
-        if mega_pullback:
-            return mega_pullback, pnl_inr
-
-    if tp_rung_armed:
-        rung_exit = tp_rung_exit_reason(
-            trade,
-            best=best,
-            pnl_pts=pnl_pts,
-            hold_seconds=hold,
-            live_velocity_3s=v3,
-            settings=settings,
-        )
-        if rung_exit:
-            return rung_exit, pnl_inr
-
-    if not mega_ladder_first:
-        ladder_exit = unified_profit_ladder_exit_reason(
-            trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
-        )
-        if ladder_exit:
-            return ladder_exit, pnl_inr
-
-        mega_pullback = stage_runner_mega_pullback_exit_reason(
-            trade, best=best, pnl_pts=pnl_pts, hold_seconds=hold, live_velocity_3s=v3,
-        )
-        if mega_pullback:
-            return mega_pullback, pnl_inr
-
-    runner_guard = runner_profit_guard_exit_reason(
-        trade, pnl_pts=pnl_pts, live_velocity_3s=v3,
-    )
-    if runner_guard:
-        return runner_guard, pnl_inr
+    if ladder_exit:
+        return ladder_exit, pnl_inr
 
     reversal_keep = peak_velocity_reversal_keep_reason(
         trade, best=best, pnl_pts=pnl_pts, live_velocity_3s=v3,
@@ -2707,10 +2445,7 @@ def evaluate_explosion_exit(
         trade_uses_moment_stage_ladder,
     )
 
-    try:
-        target = float(exit_params.target_points or 0)
-    except (TypeError, ValueError):
-        target = 0.0
+    target = exit_params.target_points
     if max_profit:
         target = max(
             target,
@@ -2861,30 +2596,17 @@ def evaluate_explosion_exit(
             stage_min_hold,
             _cfg_float(settings, "elite_runner_stage_trail_min_hold_seconds", 240.0),
         )
-    falling_under_pct = (
-        pct_keep_floor is not None
-        and _falling_under_profit_floor(pnl_pts, pct_keep_floor, v3)
-    )
-    pct_ready = _profit_floor_exit_ready(
-        trade, hold, settings, falling_under=falling_under_pct
-    )
-    tp_rung_mega_peak_keep = (
-        tp_rung_armed
-        and tp_rung_mega_leg(trade, settings=settings)
-        and best + 1e-6
-        >= _cfg_float(settings, "tp_rung_ladder_mega_disable_between_fade_min_best_points", 55.0)
-    )
     if (
-        (not tp_rung_armed or tp_rung_mega_peak_keep)
-        and pct_keep_floor is not None
+        pct_keep_floor is not None
         and best >= min_pct_best
-        and pct_ready
-        and (falling_under_pct or hold >= stage_min_hold)
+        and hold >= stage_min_hold
+        and _green_profit_hold_ready(trade, hold, settings)
         and _profit_floor_touch_sell(pnl_pts, pct_keep_floor, v3, settings)
     ):
         # Aug28 24100 PE: peaked +31pt — stage_armed waits for +45pt, so this
-        # 75% line must be able to sell before stage 1. A falling tick at or
-        # under the line sells. A flat hole is left for a return to the line.
+        # 75% line must be able to sell before stage 1. It sells only while
+        # price is still on that line. A print already through it holds, the
+        # same way the unified ladder holds the Oct 21 22700 hole.
         return "explosion_peak_keep_trail", pnl_inr
 
     stage_armed = stage_floor is not None and (
@@ -2904,8 +2626,8 @@ def evaluate_explosion_exit(
             stage_armed = False
     # Stage-trail sale is off. Oct 21 SENSEX 74200 PE was explosion_stage_trail
     # at +18.4pt, 12s after a +26.8 peak, and that put later reached ~855.
-    # The 75% peak-keep above sells a falling tick at or under that line.
-    # A flat print already through the line holds.
+    # The 75% peak-keep above books a fade once the high is 3 minutes old and
+    # price is still on that line. A print already through the line holds.
     # While a stage floor is armed, the micro trail stays off so the leg holds.
 
     # When stage ladder owns the trail, skip micro step / keep-ratio locks —

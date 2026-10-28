@@ -88,12 +88,6 @@ class SpotChart(BaseModel):
     macdSignal: float = 0.0
     macdHistogram: float = 0.0
     macdBias: str = "NEUTRAL"  # BULLISH | BEARISH | NEUTRAL
-    # Extended 1m/resampled series used for RSI/MACD/EMA (may exceed session 5m barCount).
-    indicatorBarCount: int = 0
-    rsiReady: bool = False
-    macdReady: bool = False
-    ema21Ready: bool = False
-    indicatorsWarm: bool = False
 
 
 class PremiumChart(BaseModel):
@@ -102,8 +96,6 @@ class PremiumChart(BaseModel):
     lastPremium: float = 0
     momentum3Pct: float = 0
     momentum5Pct: float = 0
-    # Live premium vs the low of the recent bars. 0 means price is the low.
-    offLowPct: float = 0
     volumeSurge: float = 1.0
     vwap: float = 0
     aboveVwap: bool = False
@@ -125,8 +117,6 @@ class TimeframeChartRead(BaseModel):
     direction: str = "NEUTRAL"
     momentumPct: float = 0
     momentum3Pct: float = 0
-    # Live price vs the low of the recent bars on this timeframe.
-    offLowPct: float = 0
     trendStrength: float = 0
     emaBias: str = "NEUTRAL"
     price: float = 0
@@ -156,8 +146,6 @@ class ChartAnalysis(BaseModel):
     smtDivergence: Optional[dict[str, Any]] = None
     keySignals: list[str] = []
     recentCloses: list[float] = []
-    # Extended 5m warmup closes (prior session + today) for tick refresh without cold MACD.
-    indicatorWarmCloses: list[float] = []
     # Advanced indicators (squeeze / ADX / Supertrend / VWAP) — powerful capture + chop context.
     squeeze: dict[str, Any] = {}
     adx: dict[str, Any] = {}
@@ -404,6 +392,6 @@ class RiskProfile(BaseModel):
 
 
 class CapitalConfig(BaseModel):
-    allocatedInr: float = Field(..., gt=0)
+    allocatedInr: float = 500_000
     perTradeRiskInr: float = 12_000
     emergencyStopInr: float = 18_000

@@ -191,35 +191,9 @@ def _immature_local_base_hard_block(
     return False, ""
 
 
-def _chop_live_near_base_fade_waive(candidate: Any, snap: SymbolSnapshot) -> bool:
-    """Pad/base capture (#676) — shallow premium dip is not chop fade."""
-    settings = get_settings()
-    if not bool(getattr(settings, "chop_live_near_base_fade_waive_enabled", True)):
-        return False
-    alert = getattr(candidate, "alert", None) or {}
-    event = getattr(candidate, "explosion_event", None)
-    from app.engines.pad_lane_capture import local_base_premium_fade_bypass
-
-    if local_base_premium_fade_bypass(
-        alert if isinstance(alert, dict) else None,
-        event,
-        snap=snap,
-    ):
-        return True
-    side_v = _side_val(getattr(candidate, "side", Side.CALL))
-    if side_v == "CALL":
-        from app.engines.best_trade_policy import call_atm_itm_base_capture_eligible
-
-        ok, _ = call_atm_itm_base_capture_eligible(candidate, snap, settings=settings)
-        return ok
-    return False
-
-
 def _faded_rip_hard_block(candidate: Any, snap: SymbolSnapshot) -> tuple[bool, str]:
     settings = get_settings()
     if not getattr(settings, "chop_live_block_faded_rip", True):
-        return False, ""
-    if _chop_live_near_base_fade_waive(candidate, snap):
         return False, ""
     event = getattr(candidate, "explosion_event", None)
     if event is None:
@@ -328,23 +302,14 @@ def _premium_5m_fading(
     *,
     side: Side | str,
     chart_meta: dict[str, Any] | None,
-    candidate: Any | None = None,
-    snap: SymbolSnapshot | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     settings = get_settings()
     meta: dict[str, Any] = {}
     if not getattr(settings, "chop_live_block_premium_5m_fade", True):
         return False, "", meta
-    if candidate is not None and snap is not None and _chop_live_near_base_fade_waive(
-        candidate, snap,
-    ):
-        meta["nearBaseFadeWaive"] = True
-        return False, "", meta
 
     premium_chart = (chart_meta or {}).get("premiumChart")
     mom5 = 0.0
-    mom3 = 0.0
-    off_low = 0.0
     direction = "NEUTRAL"
     if premium_chart is None:
         premium_mtf = (chart_meta or {}).get("premiumMtf") or {}
@@ -352,38 +317,26 @@ def _premium_5m_fading(
         if pt is None:
             return False, "", meta
         mom5 = float(getattr(pt, "momentumPct", 0) or 0)
-        mom3 = float(getattr(pt, "momentum3Pct", 0) or 0)
-        off_low = float(getattr(pt, "offLowPct", 0) or 0)
         direction = str(getattr(pt, "direction", "") or "").upper()
     elif isinstance(premium_chart, dict):
         mom5 = float(premium_chart.get("momentum5Pct") or 0)
-        mom3 = float(premium_chart.get("momentum3Pct") or 0)
-        off_low = float(premium_chart.get("offLowPct") or 0)
         direction = str(premium_chart.get("direction") or "").upper()
     else:
         mom5 = float(getattr(premium_chart, "momentum5Pct", 0) or 0)
-        mom3 = float(getattr(premium_chart, "momentum3Pct", 0) or 0)
-        off_low = float(getattr(premium_chart, "offLowPct", 0) or 0)
         direction = str(getattr(premium_chart, "direction", "") or "").upper()
 
     meta["premiumMom5Pct"] = round(mom5, 3)
     meta["premiumDirection5m"] = direction
-    meta["premiumOffLowPct"] = round(off_low, 2)
 
     min_mom = float(
         getattr(settings, "chop_live_premium_5m_fade_min_mom_pct", -0.12) or -0.12
     )
-    if direction == "BEARISH" and mom5 < min_mom:
-        from app.engines.winner_entry_guards import premium_lift_clears_fade
-
-        fresh = mom3 if premium_chart is None else mom5
-        if premium_lift_clears_fade(
-            settings,
-            off_low_pct=off_low,
-            momentum_pct=fresh,
-            momentum_3_pct=mom3,
-        ):
-            return False, "", meta
+    side_v = _side_val(side)
+    if side_v == "PUT" and direction == "BEARISH" and mom5 < min_mom:
+        return True, "chop_live_premium_5m_fade", meta
+    if side_v == "CALL" and direction == "BEARISH" and mom5 < min_mom:
+        return True, "chop_live_premium_5m_fade", meta
+    if mom5 < min_mom and direction == "BEARISH":
         return True, "chop_live_premium_5m_fade", meta
     return False, "", meta
 
@@ -437,8 +390,6 @@ def chop_live_entry_blocked(
     fade_blocked, fade_reason, fade_meta = _premium_5m_fading(
         side=getattr(candidate, "side", Side.CALL),
         chart_meta=chart_meta,
-        candidate=candidate,
-        snap=snap,
     )
     meta.update(fade_meta)
     if fade_blocked:

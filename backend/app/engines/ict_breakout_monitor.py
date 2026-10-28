@@ -1736,94 +1736,6 @@ def _coil_armed_low_score_readiness(
     return True, "coil_armed_low_score_base_entry"
 
 
-def _tape_float(value: Any) -> Optional[float]:
-    """Parse a real velocity or pad number. Mocks and blanks are missing, not zero."""
-    if isinstance(value, bool) or value is None:
-        return None
-    if type(value).__name__ == "MagicMock":
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _raw_tape_velocity(
-    event: Any,
-    alert: Optional[dict[str, Any]],
-) -> tuple[float, float]:
-    """Live 3s/9s tape before persisted armed evidence overwrites a smaller print.
-
-    A later poll often carries the causal arm-window velocity in ``ictArmedEvidence``.
-    That fill is for a missing print. An explicit live reading, including a negative
-    one, is the tape the entry has to confirm.
-    """
-    raw = alert if isinstance(alert, dict) else {}
-
-    def pick(attr: str, *keys: str) -> float:
-        event_val = (
-            _tape_float(getattr(event, attr, None)) if event is not None else None
-        )
-        alert_val: Optional[float] = None
-        for key in keys:
-            if key not in raw:
-                continue
-            parsed = _tape_float(raw.get(key))
-            if parsed is not None:
-                alert_val = parsed
-                break
-        if event_val is not None and event_val != 0:
-            return event_val
-        if alert_val is not None:
-            return alert_val
-        return float(event_val or 0.0)
-
-    return (
-        pick("velocity_3s", "velocity3s", "velocity_3s", "liveVelocity3s"),
-        pick("velocity_9s", "velocity9s", "velocity_9s", "liveVelocity9s"),
-    )
-
-
-def _stamp_base_pad_pct(row: Mapping[str, Any], ict: Any, base_move: float) -> float:
-    """Widest local pad. A small ICT reading must not hide a premium that left the base."""
-    vals: list[float] = []
-    for item in (
-        base_move,
-        getattr(ict, "base_relative_move_pct", 0) if ict is not None else 0,
-        row.get("ictBaseRelativeMovePct"),
-        row.get("localBaseMovePct"),
-        row.get("offLowMovePct"),
-        row.get("offHighMovePct"),
-    ):
-        parsed = _tape_float(item)
-        if parsed is not None:
-            vals.append(parsed)
-    return max(vals) if vals else 0.0
-
-
-def _preauthorized_stamp_is_confirmed_base_lift(
-    *,
-    base_move_pct: float,
-    live_v3: float,
-    live_v9: float,
-    settings: Any,
-) -> bool:
-    """The elite stamp is an entry only at the base with a live lift.
-
-    ``eliteBaseReady`` persisted from the arm window is not that lift. The premium
-    has to still be inside the near-base pad, and the live 3s and 9s tape both
-    have to be rising. A stale faster print does not count.
-    """
-    from app.engines.best_trade_policy import effective_near_base_max_local_pct
-
-    ceiling = effective_near_base_max_local_pct(settings)
-    if float(base_move_pct or 0) > ceiling + 1e-6:
-        return False
-    return float(live_v3) > 0.0 and float(live_v9) > 0.0
-
-
 def first_lift_entry_readiness(
     *,
     snap: Optional[SymbolSnapshot],
@@ -2133,27 +2045,6 @@ def first_lift_entry_readiness(
                 row=row,
                 symbol=_sym,
             )
-        if not structure_bypass and _side in ("CALL", "PUT"):
-            from app.engines.best_trade_policy import atm_itm_676_base_pad
-
-            shape_evidence = {
-                **(row if isinstance(row, dict) else {}),
-                "side": _side,
-                "tier": _tier,
-                "strike": float(
-                    getattr(event, "strike", 0) or row.get("strike") or 0
-                ),
-                "localBaseMovePct": _base_move or row.get("localBaseMovePct") or 0,
-                "ictBaseRelativeMovePct": row.get("ictBaseRelativeMovePct") or _base_move,
-                "offLowMovePct": row.get("offLowMovePct") or 0,
-                "armedBaseLaunch": bool(armed_launch or row.get("armedBaseLaunch")),
-                "vRipReady": bool(v_rip_ready or row.get("vRipReady")),
-                "ictVRipReady": bool(v_rip_ready or row.get("ictVRipReady")),
-                "momentType": row.get("momentType"),
-            }
-            structure_bypass = atm_itm_676_base_pad(
-                shape_evidence, snap, side=_side, settings=settings,
-            )
         if not structure_bypass:
             return False, "first_lift_structure_not_confirmed"
 
@@ -2340,44 +2231,6 @@ def first_lift_entry_readiness(
         if first_lift and not strict_armed_path and not v_rip_lane:
             if not grade_a_lane and not top_ftv_v_lane:
                 min_move = min(min_move, bd_floors["minMove"])
-    from app.engines.best_trade_policy import (
-        atm_itm_676_base_pad,
-        effective_near_base_max_local_pct,
-    )
-
-    _676_side = str(
-        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
-        or row.get("side")
-        or ""
-    ).upper()
-    _676_evidence = {
-        **(row if isinstance(row, dict) else {}),
-        "side": _676_side,
-        "tier": str(getattr(event, "tier", "") or row.get("tier") or ""),
-        "strike": float(getattr(event, "strike", 0) or row.get("strike") or 0),
-        "localBaseMovePct": base_move
-        or row.get("localBaseMovePct")
-        or row.get("ictBaseRelativeMovePct")
-        or 0,
-        "ictBaseRelativeMovePct": row.get("ictBaseRelativeMovePct") or base_move,
-        "armedBaseLaunch": bool(armed_launch or row.get("armedBaseLaunch")),
-        "ictArmedBaseLaunch": bool(armed_launch or row.get("ictArmedBaseLaunch")),
-        "vRipReady": bool(v_rip_ready or row.get("vRipReady")),
-        "ictVRipReady": bool(v_rip_ready or row.get("ictVRipReady")),
-        "eliteBaseReady": bool(elite_base_ready or row.get("eliteBaseReady")),
-        "ictEliteBaseReady": bool(elite_base_ready or row.get("ictEliteBaseReady")),
-        "firstLift": bool(first_lift or row.get("firstLift")),
-        "ictFirstLift": bool(first_lift or row.get("ictFirstLift")),
-        "ictBaseArmed": row.get("ictBaseArmed"),
-        "momentType": row.get("momentType"),
-    }
-    if atm_itm_676_base_pad(
-        _676_evidence, snap, side=_676_side, settings=settings,
-    ):
-        # #676 pad is the window. The elite 2–5% cap and the 15% first-lift
-        # floor both reject this base.
-        min_move = 0.0
-        max_move = max(max_move, effective_near_base_max_local_pct(settings))
     if not (min_move <= base_move <= max_move):
         return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
 
@@ -2559,44 +2412,11 @@ def first_lift_entry_readiness(
         or row.get("ictVolumeAwakening")
         or row.get("volumeAwaken")
     )
-    live_v3, live_v9 = _raw_tape_velocity(event, alert if isinstance(alert, dict) else None)
+    live_v3 = v3
     v3 = max(v3, float(persisted.get("velocity3s") or 0))
     v9 = max(v9, float(persisted.get("velocity9s") or 0))
-    from app.engines.best_trade_policy import atm_itm_676_base_pad
-
-    shape_side = str(
-        getattr(getattr(event, "side", None), "value", getattr(event, "side", ""))
-        or row.get("side")
-        or ""
-    ).upper()
-    atm_itm_base_pad = atm_itm_676_base_pad(
-        {
-            **row,
-            "side": shape_side,
-            "tier": str(getattr(event, "tier", "") or row.get("tier") or ""),
-            "strike": float(getattr(event, "strike", 0) or row.get("strike") or 0),
-            "localBaseMovePct": base_move
-            or row.get("localBaseMovePct")
-            or row.get("ictBaseRelativeMovePct")
-            or 0,
-            "armedBaseLaunch": bool(armed_launch or row.get("armedBaseLaunch")),
-            "ictArmedBaseLaunch": bool(armed_launch or row.get("ictArmedBaseLaunch")),
-            "vRipReady": bool(v_rip_ready or row.get("vRipReady")),
-            "ictVRipReady": bool(v_rip_ready or row.get("ictVRipReady")),
-            "eliteBaseReady": bool(elite_base_ready or row.get("eliteBaseReady")),
-            "ictEliteBaseReady": bool(elite_base_ready or row.get("ictEliteBaseReady")),
-            "firstLift": bool(first_lift or row.get("firstLift")),
-            "ictFirstLift": bool(first_lift or row.get("ictFirstLift")),
-            "ictBaseArmed": row.get("ictBaseArmed"),
-            "momentType": row.get("momentType"),
-        },
-        snap,
-        settings=settings,
-    )
-    if live_v3 < 0 and not atm_itm_base_pad:
+    if live_v3 < 0:
         return False, "first_lift_live_velocity_negative"
-    if live_v9 < 0 and not atm_itm_base_pad:
-        return False, "first_lift_live_velocity9s_negative"
     if v_rip_lane:
         min_v3 = float(
             getattr(settings, "ict_v_rip_min_velocity_3s", 1.2) or 1.2
@@ -2719,13 +2539,9 @@ def first_lift_entry_readiness(
         if _entry_policy.consolidation_cold_v3_at_base:
             min_v3 = 0.0
             min_v9 = 0.0
-    if atm_itm_base_pad:
-        # Cold velocity at the low is the base, not a failed lift.
-        min_v3 = 0.0
-        min_v9 = 0.0
-    if not atm_itm_base_pad and not sustained_lift and v3 < min_v3:
+    if not sustained_lift and v3 < min_v3:
         return False, f"first_lift_velocity3s<{min_v3:g}"
-    if not atm_itm_base_pad and not sustained_lift and v9 < min_v9:
+    if not sustained_lift and v9 < min_v9:
         return False, f"first_lift_velocity9s<{min_v9:g}"
 
     min_volume = float(
@@ -2847,7 +2663,7 @@ def first_lift_entry_readiness(
             float(getattr(snap, "tradeQualityScore", 0) or 0),
             float(persisted.get("tradeQualityScore") or 0),
         )
-        if aligned_tqs < min_tqs and not atm_itm_base_pad:
+        if aligned_tqs < min_tqs:
             return False, f"armed_base_tqs<{min_tqs:g}"
         from app.engines.moneyness import classify_moneyness
         from app.models.schemas import Side
@@ -2894,12 +2710,10 @@ def first_lift_entry_readiness(
         armed_min_tqs = float(
             getattr(settings, "ict_armed_base_launch_min_tqs", 50.0) or 50.0
         )
-        # A real armed moment keeps its own reason. The preauthorized stamp is
-        # only the entry when that moment is absent, the premium is still at the
-        # base, and the live tape — not the stored arm-window print — is lifting.
-        moment_is_v_rip = (
+        use_v_rip_reason = (
             v_rip_lane
             and armed_launch
+            and not elite_base_ready
             and aligned_tqs < armed_min_tqs
         )
         from app.engines.explosion_entry_guards import post_impulse_consolidation_entry_blocked
@@ -2912,20 +2726,15 @@ def first_lift_entry_readiness(
         )
         if pi_blocked:
             return False, pi_reason
-        if armed_launch:
-            return True, (
+        return True, (
+            "elite_base_ready_s_preauthorized"
+            if elite_base_ready
+            else (
                 "v_rip_session_low_ready"
-                if moment_is_v_rip
+                if use_v_rip_reason
                 else "armed_base_option_led_ready"
             )
-        if not _preauthorized_stamp_is_confirmed_base_lift(
-            base_move_pct=_stamp_base_pad_pct(row, ict, base_move),
-            live_v3=live_v3,
-            live_v9=live_v9,
-            settings=settings,
-        ):
-            return False, "preauthorized_stamp_needs_confirmed_base_lift"
-        return True, "elite_base_ready_s_preauthorized"
+        )
 
     # A confirmed ATM/ITM option can lead the slower 5m spot chart. This path is
     # deliberately stronger than normal first-lift readiness: it requires an A/B+
@@ -4049,59 +3858,8 @@ def late_fade_chase_blocked(
     ):
         return False, ""
     if move >= min_peak and v3 <= max_v3:
-        # Cold velocity on a high that was just printed is the lift, not a fade.
-        # Velocity looks back 3s and is still 0 a second after the print. No tape
-        # keeps the block: an extended move we have not measured stays a fade.
-        if _fresh_premium_high(event, settings):
-            return False, ""
         return True, f"ict_late_fade_chase_peak_{move:.0f}%_v3_{v3:.1f}"
     return False, ""
-
-
-def _cfg_float(settings: Any, name: str, default: float) -> float:
-    raw = getattr(settings, name, default)
-    # float(MagicMock()) is 1.0 — an unset mock is not a configured age or band.
-    if raw is None or type(raw).__module__ == "unittest.mock":
-        return float(default)
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _fresh_premium_high(event: Any, settings: Any) -> bool:
-    """True when the live premium is a high the tape has not traded yet."""
-    prem = float(getattr(event, "premium", 0) or 0)
-    sym = str(getattr(event, "symbol", "") or "")
-    side = getattr(event, "side", None)
-    strike = float(getattr(event, "strike", 0) or 0)
-    if prem <= 0 or not sym or side is None or strike <= 0:
-        return False
-    min_age = _cfg_float(
-        settings, "explosion_post_peak_chase_min_peak_age_seconds", 45.0,
-    )
-    if min_age <= 0:
-        return False
-    lookback = _cfg_float(
-        settings, "explosion_post_peak_chase_lookback_seconds", 900.0,
-    )
-    near = _cfg_float(
-        settings, "explosion_post_peak_chase_near_top_frac", 0.12,
-    )
-    try:
-        from app.engines.explosion_detector import prior_near_level_age_seconds
-
-        age = prior_near_level_age_seconds(
-            sym,
-            strike,
-            side,
-            prem,
-            lookback_seconds=lookback,
-            near_frac=near,
-        )
-    except Exception:
-        return False
-    return age is not None and age < min_age
 
 
 def _expiry_worst_session(

@@ -2,7 +2,7 @@
 # Flip live or paper execution without a separate live profile.
 #
 # Capital, loss stops, and entry gates are copied from
-# deploy/env.production.template (the paper / Oct 1 book, ₹2,75,000).
+# deploy/env.production.template (the paper / Oct 1 book, ₹2,00,000).
 # This does not apply a ₹10k overlay.
 #
 # Run on the EC2 instance:
@@ -44,14 +44,6 @@ PIN_KEYS=(
   LOSS_STREAK_PAUSE_COUNT
   TOP_MOMENTS_MIN_GRADE
   LIVE_BEST_TRADES_ONLY_ENABLED
-  LIVE_BEST_TRADES_MIN_GRADE
-  OPEN_SIDE_CONFIRMATION_ENABLED
-  OPEN_SIDE_CONFIRMATION_START_HOUR
-  OPEN_SIDE_CONFIRMATION_START_MINUTE
-  OPEN_SIDE_CONFIRMATION_MIN_MINUTES
-  INDEX_CANDLE_ROLLOVER_BLOCK_ENABLED
-  INDEX_CANDLE_ROLLOVER_STEPS
-  INDEX_CANDLE_ROLLOVER_MIN_GIVEBACK_PCT
   LIVE_EARLY_FAIL_EXIT_ENABLED
   LIVE_DISABLE_SESSION_LIFT
   CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED
@@ -68,25 +60,21 @@ PIN_KEYS=(
 
 MODE=""
 DRY_RUN=0
-NO_LOSS_STOPS=0
 for arg in "$@"; do
   case "$arg" in
     --live) MODE=live ;;
     --paper) MODE=paper ;;
     --dry-run) DRY_RUN=1 ;;
-    --no-loss-stops)
-      NO_LOSS_STOPS=1
-      ;;
     *)
       echo "Unknown option: $arg" >&2
-      echo "Usage: $0 --live | --paper [--no-loss-stops] [--dry-run]" >&2
+      echo "Usage: $0 --live | --paper [--dry-run]" >&2
       exit 1
       ;;
   esac
 done
 
 if [ -z "$MODE" ]; then
-  echo "Usage: $0 --live | --paper [--no-loss-stops] [--dry-run]" >&2
+  echo "Usage: $0 --live | --paper [--dry-run]" >&2
   exit 1
 fi
 
@@ -156,31 +144,6 @@ else
   _set_env_key PAPER_SLIPPAGE_ENABLED true
   _set_env_key PAPER_SIMULATE_BROKER_ORDERS true
   _set_env_key SHADOW_TRADE_ALL_SIGNALS true
-  echo "Paper #676 entry choke (Oct 1/5 replica + base-capture stack)..."
-  PAPER_676_KEYS=(
-    PAPER_676_ENTRY_CHOKE_ENABLED
-    OCT_PAPER_REPLICA_ENABLED
-    CALL_ATM_ITM_BASE_CAPTURE_ENABLED
-  )
-  for key in "${PAPER_676_KEYS[@]}"; do
-    val="$(_template_value "$key" || true)"
-    if [ -n "$val" ]; then
-      _set_env_key "$key" "$val"
-    fi
-  done
-  # Paper #676 stack — not the live-arm grade gate (template keeps live_best true for --live pin).
-  _set_env_key LIVE_BEST_TRADES_ONLY_ENABLED false
-  _set_env_key LEGACY_LIVE_NARROW_STACK_ENABLED false
-fi
-
-if [ "$NO_LOSS_STOPS" -eq 1 ]; then
-  echo "Disabling daily loss stop and emergency stop for this session (entries keep running in the red)..."
-  _set_env_key DAILY_LOSS_STOP_FROM_CAPITAL false
-  _set_env_key DAILY_LOSS_STOP_INR 0
-  _set_env_key EMERGENCY_STOP_ENABLED false
-  _set_env_key EMERGENCY_STOP_INR 0
-  _set_env_key SESSION_LARGE_LOSS_PAUSE_INR 0
-  _set_env_key LOSS_STREAK_PAUSE_COUNT 999
 fi
 
 if [ "$DRY_RUN" -eq 1 ] || [ "${SKIP_RESTART:-0}" = "1" ]; then

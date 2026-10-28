@@ -225,33 +225,16 @@ def index_trend_opposite_side_blocks_entry(
     dominant, trend_meta = index_session_dominant_trend(sym, snap, state, settings=settings)
     meta.update(trend_meta)
 
-    from app.engines.index_session_dominant_trend import (
-        index_peak_slide_context_active,
-        index_trough_rally_context_active,
-    )
     from app.engines.worst_day_guard import _put_rally_bullish_context
 
     bullish_ctx, bull_meta = _put_rally_bullish_context(sym, snap)
     if bullish_ctx:
         meta["putRallyBullishContext"] = bull_meta
 
-    trough_rally, trough_meta = index_trough_rally_context_active(
-        sym, snap, state, settings=settings,
-    )
-    if trough_rally:
-        meta.update(trough_meta)
-    peak_slide, peak_meta = index_peak_slide_context_active(
-        sym, snap, state, settings=settings,
-    )
-    if peak_slide:
-        meta.update(peak_meta)
-
     evidence, ranking, readiness = _candidate_evidence(candidate)
 
     block_put = side == "PUT" and (
-        dominant == "RALLY"
-        or (dominant == "NEUTRAL" and bullish_ctx)
-        or (dominant == "NEUTRAL" and trough_rally)
+        dominant == "RALLY" or (dominant == "NEUTRAL" and bullish_ctx)
     )
     if block_put:
         if _put_rally_bypass(
@@ -260,10 +243,7 @@ def index_trend_opposite_side_blocks_entry(
             return False, "ok", meta
         return True, "index_trend_put_blocked_call_rally", meta
 
-    block_call = side == "CALL" and (
-        dominant == "SLIDE" or (dominant == "NEUTRAL" and peak_slide)
-    )
-    if block_call:
+    if side == "CALL" and dominant == "SLIDE":
         if _call_slide_bypass(
             candidate, state, snap, sym, evidence, ranking, readiness, settings=settings,
         ):

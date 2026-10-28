@@ -54,101 +54,6 @@ def _snap_put(**chart_kw) -> SymbolSnapshot:
     )
 
 
-def test_cash_open_ignores_preopen_ticks_and_keeps_the_0915_print():
-    from datetime import datetime
-
-    from app.engines.index_tick_helpers import (
-        index_session_extremes,
-        record_index_session_extreme,
-    )
-
-    reset_index_tick_helpers_for_tests()
-    preopen = datetime(2026, 10, 23, 9, 8, tzinfo=IST)
-    record_index_session_extreme("NIFTY", 22680.0, now=preopen)
-    assert index_session_extremes("NIFTY") == {}
-
-    # A leftover pre-open tape must be replaced by the first cash-session tick.
-    from app.engines import index_tick_helpers as helpers
-
-    helpers._session_extremes["NIFTY"] = {
-        "date": preopen.date(),
-        "open": 22680.0,
-        "hi": 22690.0,
-        "lo": 22670.0,
-        "last": 22685.0,
-    }
-    cash = datetime(2026, 10, 23, 9, 15, tzinfo=IST)
-    record_index_session_extreme("NIFTY", 22743.2, now=cash)
-    later = datetime(2026, 10, 23, 9, 28, tzinfo=IST)
-    record_index_session_extreme("NIFTY", 22748.0, now=later)
-    ext = index_session_extremes("NIFTY")
-    assert ext["open"] == 22743.2
-    assert ext["fromCashOpen"] is True
-    assert ext["hi"] == 22748.0
-    assert ext["last"] == 22748.0
-
-
-def test_resolve_index_session_uses_spot_when_range_not_stamped_yet():
-    from types import SimpleNamespace
-
-    from app.engines.index_tick_helpers import resolve_index_session
-
-    from app.engines import index_tick_helpers as ith
-
-    reset_index_tick_helpers_for_tests()
-    ith._session_extremes["NIFTY"] = {
-        "date": datetime(2026, 10, 23, 9, 25, tzinfo=IST).date(),
-        "open": 22743.2,
-        "hi": 0.0,
-        "lo": 0.0,
-        "last": 22748.0,
-        "fromCashOpen": True,
-    }
-    snap = SimpleNamespace(spot=22750.0)
-    ext = resolve_index_session("NIFTY", snap)
-    assert ext["open"] == 22743.2
-    assert ext["hi"] == 22750.0
-    assert ext["lo"] == 22750.0
-    assert ext["last"] == 22750.0
-
-
-def test_flat_tape_does_not_inherit_an_older_spike():
-    import time
-
-    from app.engines import index_tick_helpers as ith
-
-    reset_index_tick_helpers_for_tests()
-    clear_ticks()
-    key = INDEX_KEYS["SENSEX"]
-    ith._last_spike["SENSEX"] = {
-        "v3": -0.20, "v9": -0.20, "ltp": 77000.0, "mono": time.monotonic() - 30.0,
-    }
-    record_tick(key, 76900.0)
-    from app.services import tick_store
-
-    hist = tick_store._tick_history[key.replace(":", "|")]
-    hist[0].received_mono -= 3.0
-    record_tick(key, 76900.0)
-    board = evaluate_index_tick_helpers(snap=_snap_put(), side=Side.PUT)
-    assert board.velocity_3s == 0.0
-    assert board.tick_spike is False
-
-
-def test_a_spike_from_the_last_five_seconds_fills_a_missing_tape():
-    import time
-
-    from app.engines import index_tick_helpers as ith
-
-    reset_index_tick_helpers_for_tests()
-    clear_ticks()
-    ith._last_spike["SENSEX"] = {
-        "v3": -0.08, "v9": -0.05, "ltp": 76900.0, "mono": time.monotonic(),
-    }
-    board = evaluate_index_tick_helpers(snap=_snap_put(), side=Side.PUT)
-    assert board.velocity_3s == -0.08
-    assert board.tick_spike is True
-
-
 def test_index_tick_helpers_confirm_put_on_falling_spot():
     reset_index_tick_helpers_for_tests()
     clear_ticks()
@@ -465,66 +370,8 @@ def test_index_trend_breakout_rejects_new_high_without_thrust():
     assert index_trend_breakout("SENSEX", Side.CALL, snap)["breakout"] is False
 
 
-def test_rally_points_use_broker_day_low_not_yesterday():
-    from app.engines.index_rally_side_flip import index_rally_metrics
-    from app.models.schemas import ChartAnalysis
-
-    reset_index_tick_helpers_for_tests()
-    snap = _snap_put()
-    snap.spot = 22750.0
-    snap.chartAnalysis = ChartAnalysis(
-        institutional={
-            "dayHigh": 22760.0,
-            "dayLow": 22740.0,
-            "sessionHigh": 22880.0,
-            "sessionLow": 22600.0,
-        }
-    )
-    metrics = index_rally_metrics("NIFTY", snap)
-    assert metrics["rallyPoints"] == 10.0
-    assert metrics["slidePoints"] == 10.0
-
-
-def test_rally_points_ignore_chart_session_without_a_broker_day_range():
-    from app.engines.index_rally_side_flip import index_rally_metrics
-    from app.models.schemas import ChartAnalysis
-
-    reset_index_tick_helpers_for_tests()
-    snap = _snap_put()
-    snap.spot = 22750.0
-    snap.chartAnalysis = ChartAnalysis(
-        institutional={"sessionHigh": 22880.0, "sessionLow": 22600.0}
-    )
-    metrics = index_rally_metrics("NIFTY", snap)
-    assert metrics["rallyPoints"] == 0.0
-    assert metrics["slidePoints"] == 0.0
-
-
-def test_broker_day_range_beats_yesterday_chart_session():
-    """Yesterday's chart high must not count as a fresh session high after a restart."""
-    from app.engines.index_tick_helpers import index_trend_breakout
-    from app.models.schemas import ChartAnalysis
-
-    reset_index_tick_helpers_for_tests()
-    _seed_ltp("SENSEX", [77540 + i * 2.0 for i in range(31)], step=1.5)
-    snap = _snap_put(direction="BULLISH", momentum5Pct=0.165)
-    snap.spot = 77590.0
-    snap.chartAnalysis = ChartAnalysis(
-        institutional={
-            "dayHigh": 77800.0,
-            "dayLow": 77440.0,
-            "sessionHigh": 77600.0,
-            "sessionLow": 77440.0,
-        }
-    )
-    bo = index_trend_breakout("SENSEX", Side.CALL, snap)
-    assert bo["breakout"] is False
-    assert bo.get("hi") == 77800.0
-    assert bo.get("lo") == 77440.0
-
-
 def test_trend_breakout_seeds_session_hilo_from_snapshot_when_ticks_cold():
-    """After a restart the tick tracker is cold — broker day H/L still enables the override."""
+    """After a restart the tick tracker is cold — broker session H/L still enables the override."""
     from app.engines.index_tick_helpers import index_trend_breakout
     from app.models.schemas import ChartAnalysis
     reset_index_tick_helpers_for_tests()  # no _session_extremes (cold start)
@@ -532,28 +379,11 @@ def test_trend_breakout_seeds_session_hilo_from_snapshot_when_ticks_cold():
     snap = _snap_put(direction="BULLISH", momentum5Pct=0.165)
     snap.spot = 77590.0
     snap.chartAnalysis = ChartAnalysis(
-        institutional={"dayHigh": 77600.0, "dayLow": 77440.0}
+        institutional={"sessionHigh": 77600.0, "sessionLow": 77440.0}
     )
     bo = index_trend_breakout("SENSEX", Side.CALL, snap)
     assert bo["breakout"] is True
     assert "near_session_high" in bo["reasons"]
-
-
-def test_trend_breakout_ignores_chart_session_when_quote_range_missing():
-    """Yesterday's SMC high is not a cash-session high after a restart."""
-    from app.engines.index_tick_helpers import index_trend_breakout
-    from app.models.schemas import ChartAnalysis, MarketProfile
-
-    reset_index_tick_helpers_for_tests()
-    _seed_ltp("SENSEX", [77540 + i * 2.0 for i in range(31)], step=1.5)
-    snap = _snap_put(direction="BULLISH", momentum5Pct=0.165)
-    snap.spot = 77590.0
-    snap.chartAnalysis = ChartAnalysis(
-        institutional={"sessionHigh": 77600.0, "sessionLow": 77440.0}
-    )
-    snap.marketProfile = MarketProfile(openingRangeHigh=77600.0, openingRangeLow=77440.0)
-    bo = index_trend_breakout("SENSEX", Side.CALL, snap)
-    assert bo["breakout"] is False
 
 
 def test_index_trend_override_active_scans_symbols():

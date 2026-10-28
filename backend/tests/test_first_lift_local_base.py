@@ -679,8 +679,7 @@ def test_shallow_otm_coil_is_retained_before_atm_first_lift(
     )
     symbol, strike = "NIFTY", 24200.0
     key = _strike_key(strike, side)
-    # Midday anchor — loop adds 30s; must not cross 00:00 IST during CI.
-    current = datetime(2026, 6, 15, 12, 0, 0, tzinfo=IST)
+    current = datetime.now(IST)
 
     class _Clock(datetime):
         @classmethod

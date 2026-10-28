@@ -54,216 +54,6 @@ def _evidence_local_move_pct(evidence: Mapping[str, Any]) -> float:
     )
 
 
-def _call_structural_pad_pct(evidence: Mapping[str, Any]) -> float:
-    """Local-base pad only — not session off-low (index can lead option by a few points)."""
-    return max(
-        _number(evidence.get("localBaseMovePct")),
-        _number(evidence.get("ictBaseRelativeMovePct")),
-    )
-
-
-def _call_base_pad_pct(evidence: Mapping[str, Any]) -> float:
-    """Distance off the option low. A morning high does not make the afternoon base a chase."""
-    return max(
-        _call_structural_pad_pct(evidence),
-        _number(evidence.get("offLowMovePct")),
-    )
-
-
-def _call_atm_itm_index_led(
-    evidence: Mapping[str, Any],
-    snap: Any = None,
-    *,
-    settings: Any = None,
-) -> bool:
-    """Index trough turn / v-rip off session low — Oct 23 13:34 index V shape."""
-    from app.config import get_settings
-
-    settings = settings or get_settings()
-    evidence = evidence if isinstance(evidence, Mapping) else {}
-    if bool(
-        evidence.get("indexConfirmedLocalBase")
-        or evidence.get("ictIndexConfirmedLocalBase")
-        or evidence.get("indexTroughSlowV")
-        or evidence.get("ictIndexTroughSlowV")
-    ):
-        return True
-    moment = str(evidence.get("momentType") or evidence.get("reason") or "").lower()
-    if "v_rip_session_low" in moment:
-        return True
-    if bool(evidence.get("vRipReady") or evidence.get("ictVRipReady")):
-        if snap is not None and getattr(snap, "spotChart", None) is not None:
-            from app.engines.spot_direction import index_trough_momentum_turn
-            from app.models.schemas import Side
-
-            if index_trough_momentum_turn(Side.CALL, snap.spotChart, settings=settings):
-                return True
-    return False
-
-
-def _call_pad_within_atm_itm_ceiling(
-    evidence: Mapping[str, Any],
-    snap: Any = None,
-    *,
-    settings: Any = None,
-) -> bool:
-    """Sep917 15% pad, or index-led: structural ≤ tight band and off-low ≤ index-confirmed cap."""
-    from app.config import get_settings
-
-    settings = settings or get_settings()
-    tight = effective_near_base_max_local_pct(settings)
-    structural = _call_structural_pad_pct(evidence)
-    full = _call_base_pad_pct(evidence)
-    if _call_atm_itm_index_led(evidence, snap, settings=settings):
-        wide = float(
-            getattr(settings, "index_confirmed_local_base_max_off_low_pct", 22.0) or 22.0
-        )
-        return (
-            structural <= tight + 1e-6
-            and full <= wide + 1e-6
-        )
-    return full <= tight + 1e-6
-
-
-def _atm_itm_base_moment(evidence: Mapping[str, Any]) -> bool:
-    moment = str(evidence.get("momentType") or evidence.get("reason") or "").lower()
-    if any(token in moment for token in ("v_rip", "armed_base", "elite_base", "ict_base_armed", "first_lift")):
-        return True
-    return bool(
-        evidence.get("ictBaseArmed")
-        or evidence.get("armedBaseLaunch")
-        or evidence.get("ictArmedBaseLaunch")
-        or evidence.get("eliteBaseReady")
-        or evidence.get("ictEliteBaseReady")
-        or evidence.get("vRipReady")
-        or evidence.get("ictVRipReady")
-        or evidence.get("firstLift")
-        or evidence.get("ictFirstLift")
-    )
-
-
-def call_atm_itm_near_base_pad(
-    evidence: Mapping[str, Any] | None,
-    snap: Any = None,
-    *,
-    side: str = "",
-    strike: float = 0.0,
-    settings: Any = None,
-) -> bool:
-    """#676 shape: ELITE/EXPLODING CALL, ATM or ITM, still inside the near-base pad.
-
-    The 23 Oct 13:34 NIFTY book was this shape. Premium had not left the low.
-    A cold 3-second print and a trade-quality reading under 50 are the base.
-    """
-    from app.config import get_settings
-
-    settings = settings or get_settings()
-    if not bool(getattr(settings, "call_atm_itm_base_capture_enabled", True)):
-        return False
-    evidence = evidence if isinstance(evidence, Mapping) else {}
-    side_u = _side_value(side or evidence.get("side"))
-    if side_u != "CALL":
-        return False
-    tier = str(evidence.get("tier") or "").upper()
-    if tier not in ("ELITE", "EXPLODING"):
-        return False
-    if not _atm_itm_base_moment(evidence):
-        return False
-    if not _call_pad_within_atm_itm_ceiling(evidence, snap, settings=settings):
-        return False
-
-    money = str(evidence.get("moneyness") or "").upper()
-    if money in ("ATM", "ITM"):
-        return True
-    stk = float(strike or _number(evidence.get("strike")))
-    spot = float(_number(evidence.get("spot")) or _number(getattr(snap, "spot", 0)))
-    if stk <= 0 or spot <= 0:
-        return False
-    from app.engines.moneyness import classify_moneyness
-    from app.models.schemas import Side
-
-    atm = float(
-        _number(evidence.get("atmStrike")) or _number(getattr(snap, "atmStrike", 0))
-    )
-    sym = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "")
-    return classify_moneyness(
-        Side.CALL,
-        stk,
-        spot,
-        symbol=sym,
-        atm=atm or None,
-    ) in ("ATM", "ITM")
-
-
-def put_atm_itm_near_base_pad(
-    evidence: Mapping[str, Any] | None,
-    snap: Any = None,
-    *,
-    side: str = "",
-    strike: float = 0.0,
-    settings: Any = None,
-) -> bool:
-    """#676 put mirror of the call pad: ELITE/EXPLODING PUT, ATM or ITM, still on the base."""
-    from app.config import get_settings
-    from app.models.schemas import Side
-
-    settings = settings or get_settings()
-    if not bool(getattr(settings, "call_atm_itm_base_capture_enabled", True)):
-        return False
-    evidence = evidence if isinstance(evidence, Mapping) else {}
-    side_u = _side_value(side or evidence.get("side"))
-    if side_u != "PUT":
-        return False
-    tier = str(evidence.get("tier") or "").upper()
-    if tier not in ("ELITE", "EXPLODING"):
-        return False
-    if not _atm_itm_base_moment(evidence):
-        return False
-    if not _call_pad_within_atm_itm_ceiling(evidence, snap, settings=settings):
-        return False
-
-    money = str(evidence.get("moneyness") or "").upper()
-    if money in ("ATM", "ITM"):
-        return True
-    stk = float(strike or _number(evidence.get("strike")))
-    spot = float(_number(evidence.get("spot")) or _number(getattr(snap, "spot", 0)))
-    if stk <= 0 or spot <= 0:
-        return False
-    from app.engines.moneyness import classify_moneyness
-
-    atm = float(
-        _number(evidence.get("atmStrike")) or _number(getattr(snap, "atmStrike", 0))
-    )
-    sym = str(evidence.get("symbol") or getattr(snap, "symbol", "") or "")
-    return classify_moneyness(
-        Side.PUT,
-        stk,
-        spot,
-        symbol=sym,
-        atm=atm or None,
-    ) in ("ATM", "ITM")
-
-
-def atm_itm_676_base_pad(
-    evidence: Mapping[str, Any] | None,
-    snap: Any = None,
-    *,
-    side: str = "",
-    strike: float = 0.0,
-    settings: Any = None,
-) -> bool:
-    """#676 base, either side: ATM/ITM and still inside the near-base pad."""
-    evidence = evidence if isinstance(evidence, Mapping) else {}
-    side_u = _side_value(side or evidence.get("side"))
-    if side_u == "PUT":
-        return put_atm_itm_near_base_pad(
-            evidence, snap, side=side_u, strike=strike, settings=settings,
-        )
-    return call_atm_itm_near_base_pad(
-        evidence, snap, side=side_u or "CALL", strike=strike, settings=settings,
-    )
-
-
 def _moment_text_blob(
     evidence: Mapping[str, Any],
     alert: Mapping[str, Any] | None = None,
@@ -421,64 +211,6 @@ def symmetric_structural_base_evidence(
         or evidence.get("fastBullishLocalBase")
         or evidence.get("eliteBaseReady")
         or evidence.get("activeBreakout")
-    )
-
-
-def quality_moment_passport_active(
-    alert: Mapping[str, Any] | None,
-    *,
-    settings: Any = None,
-    snap: Any = None,
-) -> tuple[bool, str]:
-    """FTV / V-rip / explosive launch with ICT structure — safe to waive post-win FOMO layers."""
-    settings = settings or get_settings()
-    if not bool(getattr(settings, "quality_moment_passport_enabled", True)):
-        return False, "disabled"
-    alert_d = alert if isinstance(alert, Mapping) else {}
-    from app.engines.top_moment_gate import explosion_alert_is_top_moment
-
-    tier = str(alert_d.get("tier") or "").upper()
-    moment = str(alert_d.get("momentType") or alert_d.get("moment_type") or "").lower()
-    top_moment = explosion_alert_is_top_moment(alert_d)
-    tier_ok = tier in ("ELITE", "EXPLODING", "BUILDING") and top_moment
-    moment_ok = moment in {
-        "v",
-        "first_lift_local_base",
-        "armed_base_local_base",
-        "flat_then_vertical",
-        "building_local_base_lift_ready",
-    }
-    v_rip = bool(alert_d.get("ictVRipReady") or alert_d.get("vRipReady"))
-    structural = bool(
-        symmetric_chop_ftv_launch_evidence(alert_d, settings=settings)
-        or v_rip
-        or alert_d.get("ictBaseArmed")
-        or alert_d.get("buildingRipReady")
-        or alert_d.get("ictBuildingRipReady")
-    )
-    if not structural:
-        return False, "no_structure"
-    if top_moment or tier_ok or moment_ok or v_rip:
-        return True, "quality_moment_passport"
-    return False, "not_top_moment"
-
-
-def quality_moment_passport_waives_elite_entry(settings: Any = None) -> bool:
-    from app.config import get_settings
-
-    settings = settings or get_settings()
-    return bool(
-        getattr(settings, "quality_moment_passport_enabled", True)
-        and getattr(settings, "quality_moment_passport_waives_elite_entry", True)
-    )
-
-
-def quality_moment_passport_elite_score_floor(settings: Any = None) -> float:
-    from app.config import get_settings
-
-    settings = settings or get_settings()
-    return float(
-        getattr(settings, "quality_moment_passport_elite_score_floor", 82.0) or 82.0
     )
 
 
@@ -685,12 +417,6 @@ def timing_allows_best_trade_full_size(
         return True
     assessment = str(timing.get("assessment") or "").upper()
     if assessment in ("GOOD", "OK"):
-        return True
-    if bool(timing.get("callAtmItmBase676Waive")) and str(
-        timing.get("callAtmItmBase676WaiveMode") or ""
-    ).lower() == "eligible" and bool(
-        getattr(settings, "call_atm_itm_base_failed_launch_full_size_when_eligible", True)
-    ):
         return True
     if bool(getattr(settings, "entry_timing_structured_cold_max_lots", False)):
         return assessment == "COLD_BASE"
@@ -976,7 +702,6 @@ def call_at_base_best_trade_from_candidate(
 def _call_atm_itm_launch_ok(
     evidence: Mapping[str, Any],
     *,
-    snap: Any = None,
     readiness_reason: str = "",
     settings: Any = None,
 ) -> bool:
@@ -989,15 +714,6 @@ def _call_atm_itm_launch_ok(
             or evidence.get("activeBreakout")
             or evidence.get("displacement")
         )
-    ):
-        return True
-    # Armed base / v-rip while the pad is still the low is the launch. The
-    # first-lift pair can be missing because velocity and trade quality are cold.
-    tier = str(evidence.get("tier") or "").upper()
-    if (
-        tier in ("ELITE", "EXPLODING")
-        and _atm_itm_base_moment(evidence)
-        and _call_pad_within_atm_itm_ceiling(evidence, snap, settings=settings)
     ):
         return True
     from app.engines.pe_win_ce_mirror import _building_rip_launch_ok
@@ -1045,24 +761,8 @@ def call_atm_itm_base_capture_eligible(
         ranking = {}
     nested = ranking.get("evidence") if isinstance(ranking.get("evidence"), dict) else {}
     evidence = {**alert, **nested, **ranking}
-    if snap is not None:
-        evidence.setdefault("spot", getattr(snap, "spot", 0))
-        evidence.setdefault("atmStrike", getattr(snap, "atmStrike", 0))
-        evidence.setdefault("symbol", getattr(snap, "symbol", ""))
-    evidence.setdefault("strike", getattr(candidate, "strike", 0))
-    evidence.setdefault("side", _side_value(getattr(candidate, "side", "")))
 
-    structural = symmetric_structural_base_evidence(evidence, settings=settings)
-    if (
-        not structural
-        and _atm_itm_base_moment(evidence)
-        and _call_pad_within_atm_itm_ceiling(evidence, snap, settings=settings)
-    ):
-        structural = True
-        meta["nearBasePad"] = True
-        if _call_atm_itm_index_led(evidence, snap, settings=settings):
-            meta["indexLedPad"] = True
-    if not structural:
+    if not symmetric_structural_base_evidence(evidence, settings=settings):
         return False, meta
 
     tier = str(evidence.get("tier") or "").upper()
@@ -1071,10 +771,7 @@ def call_atm_itm_base_capture_eligible(
         return False, meta
 
     if not _call_atm_itm_launch_ok(
-        evidence,
-        snap=snap,
-        readiness_reason=readiness_reason,
-        settings=settings,
+        evidence, readiness_reason=readiness_reason, settings=settings,
     ):
         return False, {**meta, "reason": "launch_not_confirmed"}
 
@@ -1087,351 +784,6 @@ def call_atm_itm_base_capture_eligible(
     ):
         meta["callAtBaseBestTrade"] = True
 
-    return True, meta
-
-
-def put_atm_itm_base_capture_mirror_eligible(
-    candidate: Any,
-    snap: Any,
-    *,
-    state: Any = None,
-    readiness_reason: str = "",
-    settings: Any = None,
-) -> tuple[bool, dict[str, Any]]:
-    """PE mirror of #676 — ATM/ITM PUT at structural pad with launch confirm."""
-    from app.config import get_settings
-
-    settings = settings or get_settings()
-    meta: dict[str, Any] = {}
-    if not bool(getattr(settings, "call_atm_itm_base_capture_enabled", True)):
-        return False, meta
-    if str(getattr(candidate, "mode", "") or "") != "explosion":
-        return False, meta
-    if _side_value(getattr(candidate, "side", "")) != "PUT":
-        return False, meta
-    if snap is None:
-        return False, meta
-
-    money = _classify_moneyness(candidate, snap)
-    meta["moneyness"] = money
-    if money not in ("ATM", "ITM"):
-        return False, meta
-
-    alert = _alert_for_candidate(candidate)
-    evidence = dict(alert) if isinstance(alert, Mapping) else {}
-    if not symmetric_structural_base_evidence(evidence, settings=settings):
-        return False, meta
-
-    tier = str(evidence.get("tier") or "").upper()
-    meta["tier"] = tier
-    if tier not in ("ELITE", "EXPLODING", "BUILDING"):
-        return False, meta
-
-    sym = str(getattr(candidate, "symbol", "") or evidence.get("symbol") or "").upper()
-    # Same bar as the call: a cold print still inside the pad is the base.
-    # The 2% off-high floor only applies when that pad is not already proven.
-    on_base_pad = (
-        _atm_itm_base_moment(evidence)
-        and _call_pad_within_atm_itm_ceiling(evidence, snap, settings=settings)
-    )
-    if state is not None:
-        from app.engines.put_slide_ce_mirror import put_pe_base_context_armed
-
-        armed, reason, _ = put_pe_base_context_armed(
-            state,
-            snap,
-            sym,
-            evidence,
-            readiness_reason=readiness_reason,
-            settings=settings,
-        )
-        if not armed and not on_base_pad:
-            return False, {**meta, "reason": reason or "put_base_not_armed"}
-    elif not on_base_pad and max(
-        _number(evidence.get("offHighMovePct")),
-        _number(evidence.get("localBaseMovePct")),
-    ) < float(getattr(settings, "put_premium_local_base_min_off_high_pct", 2.0) or 2.0) - 1e-6:
-        return False, {**meta, "reason": "put_pad_not_confirmed"}
-
-    if not _call_atm_itm_launch_ok(
-        evidence, snap=snap, readiness_reason=readiness_reason, settings=settings,
-    ):
-        return False, {**meta, "reason": "launch_not_confirmed"}
-
-    return True, meta
-
-
-def base_capture_reentry_ml_waive_eligible(
-    *,
-    symbol: str,
-    side: Any,
-    strike: float,
-    snap: Any,
-    alert: Mapping[str, Any] | None,
-    state: Any = None,
-    settings: Any = None,
-) -> tuple[bool, str]:
-    """True when re-entry is a #676-style CE base or symmetric PE base (waive ML / fake-trap)."""
-    from types import SimpleNamespace
-
-    from app.config import get_settings
-    from app.models.schemas import Side
-
-    settings = settings or get_settings()
-    if not bool(getattr(settings, "reentry_ml_waive_on_base_capture_eligible_enabled", True)):
-        return False, "disabled"
-    if snap is None or not isinstance(alert, Mapping):
-        return False, "missing_context"
-
-    side_u = _side_value(side)
-    sym = str(symbol or alert.get("symbol") or "").upper()
-    stk = float(strike or alert.get("strike") or 0)
-    if not sym or stk <= 0 or side_u not in ("CALL", "PUT"):
-        return False, "invalid_candidate"
-
-    side_enum = Side.CALL if side_u == "CALL" else Side.PUT
-    cand = SimpleNamespace(
-        mode="explosion",
-        symbol=sym,
-        side=side_enum,
-        strike=stk,
-        alert=dict(alert),
-        pretrade_meta={},
-        snap=snap,
-    )
-    if side_u == "CALL":
-        ok, meta = call_atm_itm_base_capture_eligible(
-            cand, snap, state=state, settings=settings,
-        )
-        if ok:
-            return True, "call_atm_itm_base_capture_676"
-        return False, str(meta.get("reason") or "not_676_eligible")
-
-    ok, meta = put_atm_itm_base_capture_mirror_eligible(
-        cand, snap, state=state, settings=settings,
-    )
-    if ok:
-        return True, "put_atm_itm_base_capture_mirror"
-    return False, str(meta.get("reason") or "not_put_base_eligible")
-
-
-def call_alert_from_timing_context(
-    event: Any,
-    *,
-    ict: Any = None,
-    snap: Any = None,
-) -> dict[str, Any]:
-    """Merge explosion event + ICT into alert-shaped evidence for #676 checks."""
-    alert: dict[str, Any] = {}
-    if ict is not None:
-        if hasattr(ict, "to_dict"):
-            alert.update(ict.to_dict())
-        alert["localBaseMovePct"] = max(
-            _number(alert.get("baseRelativeMovePct")),
-            _number(getattr(ict, "base_relative_move_pct", 0)),
-        )
-        alert["ictBaseRelativeMovePct"] = alert["localBaseMovePct"]
-        alert["ictBaseArmed"] = bool(
-            getattr(ict, "base_armed", False) or alert.get("baseArmed")
-        )
-        alert["armedBaseLaunch"] = bool(
-            getattr(ict, "armed_base_launch", False) or alert.get("armedBaseLaunch")
-        )
-        alert["eliteBaseReady"] = bool(
-            getattr(ict, "elite_base_ready", False) or alert.get("eliteBaseReady")
-        )
-        alert["vRipReady"] = bool(
-            getattr(ict, "v_rip_ready", False) or alert.get("vRipReady")
-        )
-        alert["ictVRipReady"] = alert["vRipReady"]
-        alert["firstLift"] = bool(getattr(ict, "first_lift", False) or alert.get("firstLift"))
-        alert["flatThenVertical"] = bool(
-            getattr(ict, "flat_then_vertical", False) or alert.get("flatThenVertical")
-        )
-        alert["volumeAwaken"] = bool(
-            getattr(ict, "volume_awakening", False) or alert.get("volumeAwakening")
-        )
-        pat = str(getattr(ict, "pattern", "") or alert.get("pattern") or "")
-        if pat and not alert.get("momentType"):
-            alert["momentType"] = pat
-    if event is not None:
-        side_v = getattr(event, "side", "")
-        side = side_v.value if hasattr(side_v, "value") else str(side_v or "")
-        alert.setdefault("symbol", str(getattr(event, "symbol", "") or ""))
-        alert.setdefault("side", side)
-        alert.setdefault("strike", float(getattr(event, "strike", 0) or 0))
-        alert.setdefault("tier", str(getattr(event, "tier", "") or ""))
-        alert.setdefault("velocity3s", _number(getattr(event, "velocity_3s", 0)))
-        alert.setdefault("velocity9s", _number(getattr(event, "velocity_9s", 0)))
-        alert.setdefault(
-            "explosionScore",
-            _number(getattr(event, "explosion_score", 0) or getattr(event, "score", 0)),
-        )
-        alert.setdefault("premium", _number(getattr(event, "premium", 0)))
-    if snap is not None:
-        alert.setdefault("spot", _number(getattr(snap, "spot", 0)))
-        alert.setdefault("atmStrike", _number(getattr(snap, "atmStrike", 0)))
-    return alert
-
-
-def explosion_candidate_from_timing_context(
-    event: Any,
-    *,
-    ict: Any = None,
-    snap: Any = None,
-) -> Any:
-    """Minimal explosion candidate for policy checks from entry_timing inputs."""
-    from types import SimpleNamespace
-
-    alert = call_alert_from_timing_context(event, ict=ict, snap=snap)
-    side_v = alert.get("side") or getattr(event, "side", "")
-    return SimpleNamespace(
-        mode="explosion",
-        symbol=str(alert.get("symbol") or getattr(event, "symbol", "") or ""),
-        side=side_v,
-        strike=float(alert.get("strike") or getattr(event, "strike", 0) or 0),
-        premium=float(alert.get("premium") or getattr(event, "premium", 0) or 0),
-        tier=str(alert.get("tier") or getattr(event, "tier", "") or ""),
-        alert=alert,
-        pretrade_meta={},
-        snap=snap,
-    )
-
-
-def call_atm_itm_base_waives_structured_failed_launch(
-    event: Any,
-    *,
-    ict: Any = None,
-    snap: Any = None,
-    state: Any = None,
-    in_window: bool = True,
-    settings: Any = None,
-) -> tuple[bool, str]:
-    """True when #676 rank arm should not hard-block on structured FAILED_LAUNCH."""
-    from app.config import get_settings
-
-    settings = settings or get_settings()
-    if not bool(getattr(settings, "call_atm_itm_base_waives_failed_launch_enabled", True)):
-        return False, ""
-    if not in_window or event is None:
-        return False, ""
-    side_v = getattr(event, "side", "")
-    side = side_v.value if hasattr(side_v, "value") else str(side_v or "").upper()
-    if side != "CALL":
-        return False, ""
-    candidate = explosion_candidate_from_timing_context(event, ict=ict, snap=snap)
-    ok, _ = call_atm_itm_base_capture_eligible(
-        candidate, snap, state=state, settings=settings,
-    )
-    if ok:
-        return True, "eligible"
-    alert = call_alert_from_timing_context(event, ict=ict, snap=snap)
-    if call_atm_itm_near_base_pad(
-        alert,
-        snap,
-        side="CALL",
-        strike=float(getattr(candidate, "strike", 0) or 0),
-        settings=settings,
-    ):
-        return True, "near_base_pad"
-    return False, ""
-
-
-def call_atm_itm_base_rank_armed(
-    candidate: Any,
-    snap: Any,
-    *,
-    state: Any = None,
-    settings: Any = None,
-) -> tuple[bool, str]:
-    """#676 rank arm: +44 / −36 only when the call is fully capture-eligible.
-
-    A near-base pad that fails eligibility does not move the rank. The 23 Oct
-    v-rip already passes eligibility, so it still takes +44.
-    """
-    from app.config import get_settings
-
-    settings = settings or get_settings()
-    ok, _ = call_atm_itm_base_capture_eligible(
-        candidate, snap, state=state, settings=settings,
-    )
-    if ok:
-        return True, "eligible"
-    return False, ""
-
-
-def call_atm_itm_index_call_leg_active(
-    symbol: str,
-    snap: Any,
-    *,
-    state: Any = None,
-    settings: Any = None,
-) -> tuple[bool, dict[str, Any]]:
-    """Index-level #676 side: trough V + soft rally bar (pe_win mirror, not a new pts knob)."""
-    from app.config import get_settings
-    from app.models.schemas import Side, SymbolSnapshot
-
-    settings = settings or get_settings()
-    meta: dict[str, Any] = {}
-    if not bool(getattr(settings, "call_atm_itm_base_capture_enabled", True)):
-        return False, meta
-    if not isinstance(snap, SymbolSnapshot):
-        return False, meta
-    chart = snap.spotChart
-    if chart is None:
-        return False, meta
-    from app.engines.spot_direction import index_trough_momentum_turn
-
-    if not index_trough_momentum_turn(Side.CALL, chart, settings=settings):
-        return False, meta
-    stub = {
-        "momentType": "v_rip_session_low",
-        "side": "CALL",
-        "symbol": str(symbol or "").upper(),
-    }
-    if not _call_atm_itm_index_led(stub, snap, settings=settings):
-        return False, meta
-    from app.engines.pe_win_ce_mirror import _soft_index_rally_ok
-
-    ok, reason, rally_meta = _soft_index_rally_ok(symbol, snap, settings=settings)
-    if not ok:
-        return False, {**meta, **rally_meta}
-    meta["callAtmItm676IndexCallLeg"] = reason
-    meta.update(rally_meta)
-    return True, meta
-
-
-def call_atm_itm_index_put_leg_active(
-    symbol: str,
-    snap: Any,
-    *,
-    state: Any = None,
-    settings: Any = None,
-) -> tuple[bool, dict[str, Any]]:
-    """PE mirror of call_atm_itm_index_call_leg_active — slide off high + soft pts bar."""
-    from app.config import get_settings
-    from app.models.schemas import Side, SymbolSnapshot
-
-    settings = settings or get_settings()
-    meta: dict[str, Any] = {}
-    if not bool(getattr(settings, "call_atm_itm_base_capture_enabled", True)):
-        return False, meta
-    if not isinstance(snap, SymbolSnapshot):
-        return False, meta
-    chart = snap.spotChart
-    if chart is None:
-        return False, meta
-    from app.engines.spot_direction import index_trough_momentum_turn
-
-    if not index_trough_momentum_turn(Side.PUT, chart, settings=settings):
-        return False, meta
-    from app.engines.put_slide_ce_mirror import _soft_index_slide_ok
-
-    ok, reason, slide_meta = _soft_index_slide_ok(symbol, snap, settings=settings)
-    if not ok:
-        return False, {**meta, **slide_meta}
-    meta["callAtmItm676IndexPutLeg"] = reason
-    meta.update(slide_meta)
     return True, meta
 
 
@@ -1467,12 +819,13 @@ def call_atm_itm_base_capture_from_evidence(
         pretrade_meta={},
         snap=snap,
     )
-    armed, _ = call_atm_itm_base_rank_armed(
+    ok, _ = call_atm_itm_base_capture_eligible(
         cand,
         snap,
+        readiness_reason=readiness_reason,
         settings=settings,
     )
-    return armed
+    return ok
 
 
 def call_atm_itm_base_selector_rank_delta(
@@ -1492,10 +845,10 @@ def call_atm_itm_base_selector_rank_delta(
     snap = snapshots.get(sym) or getattr(candidate, "snap", None)
 
     if side == "CALL":
-        armed, _ = call_atm_itm_base_rank_armed(
+        ok, _ = call_atm_itm_base_capture_eligible(
             candidate, snap, state=state, settings=settings,
         )
-        if armed:
+        if ok:
             return float(
                 getattr(settings, "call_atm_itm_base_rank_bonus", 44.0) or 44.0
             )
@@ -1528,10 +881,10 @@ def symbols_with_call_atm_itm_base_ready(
         if _side_value(getattr(cand, "side", "")) != "CALL":
             continue
         snap = snapshots.get(sym) or getattr(cand, "snap", None)
-        armed, _ = call_atm_itm_base_rank_armed(
+        ok, _ = call_atm_itm_base_capture_eligible(
             cand, snap, state=state, settings=settings,
         )
-        if armed:
+        if ok:
             out.add(sym)
     return out
 
@@ -1955,21 +1308,10 @@ def best_trade_chop_deep_chase_blocked(
         and _side_value(getattr(candidate, "side", "")) == "CALL"
     ):
         snap = getattr(candidate, "snap", None)
-        armed, _ = call_atm_itm_base_rank_armed(
+        ok, _ = call_atm_itm_base_capture_eligible(
             candidate, snap, settings=settings,
         )
-        if armed:
-            return False, ""
-
-    if (
-        bool(getattr(settings, "call_atm_itm_base_waive_chop_deep_itm", True))
-        and _side_value(getattr(candidate, "side", "")) == "PUT"
-    ):
-        snap = getattr(candidate, "snap", None)
-        put_base, _ = put_atm_itm_base_capture_mirror_eligible(
-            candidate, snap, settings=settings,
-        )
-        if put_base:
+        if ok:
             return False, ""
 
     mode_u = str(day_mode or (elite_assessment or {}).get("dayMode") or "").upper()

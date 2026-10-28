@@ -105,40 +105,6 @@ def effective_best_pnl(trade: PaperTrade, pnl_pts: float = 0.0) -> float:
     return max(_local_observed_best(trade, pnl_pts), cycle_pts)
 
 
-def defer_modest_peak_keep_for_max_profit_stage_runner(
-    trade: PaperTrade,
-    best: float,
-    *,
-    settings: Settings | None = None,
-) -> bool:
-    """Hold off 75% peak-keep until stage 1 is near-complete on mega projected runners.
-
-    Entry stamps projectedMaxTp in the hundreds while stageSize divides the path (e.g.
-    703 / 75). Unified ladder and ftv_runner_pct_trail were booking ~half of a +20pt
-    peak at ~15% gain — before stage trail or pre-stage hold could ride the rip.
-    """
-    s = settings or get_settings()
-    ctx = trade.entryContext or {}
-    plan = ctx.get("exitPlan") or {}
-    if not bool(ctx.get("maxProfitCapture")):
-        return False
-    projected = _safe_float(ctx.get("projectedMaxTp") or plan.get("projectedMaxTp"))
-    stage = _safe_float(ctx.get("stageSize") or plan.get("stageSize"))
-    best = _safe_float(best)
-    if projected <= 0 or stage <= 0 or best <= 0:
-        return False
-    min_proj = _cfg_float(s, "stage_runner_defer_pct_keep_min_projected_tp", 400.0)
-    if projected + 1e-6 < min_proj:
-        return False
-    frac = _cfg_float(s, "moment_stage_near_complete_frac", 0.82)
-    if best + 1e-6 >= stage * max(0.0, min(1.0, frac)):
-        return False
-    min_best = _cfg_float(s, "stage_runner_defer_pct_keep_min_best_points", 28.0)
-    if best + 1e-6 >= min_best:
-        return False
-    return True
-
-
 def moment_stage_near_complete(
     trade: PaperTrade,
     best: float,
@@ -387,7 +353,7 @@ def build_moment_stage_plan(
         return None
 
     stage_size = compute_stage_size(projected, s)
-    out: dict[str, Any] = {
+    return {
         "momentStageLadder": True,
         "projectedMaxTp": projected,
         "stageSize": stage_size,
@@ -397,20 +363,6 @@ def build_moment_stage_plan(
         ),
         "stageLateProgress": round(_cfg_float(s, "moment_stage_late_progress", 0.70), 3),
     }
-    if bool(getattr(s, "tp_rung_ladder_exit_enabled", True)) and projected + 1e-6 >= _cfg_float(
-        s, "tp_rung_ladder_min_projected_tp", 400.0
-    ):
-        from app.engines.tp_rung_ladder import build_tp_rung_points
-
-        rungs = build_tp_rung_points(
-            projected_max_tp=projected,
-            stage_size=stage_size,
-            exit_plan=exit_plan,
-            settings=s,
-        )
-        out["tpRungLadder"] = True
-        out["tpRungsPts"] = rungs
-    return out
 
 
 def _ladder_fields(trade: PaperTrade) -> dict[str, Any]:
@@ -673,8 +625,6 @@ def ftv_runner_pct_floor(
         return None
     entry = _safe_float(getattr(trade, "entryPremium", 0))
     best = _safe_float(best)
-    if defer_modest_peak_keep_for_max_profit_stage_runner(trade, best, settings=s):
-        return None
     if entry <= 0 or best <= 0:
         return None
     arm_pct = _cfg_float(s, "ftv_runner_pct_trail_arm_pct", 25.0)
@@ -732,17 +682,6 @@ def profit_ladder_floor(
     be_floor = entry * _cfg_float(s, "unified_profit_ladder_breakeven_lock_pct", 2.0) / 100.0
     peak_ltp = max(_safe_float(getattr(trade, "maxLtp", 0)), entry + best)
     arm_ratio = max(1.01, _cfg_float(s, "unified_profit_ladder_multiple_arm_ratio", 2.0))
-    gain_arm_pct = _cfg_float(s, "unified_profit_ladder_keep_arm_pct", 15.0)
-    ctx = trade.entryContext or {}
-    if bool(ctx.get("maxProfitCapture")) and trade_uses_moment_stage_ladder(trade):
-        plan = ctx.get("exitPlan") or {}
-        projected = _safe_float(ctx.get("projectedMaxTp") or plan.get("projectedMaxTp"))
-        min_proj = _cfg_float(s, "stage_runner_defer_pct_keep_min_projected_tp", 400.0)
-        if projected + 1e-6 >= min_proj:
-            gain_arm_pct = min(
-                gain_arm_pct,
-                _cfg_float(s, "stage_runner_unified_ladder_arm_gain_pct", 14.0),
-            )
 
     if peak_ltp + 1e-6 >= arm_ratio * entry:
         # Highest integer multiple the peak has crossed. Lock that print and
@@ -753,7 +692,7 @@ def profit_ladder_floor(
         excess = max(0.0, peak_ltp - anchor)
         floor_premium = anchor + excess * keep
         floor_pts, layer = floor_premium - entry, "multiple"
-    elif gain_pct + 1e-6 >= gain_arm_pct:
+    elif gain_pct >= _cfg_float(s, "unified_profit_ladder_keep_arm_pct", 15.0):
         floor_pts, layer = max(best * keep, be_floor), "peak_keep"
     elif (
         getattr(s, "unified_profit_ladder_breakeven_enabled", False) is True

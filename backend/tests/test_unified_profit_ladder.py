@@ -106,45 +106,6 @@ def test_flag_off_leaves_exit_to_legacy_trail_ce_pe(side):
 
 
 @pytest.mark.parametrize("side", SIDES)
-def test_oct21_mega_projected_runner_hole_not_ftv_peak_keep_at_plus_10_ce_pe(side):
-    """Oct 21 22700: FTV pct trail stays off under +28pt. A falling hole is sold."""
-    from app.engines.moment_stage_trail import ftv_runner_pct_floor
-
-    s = _settings()
-    trade = _trade(
-        side,
-        140.02,
-        21.48,
-        strike=22700.0,
-        seconds=549,
-        ctx={
-            "maxProfitCapture": True,
-            "vBaseFtvRunner": True,
-            "momentStageLadder": True,
-            "projectedMaxTp": 703.8,
-            "stageSize": 75.0,
-            "explosionTier": "ELITE",
-        },
-    )
-    floor, layer = profit_ladder_floor(trade, 21.48, settings=s)
-    assert layer == "peak_keep"
-    assert ftv_runner_pct_floor(trade, 21.48, settings=s) is None
-    flat_trade = _trade(
-        side,
-        140.02,
-        21.48,
-        strike=22700.0,
-        seconds=549,
-        ctx=dict(trade.entryContext or {}),
-    )
-    with _use(s):
-        falling, _ = evaluate_explosion_exit(trade, 150.38, "ELITE", 65, live_velocity_3s=-0.5)
-        flat, _ = evaluate_explosion_exit(flat_trade, 150.38, "ELITE", 65, live_velocity_3s=0.0)
-    assert falling == "explosion_profit_ladder_peak_keep"
-    assert flat is None or not str(flat).startswith("explosion_profit_ladder")
-
-
-@pytest.mark.parametrize("side", SIDES)
 def test_oct12_cheap_premium_books_peak_keep_ce_pe(side):
     """22300 PE @ ₹58.5 peaked +10.2pt (+17%) then rode back to +₹2k."""
     s = _settings()
@@ -394,11 +355,12 @@ def test_oct16_23150_shape_books_seventy_five_pct_ce_pe(side):
 
 
 @pytest.mark.parametrize("side", SIDES)
-def test_oct21_22700_falling_hole_sells_flat_hole_holds_ce_pe(side):
-    """A falling print under the 75% line sells. A flat hole still holds.
+def test_oct21_22700_hole_holds_until_price_returns_ce_pe(side):
+    """Oct 21 NIFTY 22700 PE: floor ~156, sold 150.38. That hole is a hold.
 
-    Oct 21 SENSEX 73400 PE was held through that fall and stopped out at a loss.
-    A downtick on the line still sells. A rising tick on the line holds.
+    A downtick still within 2 points of the 75% line sells. A rising tick
+    on the line holds. The same hole must not be sold by the FTV peak-keep
+    trail on the next check.
     """
     s = _settings()
     entry = 140.02
@@ -426,11 +388,8 @@ def test_oct21_22700_falling_hole_sells_flat_hole_holds_ce_pe(side):
     trade.lots = 19
     near_pts = floor - 0.13
     with _use(s):
-        falling = unified_profit_ladder_exit_reason(
+        hole = unified_profit_ladder_exit_reason(
             trade, best=best, pnl_pts=10.36, hold_seconds=549, live_velocity_3s=-0.4,
-        )
-        flat = unified_profit_ladder_exit_reason(
-            trade, best=best, pnl_pts=10.36, hold_seconds=549, live_velocity_3s=0.0,
         )
         near = unified_profit_ladder_exit_reason(
             trade, best=best, pnl_pts=near_pts, hold_seconds=549, live_velocity_3s=-0.4,
@@ -442,8 +401,7 @@ def test_oct21_22700_falling_hole_sells_flat_hole_holds_ce_pe(side):
             trade, entry + 10.36, "ELITE", 65, live_velocity_3s=-0.4,
         )
     assert floor == pytest.approx(16.11)
-    assert falling == "explosion_profit_ladder_peak_keep"
-    assert flat is None
+    assert hole is None
     assert near == "explosion_profit_ladder_peak_keep"
     assert rising is None
-    assert reason == "explosion_profit_ladder_peak_keep"
+    assert reason is None

@@ -516,11 +516,7 @@ def test_severe_pause_blocks_nifty_but_allows_sensex_deep_itm(
 def test_expiry_daily_loss_stop_bypass_active(_sess, mock_settings, _pnl, _top):
     from app.engines.bad_day_routing import expiry_daily_loss_stop_bypass_active
 
-    cfg = _settings(
-        daily_loss_stop_inr=20_000.0,
-        daily_loss_stop_from_capital=False,
-        expiry_daily_loss_stop_bypass_enabled=True,
-    )
+    cfg = _settings(daily_loss_stop_inr=20_000.0, expiry_daily_loss_stop_bypass_enabled=True)
     mock_settings.return_value = cfg
     snaps = {"SENSEX": _snap("SENSEX")}
     assert expiry_daily_loss_stop_bypass_active(AutoTraderState(), snaps) is True
@@ -534,7 +530,7 @@ def test_daily_loss_gate_lifts_for_expiry_top_bypass(_bypass, mock_settings, _pn
     from app.engines.capital_allocator import update_daily_profit_gate
     from app.models.schemas import PaperTrade, StrategyType
 
-    cfg = _settings(daily_loss_stop_inr=20_000.0, daily_loss_stop_from_capital=False)
+    cfg = _settings(daily_loss_stop_inr=20_000.0)
     cfg.daily_profit_target_inr = 44_000
     cfg.daily_profit_trail_inr = 5_000
     cfg.daily_profit_stage_locks_enabled = True

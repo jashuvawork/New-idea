@@ -20,9 +20,9 @@ class LunchChopFade(BaseStrategy):
 
         # Fade move outside VAH/VAL back into value
         side = None
-        if profile.vah > 0 and spot > profile.vah and orderflow.volumeAcceleration < 50:
+        if spot > profile.vah and orderflow.volumeAcceleration < 50:
             side = Side.PUT  # fade overextension
-        elif profile.val > 0 and spot < profile.val and orderflow.volumeAcceleration < 50:
+        elif spot < profile.val and orderflow.volumeAcceleration < 50:
             side = Side.CALL
 
         if not side:

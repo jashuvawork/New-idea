@@ -46,9 +46,8 @@ async def live_order_fill(client: UpstoxClient, order_id: str) -> dict[str, Any]
             "status": status,
             "averagePrice": average if average > 0 else 0.0,
             "filledQuantity": filled,
-            "statusMessage": str(order.get("status_message") or order.get("statusMessage") or ""),
         }
-    return {"status": "", "averagePrice": 0.0, "filledQuantity": 0.0, "statusMessage": ""}
+    return {"status": "", "averagePrice": 0.0, "filledQuantity": 0.0}
 
 
 def live_order_fill_complete(fill: dict[str, Any]) -> bool:
@@ -59,59 +58,6 @@ def live_order_fill_complete(fill: dict[str, Any]) -> bool:
 
 def live_order_fill_rejected(fill: dict[str, Any]) -> bool:
     return str(fill.get("status") or "").lower() in _REJECTED_ORDER_STATUSES
-
-
-def lots_fitting_broker_margin(
-    lots: int,
-    lot_size: int,
-    premium: float,
-    available_margin: float,
-    *,
-    buffer_inr: float = 500.0,
-    price_cushion: float = 1.03,
-) -> int:
-    """Largest lot count whose protected cost fits the broker's free margin.
-
-    Upstox prices a market option order as a limit near the live print, which
-    can sit above the signal. Size to that print and leave a rupee buffer so a
-    few hundred rupees of shortfall does not reject the order.
-    """
-    try:
-        lots_i = int(lots)
-        mult = int(lot_size)
-        px = float(premium)
-        cash = float(available_margin)
-        cushion = float(price_cushion)
-        buffer = float(buffer_inr)
-    except (TypeError, ValueError):
-        return 0
-    if lots_i <= 0 or mult <= 0 or px <= 0 or cash <= 0:
-        return 0
-    guard = px * max(1.0, cushion)
-    room = cash - max(0.0, buffer)
-    if room <= 0 or guard <= 0:
-        return 0
-    affordable = int(room // (guard * mult))
-    return max(0, min(lots_i, affordable))
-
-
-def broker_position_quantity(rows: Any, instrument_key: str) -> float:
-    """Net quantity the broker still holds for this contract. Unknown rows count as held."""
-    wanted = str(instrument_key or "")
-    if not wanted or not isinstance(rows, list):
-        return 0.0
-    qty = 0.0
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        key = str(row.get("instrument_token") or row.get("instrument_key") or "")
-        if key != wanted:
-            continue
-        try:
-            qty += float(row.get("quantity") or 0)
-        except (TypeError, ValueError):
-            return 1.0
-    return qty
 
 
 async def find_existing_exit_order(

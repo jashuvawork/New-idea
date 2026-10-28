@@ -1,4 +1,4 @@
-"""Never-green hard stop at 300s. Post-win velocity is off, as on #676."""
+"""#676 live guards: never-green hard stop at 300s, reentry velocity after a win."""
 
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -103,22 +103,7 @@ def _winner(side: Side) -> PaperTrade:
     )
 
 
-def test_default_matches_676_and_does_not_require_velocity_after_a_win():
-    assert Settings().win_reentry_requires_velocity_enabled is False
-    state = AutoTraderState(closedPaperTrades=[_winner(Side.PUT)])
-    with patch("app.engines.session_mode_feedback.get_settings", return_value=Settings()):
-        blocked, reason = win_reentry_velocity_blocked(
-            state,
-            symbol="SENSEX",
-            side=Side.PUT,
-            strike=71500.0,
-            velocity_3s=0.2,
-        )
-    assert blocked is False
-    assert reason == ""
-
-
-def test_reentry_after_win_requires_velocity_on_both_sides_when_enabled():
+def test_reentry_after_win_requires_velocity_on_both_sides():
     settings = _settings()
     for side in (Side.PUT, Side.CALL):
         state = AutoTraderState(closedPaperTrades=[_winner(side)])

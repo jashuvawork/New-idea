@@ -38,7 +38,6 @@ def _premium_chart_dict(premium: Optional[PremiumChart]) -> dict[str, Any]:
         "lastPremium": premium.lastPremium,
         "momentum3Pct": premium.momentum3Pct,
         "momentum5Pct": premium.momentum5Pct,
-        "offLowPct": premium.offLowPct,
         "volumeSurge": premium.volumeSurge,
         "vwap": premium.vwap,
         "aboveVwap": premium.aboveVwap,
@@ -87,22 +86,7 @@ async def fetch_live_trade_charts(
     index_key = INDEX_KEYS.get(sym)
     candles_5m, index_candles = await fetch_index_chart_candles(client, sym, force_refresh=force)
     if not index_candles:
-        warmup = int(
-            getattr(settings, "spot_chart_indicator_warmup_1m_bars", 400) or 400
-        )
-        bar_count = max(
-            int(getattr(settings, "spot_chart_1m_bars", 300) or 300),
-            warmup,
-            count,
-        )
-        from app.engines.indicator_series import indicator_seed_lookback_days
-
-        index_candles = await client.get_candles(
-            sym,
-            count=bar_count,
-            force_refresh=force,
-            lookback_days=indicator_seed_lookback_days(settings),
-        )
+        index_candles = await client.get_candles(sym, count=count, force_refresh=force)
     profile = _build_profile(index_candles, spot)
     index_chart = build_spot_chart(candles_5m, spot, profile, indicator_candles_1m=index_candles)
     breadth_bias = snap.breadth.bias if snap.breadth else "NEUTRAL"
@@ -120,15 +104,7 @@ async def fetch_live_trade_charts(
     premium_mtf_reads = None
     if settings.execution_mtf_enabled and index_key:
         try:
-            from app.engines.indicator_series import indicator_seed_lookback_days
-
-            index_mtf_reads = await fetch_mtf_charts(
-                client,
-                index_key,
-                spot,
-                force_refresh=force,
-                lookback_days=indicator_seed_lookback_days(settings),
-            )
+            index_mtf_reads = await fetch_mtf_charts(client, index_key, spot, force_refresh=force)
             index_mtf = mtf_summary(index_mtf_reads, side)
         except Exception as exc:
             logger.warning("Index MTF fetch failed for %s: %s", sym, exc)
@@ -185,13 +161,6 @@ async def fetch_live_trade_charts(
         "spot": round(spot, 2),
         "indexChart": chart_summary_dict(index_chart),
         "indexChartFull": index_chart.model_dump(),
-        "indicatorReadiness": {
-            "indicatorBarCount": index_chart.indicatorBarCount,
-            "rsiReady": index_chart.rsiReady,
-            "macdReady": index_chart.macdReady,
-            "ema21Ready": index_chart.ema21Ready,
-            "indicatorsWarm": index_chart.indicatorsWarm,
-        },
         "quoteContext": quote_ctx,
         "premiumChart": _premium_chart_dict(premium_chart),
         "indexMtf": index_mtf,
@@ -201,8 +170,6 @@ async def fetch_live_trade_charts(
         "recommendedSide": chart_summary_dict(index_chart).get("recommendedSide"),
         "_indexMtfReads": index_mtf_reads,
         "_premiumMtfReads": premium_mtf_reads,
-        "_indexCandles1m": index_candles,
-        "_indexCandles5m": candles_5m,
     }
 
 
@@ -324,8 +291,6 @@ async def monitor_trade_chart_before_execution(
     settings = get_settings()
     if not settings.execution_chart_gate_enabled:
         return True, "ok", {"enabled": False}
-
-    decision_now = datetime.now(IST)
 
     from app.engines.expiry_day_guards import expiry_pm_itm_chart_bypass_allowed
     from app.engines.aligned_explosion_bypass import expiry_chart_bypass_for_event
@@ -495,8 +460,14 @@ async def monitor_trade_chart_before_execution(
         )
     except Exception as exc:
         logger.warning("Execution chart fetch failed for %s — using snapshot: %s", symbol, exc)
-        from app.engines.index_candle_rollover import open_caution_window_active
-
+        blocked, reason = chart_blocks_side(
+            side, snap.spotChart, trade_score=trade_score,
+            breadth_aligned_bypass=breadth_bypass,
+            premium_led_bypass=structure_chart_bypass,
+            expiry_explosion_bypass=expiry_chart_bypass,
+            strict_first_lift_bypass=strict_chart_bypass,
+            index_trough_bypass=index_trough_bypass,
+        )
         fallback = {
             "enabled": True,
             "source": "snapshot_fallback",
@@ -506,79 +477,11 @@ async def monitor_trade_chart_before_execution(
             "firstLiftBypass": first_lift_bypass,
             "padLaneChartBypass": pad_lane_chart_bypass,
         }
-        in_open = open_caution_window_active(decision_now, settings)
-        if in_open:
-            fallback["openCautionWindow"] = True
-            fallback["passed"] = False
-            fallback["blockReason"] = "exec_live_chart_required_open_window"
-            return False, "exec_live_chart_required_open_window", fallback
-
-        from types import SimpleNamespace
-
-        from app.engines.best_trade_policy import call_atm_itm_base_capture_eligible
-
-        lift_lane = bool(
-            strict_first_lift_bypass
-            or pad_lane_chart_bypass
-            or premium_fade_pad_lane
-        )
-        if not lift_lane:
-            cand_probe = SimpleNamespace(
-                mode=mode or "explosion",
-                symbol=symbol,
-                side=side,
-                strike=strike,
-                alert=alert if isinstance(alert, dict) else {},
-                pretrade_meta={},
-                snap=snap,
-            )
-            atm_ok, _ = call_atm_itm_base_capture_eligible(
-                cand_probe, snap, state=state, settings=settings,
-            )
-            lift_lane = atm_ok
-
-        if lift_lane:
-            blocked, chart_reason = chart_blocks_side(
-                side, snap.spotChart, trade_score=trade_score,
-                breadth_aligned_bypass=breadth_bypass,
-                premium_led_bypass=structure_chart_bypass,
-                expiry_explosion_bypass=expiry_chart_bypass,
-                strict_first_lift_bypass=strict_chart_bypass,
-                index_trough_bypass=index_trough_bypass,
-            )
-            if blocked:
-                return False, f"exec_{chart_reason}", fallback
-            fallback["passed"] = True
-            fallback["liftCaptureSnapshotFallback"] = True
-            return True, "ok", fallback
-
-        fallback["openCautionWindow"] = False
-        fallback["passed"] = False
-        fallback["blockReason"] = "exec_live_chart_fetch_failed"
-        return False, "exec_live_chart_fetch_failed", fallback
+        if blocked:
+            return False, f"exec_{reason}", fallback
+        return True, "ok", fallback
 
     index_chart = SpotChart(**meta["indexChartFull"])
-    from app.engines.index_candle_rollover import index_candle_rollover_blocked
-
-    # 09:15–09:45 cash-candle side. Intentionally before first-lift and premium bypasses.
-    candles_1m = meta.pop("_indexCandles1m", None)
-    candles_5m = meta.pop("_indexCandles5m", None)
-    roll_blocked, roll_reason, roll_meta = index_candle_rollover_blocked(
-        side,
-        candles_1m,
-        candles_5m,
-        spot=float(meta.get("spot") or getattr(snap, "spot", 0) or 0),
-        now=decision_now,
-        settings=settings,
-    )
-    if roll_blocked:
-        meta.pop("_indexMtfReads", None)
-        meta.pop("_premiumMtfReads", None)
-        meta["indexCandleRollover"] = roll_meta
-        meta["enabled"] = True
-        meta["passed"] = False
-        meta["blockReason"] = f"exec_{roll_reason}"
-        return False, f"exec_{roll_reason}", meta
     if not index_trough_bypass:
         index_trough_bypass = index_trough_momentum_turn(side, index_chart)
     premium_data = meta.get("premiumChart") or {}

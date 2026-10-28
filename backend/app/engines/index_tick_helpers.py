@@ -41,115 +41,16 @@ _pending_wake_symbols: set[str] = set()
 _observer_registered: bool = False
 
 
-_CASH_OPEN_MINUTES = 9 * 60 + 15
-
-
 def index_session_extremes(symbol: str) -> dict[str, Any]:
     """Live intraday index session open/high/low/last for one symbol (tick-maintained)."""
     return dict(_session_extremes.get(str(symbol or "").upper()) or {})
 
 
-def record_index_session_extreme(
-    symbol: str,
-    ltp: float,
-    *,
-    now: Optional[Any] = None,
-) -> None:
-    """Track today's cash-session open from the first tick at or after 09:15 IST.
-
-    A pre-open print, or the first tick after a restart, is not the cash open.
-    Leaving that print in place made 09:15–09:45 confirmation measure the move
-    from the wrong price.
-    """
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    sym = str(symbol or "").upper()
-    if not sym:
-        return
-    price = float(ltp or 0)
-    if price <= 0:
-        return
-    current = now or datetime.now(ZoneInfo("Asia/Kolkata"))
-    if getattr(current, "tzinfo", None) is not None:
-        current = current.astimezone(ZoneInfo("Asia/Kolkata"))
-    minutes = current.hour * 60 + current.minute + current.second / 60.0
-    if minutes < _CASH_OPEN_MINUTES:
-        return
-    today = current.date()
-    ext = _session_extremes.get(sym)
-    if ext is None or ext.get("date") != today or not ext.get("fromCashOpen"):
-        _session_extremes[sym] = {
-            "date": today,
-            "open": price,
-            "hi": price,
-            "lo": price,
-            "last": price,
-            "fromCashOpen": True,
-        }
-        return
-    if price > float(ext["hi"]):
-        ext["hi"] = price
-    if price < float(ext["lo"]):
-        ext["lo"] = price
-    ext["last"] = price
-
-
-def broker_day_ohlc(snap: Any) -> tuple[float, float, float]:
-    """Official day open/high/low stamped from the index quote. Not the SMC range."""
-    if snap is None:
-        return 0.0, 0.0, 0.0
-    try:
-        ca = getattr(snap, "chartAnalysis", None)
-        inst = getattr(ca, "institutional", None) if ca is not None else None
-        if isinstance(inst, dict):
-            return (
-                float(inst.get("dayOpen") or 0),
-                float(inst.get("dayHigh") or 0),
-                float(inst.get("dayLow") or 0),
-            )
-    except Exception:
-        pass
-    return 0.0, 0.0, 0.0
-
-
-def resolve_index_session(symbol: str, snap: Any = None) -> dict[str, float]:
-    """Cash-session open/high/low/last for side confirmation.
-
-    The broker day open wins over the tick tape. A restart inside 09:15–09:45
-    otherwise treats the first post-restart tick as the open.
-    """
-    ext = index_session_extremes(symbol)
-    session_open = float(ext.get("open") or 0)
-    hi = float(ext.get("hi") or 0)
-    lo = float(ext.get("lo") or 0)
-    last = float(ext.get("last") or 0)
-    day_open, day_high, day_low = broker_day_ohlc(snap)
-    if day_open > 0:
-        session_open = day_open
-    if day_high > 0:
-        hi = max(hi, day_high) if hi > 0 else day_high
-    if day_low > 0:
-        lo = min(lo, day_low) if lo > 0 else day_low
-    spot = float(getattr(snap, "spot", 0) or 0) or last
-    if spot > 0:
-        hi = max(hi, spot) if hi > 0 else spot
-        lo = min(lo, spot) if lo > 0 else spot
-    return {
-        "open": session_open,
-        "hi": hi,
-        "lo": lo,
-        "last": spot if spot > 0 else last,
-    }
-
-
 def _snap_session_extremes(snap: Any) -> tuple[float, float]:
-    """Broker dayHigh/dayLow. A missing quote range stays missing.
+    """Broker candle-derived session high/low from the snapshot (available at open/restart).
 
-    SMC sessionHigh/sessionLow and the market-profile opening range are the
-    chart window. At the open that window is yesterday, so they are not a
-    stand-in for the cash-session high and low. The tick tape is the other
-    source, via resolve_index_session.
+    Read from chartAnalysis.institutional (SMC sessionHigh/sessionLow), falling back to the
+    MarketProfile opening-range extremes. Returns (0.0, 0.0) when unavailable.
     """
     if snap is None:
         return 0.0, 0.0
@@ -157,10 +58,18 @@ def _snap_session_extremes(snap: Any) -> tuple[float, float]:
         ca = getattr(snap, "chartAnalysis", None)
         inst = getattr(ca, "institutional", None) if ca is not None else None
         if isinstance(inst, dict):
-            day_hi = float(inst.get("dayHigh") or 0)
-            day_lo = float(inst.get("dayLow") or 0)
-            if day_hi > 0 and day_lo > 0:
-                return day_hi, day_lo
+            hi = float(inst.get("sessionHigh") or 0)
+            lo = float(inst.get("sessionLow") or 0)
+            if hi > 0 or lo > 0:
+                return hi, lo
+    except Exception:
+        pass
+    try:
+        prof = getattr(snap, "marketProfile", None)
+        if prof is not None:
+            hi = float(getattr(prof, "openingRangeHigh", 0) or 0)
+            lo = float(getattr(prof, "openingRangeLow", 0) or 0)
+            return hi, lo
     except Exception:
         pass
     return 0.0, 0.0
@@ -334,10 +243,24 @@ def _on_index_tick(instrument_key: str, ltp: float) -> None:
         cutoff = time.monotonic() - hist_secs
         while lh and lh[0][0] < cutoff:
             lh.popleft()
-    # Cash-session open/high/low. Pre-open ticks are ignored so they cannot
-    # become today's open for the 09:15–09:45 side check.
+    # Maintain intraday session high/low from the live tape (reset on a new IST day).
     try:
-        record_index_session_extreme(symbol, float(ltp))
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+        ext = _session_extremes.get(symbol)
+        if ext is None or ext.get("date") != today:
+            _session_extremes[symbol] = {
+                "date": today, "open": float(ltp),
+                "hi": float(ltp), "lo": float(ltp), "last": float(ltp),
+            }
+        else:
+            if float(ltp) > ext["hi"]:
+                ext["hi"] = float(ltp)
+            if float(ltp) < ext["lo"]:
+                ext["lo"] = float(ltp)
+            ext["last"] = float(ltp)
     except Exception:
         pass
     try:
@@ -371,7 +294,6 @@ def _on_index_tick(instrument_key: str, ltp: float) -> None:
         "v3": float(v3),
         "v9": float(v9 or 0.0),
         "ltp": float(ltp),
-        "mono": time.monotonic(),
     }
     if bool(getattr(settings, "index_spike_history_enabled", True)):
         hist = _spike_history[symbol]
@@ -438,7 +360,6 @@ def evaluate_index_tick_helpers(
         return out
 
     # Live index tape velocity (actual spot move, not strike premium).
-    v3 = None
     key = INDEX_KEYS.get(symbol)
     if key:
         try:
@@ -462,14 +383,10 @@ def evaluate_index_tick_helpers(
                 out.velocity_9s = float(v9)
         except Exception:
             pass
-    # A missing 3s read can reuse a spike from the last few seconds. A flat
-    # read (0) is a real print and must not be replaced by an older spike.
-    if v3 is None:
+    # Fall back to last spike stamp if live tape is quiet but we just saw a spike.
+    if out.velocity_3s == 0.0:
         spike = last_index_spike(symbol)
-        age_limit = 5.0
-        mono = spike.get("mono")
-        fresh = mono is not None and (time.monotonic() - float(mono)) <= age_limit
-        if fresh:
+        if spike:
             out.velocity_3s = float(spike.get("v3") or 0)
             out.velocity_9s = float(spike.get("v9") or out.velocity_9s)
 
@@ -638,15 +555,16 @@ def index_trend_breakout(
     side_u = _side_str(side)
     if side_u not in ("CALL", "PUT"):
         return out
-    resolved = resolve_index_session(sym, snap)
-    hi = float(resolved.get("hi") or 0)
-    lo = float(resolved.get("lo") or 0)
-    spot = float(getattr(snap, "spot", 0) or 0) or float(resolved.get("last") or 0)
-    # Widen from the snapshot only with the broker day range. A chart
-    # sessionHigh from the multi-day window is not today's high.
+    ext = _session_extremes.get(sym) or {}
+    hi = float(ext.get("hi") or 0)
+    lo = float(ext.get("lo") or 0)
+    spot = float(getattr(snap, "spot", 0) or 0) or float(ext.get("last") or 0)
+    # Seed / widen from the broker candle-derived session high/low so the override is
+    # accurate IMMEDIATELY at open and after any restart (the tick tracker starts cold and
+    # would otherwise need to rebuild the full-session extremes from the first tick).
     snap_hi, snap_lo = _snap_session_extremes(snap)
     if snap_hi > 0:
-        hi = max(hi, snap_hi) if hi > 0 else snap_hi
+        hi = max(hi, snap_hi)
     if snap_lo > 0:
         lo = min(lo, snap_lo) if lo > 0 else snap_lo
     if spot <= 0 or hi <= 0 or lo <= 0:

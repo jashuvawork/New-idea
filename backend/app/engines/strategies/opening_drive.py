@@ -20,9 +20,9 @@ class OpeningDriveScalp(BaseStrategy):
 
         # Break above ORH → CALL, below ORL → PUT
         side = None
-        if profile.openingRangeHigh > 0 and spot > profile.openingRangeHigh and breadth.bias == "BULLISH":
+        if spot > profile.openingRangeHigh and breadth.bias == "BULLISH":
             side = Side.CALL
-        elif profile.openingRangeLow > 0 and spot < profile.openingRangeLow and breadth.bias == "BEARISH":
+        elif spot < profile.openingRangeLow and breadth.bias == "BEARISH":
             side = Side.PUT
         if not side:
             return None

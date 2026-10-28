@@ -84,8 +84,6 @@ class Settings(BaseSettings):
     chop_live_guards_enabled: bool = True
     chop_live_block_immature_local_base: bool = True
     chop_live_block_premium_5m_fade: bool = True
-    # #676 / pad-lane: shallow 5m premium dip at armed base is not a chop fade block.
-    chop_live_near_base_fade_waive_enabled: bool = True
     chop_live_premium_5m_fade_min_mom_pct: float = -0.12
     chop_live_second_leg_block_enabled: bool = True
     chop_live_second_leg_cooldown_seconds: int = 900
@@ -138,9 +136,9 @@ class Settings(BaseSettings):
     # Trap-stamped chop+elite exits: modest MFE then bleed (Sep08 +1.45pt → adaptive SL).
     chop_live_trap_early_fail_max_best_points: float = 2.0
     chop_live_trap_early_fail_max_hold_seconds: int = 600
-    # Live explosion entries must be grade A or S. Score, chart, and pad stay shared.
-    live_best_trades_only_enabled: bool = True
-    live_best_trades_min_grade: str = "A"
+    # Ignored. October 1 paper never applied the grade-S live bar.
+    live_best_trades_only_enabled: bool = False
+    live_best_trades_min_grade: str = "S"
     live_best_trades_min_explosion_score: float = 200.0
     live_best_trades_tiers_csv: str = "ELITE,EXPLODING"
     live_best_trades_require_first_lift: bool = True
@@ -400,9 +398,6 @@ class Settings(BaseSettings):
     call_atm_itm_base_put_rank_penalty: float = 36.0
     call_atm_itm_base_elite_score_floor: float = 76.0
     call_atm_itm_base_waive_chop_deep_itm: bool = True
-    # PR #676: armed ATM/ITM CE base may enter on negative v3 (not FAILED_LAUNCH block).
-    call_atm_itm_base_waives_failed_launch_enabled: bool = True
-    call_atm_itm_base_failed_launch_full_size_when_eligible: bool = True
     # PUT slide / CE-win PE mirror — symmetric Sep 9–17 SENSEX 73900 PE OTM capture.
     put_slide_unlock_enabled: bool = True
     put_slide_unlock_waive_expiry_otm: bool = False
@@ -495,9 +490,10 @@ class Settings(BaseSettings):
     sep917_live_checklist_enforcement_enabled: bool = False
     # Persist radar archive + premium tape on WS overlay (9:15+), not only on entry scan.
     radar_record_on_ws_overlay_enabled: bool = True
-    # On. Deep ITM chop/trap chase is refused. The #676 ATM/ITM base
-    # (call pad, and the put mirror) is the waiver.
-    best_trade_block_chop_deep_chase_enabled: bool = True
+    # Off. Oct 19 deep ITM selections (23050+ PE, SENSEX calls) died here
+    # after the selector had already chosen them. Cheap near-base preference
+    # stays a rank signal, not an order refuse.
+    best_trade_block_chop_deep_chase_enabled: bool = False
     best_trade_deep_chase_min_premium_inr: float = 120.0
     best_trade_deep_chase_max_local_pct: float = 18.0
     best_trade_cheap_entry_max_premium_inr: float = 85.0
@@ -807,8 +803,6 @@ class Settings(BaseSettings):
     # Paper should mirror live execution (broker flow + slippage) before going live
     paper_live_parity_enabled: bool = True
     paper_simulate_broker_orders: bool = True  # resolve instrument + paper order ids in parity mode
-    # When true, paper-live-parity runs the same entry gates as live (e.g. live_best_trades grade bar).
-    paper_mirror_live_entry_gates: bool = True
 
     # Paper slippage — realistic fills for milestone / PnL (ignored on live broker fills)
     paper_slippage_enabled: bool = True
@@ -856,14 +850,10 @@ class Settings(BaseSettings):
     # low at 10:47 as the down-move exhausted, V-reversed, stopped). Near-base entries are
     # exempt by construction (current sits at the window low, not its peak), so this never
     # blocks a genuine base entry — only the late/mid-rip chase.
-    # The live print of a new high is the lift. The top has to have been traded for
-    # min_peak_age_seconds before buying it counts as exhaustion. A one-second-old
-    # high was being blocked as a chase the moment the next sample arrived.
     explosion_post_peak_chase_guard_enabled: bool = True
     explosion_post_peak_chase_lookback_seconds: float = 900.0
     explosion_post_peak_chase_min_run_pct: float = 0.25
     explosion_post_peak_chase_near_top_frac: float = 0.12
-    explosion_post_peak_chase_min_peak_age_seconds: float = 45.0
     # Sep 24 post-spike dump (#639) — off for Sep 9–17 production profile.
     premium_post_spike_dump_guard_enabled: bool = False
     premium_post_spike_dump_min_drawdown_pct: float = 12.0
@@ -929,9 +919,6 @@ class Settings(BaseSettings):
     explosion_coil_top_max_position_frac: float = 0.50
     explosion_coil_top_tiers_csv: str = "WATCH,BUILDING"
     explosion_coil_top_breakout_min_velocity_3s: float = 2.0
-    # The print that makes the range high is the lift. Block the ceiling only
-    # after price has already traded there. A one-second-old high was a coil top.
-    explosion_coil_top_min_ceiling_age_seconds: float = 45.0
     # Day-adaptive entry floors (coil-top, cold-base probe, BUILDING min velocity).
     entry_day_adaptive_enabled: bool = True
     entry_day_worst_coil_top_max_position_frac: float = 0.35
@@ -1626,50 +1613,6 @@ class Settings(BaseSettings):
     moment_stage_count: int = 8
     moment_stage_min_size: float = 5.0
     moment_stage_max_size: float = 55.0
-    # Max-profit legs stamped with a large projectedMaxTp (e.g. 700+) must not use 75%
-    # peak-keep at +15–20pt while stage 1 (stageSize) is still building — Oct 21 live
-    # NIFTY PUT 22700 exited at +10pt with projected 703. Cheap Oct12 runners (projected
-    # ~258) still use modest peak-keep via unified ladder / ftv_runner_pct_trail.
-    stage_runner_defer_pct_keep_min_projected_tp: float = 400.0
-    # Below this best-pts, defer 75% keep on mega projected runners (Oct21 +21pt);
-    # Sep2 +31pt at 11.7% still arms once best ≥ this.
-    stage_runner_defer_pct_keep_min_best_points: float = 28.0
-    # Mega projected runners (800+): arm unified 75% peak-keep at this gain % — Oct 21
-    # SENSEX 73400 PE peaked +47.7pt (+14.0%) but missed the default 15% ladder arm.
-    stage_runner_unified_ladder_arm_gain_pct: float = 14.0
-    # After best ≥ min best, a pullback that holes through the 75% FTV line still books
-    # remaining green (Oct 21 73400: +47pt → +10pt hole, not −₹9k giveback).
-    stage_runner_mega_hole_exit_enabled: bool = True
-    stage_runner_mega_hole_exit_min_best_points: float = 28.0
-    stage_runner_mega_hole_exit_min_remain_points: float = 6.0
-    # Once a mega peak matured, do not ride a 75% hole into red — scratch near BE.
-    stage_runner_mega_red_giveback_enabled: bool = True
-    stage_runner_mega_red_giveback_min_best_points: float = 28.0
-    # After a mega peak, book a near-scratch when most of the move is gone (Sep2 +31→+1pt).
-    stage_runner_mega_scratch_max_points: float = 2.0
-    stage_runner_mega_scratch_min_giveback_frac: float = 0.70
-    # TP rung ladder — single exit owner for mega projected stage-ladder legs.
-    tp_rung_ladder_exit_enabled: bool = True
-    tp_rung_ladder_min_projected_tp: float = 400.0
-    tp_rung_ladder_min_best_to_arm_exits: float = 28.0
-    tp_rung_ladder_min_rung_points: float = 4.0
-    tp_rung_ladder_max_rungs: int = 24
-    tp_rung_ladder_confirm_slip_points: float = 0.25
-    tp_rung_ladder_floor_slip_points: float = 1.0
-    tp_rung_ladder_floor_touch_points: float = 2.0
-    tp_rung_ladder_approach_buffer_points: float = 4.0
-    tp_rung_ladder_fade_min_giveback_points: float = 2.0
-    tp_rung_ladder_min_hold_seconds: float = 45.0
-    tp_rung_ladder_hot_defer_velocity_3s: float = 2.5
-    tp_rung_ladder_red_min_best_points: float = 20.0
-    # Mega stage-ladder legs (projectedMaxTp ≥ min) — patience before between-rung fade.
-    tp_rung_ladder_mega_fade_min_giveback_points: float = 12.0
-    tp_rung_ladder_mega_hot_defer_velocity_3s: float = 4.0
-    tp_rung_ladder_mega_approach_buffer_points: float = 7.0
-    tp_rung_ladder_mega_fall_min_seconds_after_peak: float = 75.0
-    # Above this best, skip between-rung fade; use 75% ladder / rung floor / mega hole.
-    tp_rung_ladder_mega_disable_between_fade_min_best_points: float = 55.0
-    tp_rung_ladder_mega_ladder_first_min_best_points: float = 55.0
     # FTV runner %-of-peak-gain trailing floor. V/FTV moments run in big % from the local
     # base (e.g. Rs68 -> Rs140 = +106%). The absolute stage ladder is tuned for mega point
     # moves and under-protects modest-but-real % moves (a +40% peak can give back to +4%).
@@ -1709,33 +1652,10 @@ class Settings(BaseSettings):
     unified_profit_ladder_multiple_min_giveback_pct_of_peak: float = 5.0
     unified_profit_ladder_fast_fade_velocity_3s: float = 2.0
     unified_profit_ladder_hot_defer_velocity_3s: float = 2.0
-    # A flat or rising print more than this far under the 75% line is a hold.
-    # A falling print at or under the line is a sale. Oct 21 SENSEX 73400 PE
-    # peaked at 388 (+₹24,788) and the old hole-hold rode it to the −₹21,029 stop.
+    # Sell the 75% line only while price is still on it. A print already through
+    # that line is a hold until it comes back and turns down. Oct 21 NIFTY 22700
+    # PE peaked at 161.50 (floor ~156) and was sold at 150.38.
     unified_profit_ladder_floor_touch_points: float = 2.0
-    # A fall through the 75% line does not wait out the full 3 minutes. 45s skips
-    # the 12s dip that sold SENSEX 74200 before that put ran to ~855.
-    unified_profit_ladder_fall_min_hold_seconds: float = 60.0
-    unified_profit_ladder_fall_min_seconds_after_peak: float = 45.0
-    # Runner profit guard — a tiered keep-of-peak floor with no after-peak wait
-    # and no touch band. The 75% layers above still book first on a slow fade;
-    # this catches the bleed through them (Oct 21 SENSEX 73400 PE: +47.7pt →
-    # −40pt stop; 73300 PE replays to the stop on the same tape).
-    # Floor = best × keep for the highest tier reached. Only a print that stays
-    # under the floor for confirm_seconds sells — there is no instant sale.
-    runner_profit_guard_enabled: bool = True
-    # Cheap premiums: a +6% wiggle on ₹60 is noise, not a run to protect.
-    runner_profit_guard_min_best_points: float = 4.0
-    # One-print shakeouts right after a high recover (Oct 21 NIFTY 22700 PE).
-    runner_profit_guard_confirm_seconds: float = 30.0
-    runner_profit_guard_tier1_gain_pct: float = 5.0
-    runner_profit_guard_tier1_keep_ratio: float = 0.20
-    runner_profit_guard_tier2_gain_pct: float = 12.0
-    runner_profit_guard_tier2_keep_ratio: float = 0.35
-    runner_profit_guard_tier3_gain_pct: float = 25.0
-    runner_profit_guard_tier3_keep_ratio: float = 0.55
-    runner_profit_guard_tier4_gain_pct: float = 50.0
-    runner_profit_guard_tier4_keep_ratio: float = 0.70
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.
@@ -2053,9 +1973,9 @@ class Settings(BaseSettings):
     explosion_post_peak_reentry_base_span_seconds: float = 6.0
     explosion_post_peak_reentry_min_reacceleration_pct: float = 8.0
     explosion_post_peak_reentry_min_velocity_3s: float = 1.5
-    # Off, as on October 1 (#676). A winning close does not require fresh 3s
-    # velocity. The spent flat-to-vertical guard above still asks for 1.5.
-    win_reentry_requires_velocity_enabled: bool = False
+    # After a winning close on the same CE/PE strike, the next entry needs
+    # live 3s velocity back at or above explosion_post_peak_reentry_min_velocity_3s.
+    win_reentry_requires_velocity_enabled: bool = True
     # Block re-entry on a strike that already ripped to session peak and is still
     # trading near the top on weak velocity (Aug25 24250 PE ₹121 peak → ₹110 chase).
     # Near-peak / 8% first-lift chase (#652) — off for Sep 9–17 production profile.
@@ -2064,20 +1984,6 @@ class Settings(BaseSettings):
     explosion_late_reentry_near_peak_pct: float = 12.0
     explosion_late_reentry_pullback_ok_pct: float = 22.0
     explosion_late_reentry_min_velocity_3s: float = 1.2
-    # After a same-strike win: waive near-peak late reentry on a fresh local base, or
-    # one capped continuation leg (hot v3) — not full #676 rank. Tuned for 2026-10-26
-    # NIFTY 22500 CE: post-win ~14:15 blocked at session peak with zero funnel attempts.
-    post_win_late_reentry_waive_enabled: bool = True
-    post_win_late_reentry_waive_lookback_seconds: int = 14400
-    post_win_new_local_base_max_pad_pct: float = 22.0
-    post_win_continuation_leg_enabled: bool = True
-    post_win_continuation_leg_min_velocity_3s: float = 2.0
-    post_win_continuation_leg_lot_cap: int = 4
-    # One same-strike reentry after a win, only while that premium is rising off a
-    # fresh post-close base inside the pad. Clears near-miss and elite chase stamps.
-    # A fading print, the opposite side, a second leg, or a lift already past the
-    # pad stays blocked. Oct 21 SENSEX 74200 PUT sold near 315 and ran to 1029.
-    same_strike_post_win_fresh_base_reentry_enabled: bool = True
     # Sep28 NIFTY 22850 PE: first-lift + hot v3 must not waive a shallow pullback
     # near session peak after the rip is already extended (2% off peak → −₹33k SL).
     explosion_late_reentry_first_lift_hot_v3_min_pullback_pct: float = 8.0
@@ -2180,10 +2086,6 @@ class Settings(BaseSettings):
     eod_replay_live_session_gates_enabled: bool = True
     # Mirror live structural entry gates in replay (Sep08 fixes respect Settings knobs).
     eod_replay_structural_gates_enabled: bool = True
-    # Match live selector: reentry ML + velocity + exhausted FTV in replay structural stack.
-    eod_replay_reentry_ml_gate_enabled: bool = True
-    eod_replay_reentry_velocity_gate_enabled: bool = True
-    eod_replay_exhausted_ftv_gate_enabled: bool = True
     # Optional full validate_candidate stack — heavier; default off.
     eod_replay_pretrade_enabled: bool = False
     # Full-tape replay tuning (NOT wired to live auto-trader). Profile A/B showed
@@ -2209,8 +2111,6 @@ class Settings(BaseSettings):
     instrument_max_entries_per_day: int = 3
     # Exact-leg defer after execution-time premium fade; another leg may win next scan.
     preorder_rejection_suppression_seconds: int = 30
-    # Exact-leg defer after an expiry OTM-strike block so the ATM/ITM leg can take the slot.
-    preorder_structural_rejection_suppression_seconds: int = 120
     # Jul27 scalp churn: tiny win @6 lots → full size @24/25 → stop → repeat same CE.
     # Longer same-strike cooldowns + hard daily cap for scalp only.
     scalp_instrument_win_cooldown_seconds: int = 600
@@ -2932,18 +2832,6 @@ class Settings(BaseSettings):
     local_base_overrides_bearish_breadth: bool = True
     spot_chart_timeframe_minutes: int = 5
     spot_chart_1m_bars: int = 300  # 1m history for 5m resample + RSI/MACD warmup
-    # Prior-session seed target (~78×5m Ichimoku cloud + MACD 35 on 1m resample).
-    spot_chart_indicator_warmup_1m_bars: int = 400
-    # V2 history excludes today. Two calendar days on Monday is Sat–Mon, so
-    # Friday never arrives and MACD sees only this morning. A week reaches the
-    # previous cash session across a weekend or a short holiday. Session open,
-    # high, low, and VWAP stay on today's 09:15 bars.
-    spot_chart_indicator_seed_calendar_days: int = 7
-    # Carried on chartAnalysis for WS tick refresh (session recentCloses stay short at open).
-    spot_chart_indicator_warm_closes_cap: int = 120
-    # Off. A missing MACD seed must not ban the entry. Unready MACD, EMA, and
-    # Ichimoku stay quiet; they do not vote and they do not block.
-    spot_chart_block_explosion_when_indicators_cold: bool = False
     # Historical time-to-FTV advisory. V3 index candles train a time-of-day
     # breakout prior; live premium/orderflow must still confirm every entry.
     ftv_probability_enabled: bool = True
@@ -3063,14 +2951,7 @@ class Settings(BaseSettings):
     execution_chart_force_upstox_refresh: bool = True
     execution_chart_premium_check_enabled: bool = True
     execution_chart_min_premium_momentum_pct: float = -0.15
-    # A short red print is not a fade once premium has reclaimed off its recent
-    # low (last 20 one-minute bars, 4 bars on 5m). 26 Oct 09:20 NIFTY 22500 CE
-    # 161→127 stayed a fade because price was that low. At 09:39 the same strike
-    # was ~15% off the low and a 0.15% one-minute dip still blocked the lift.
-    # A fresh collapse through the floor still blocks.
-    premium_fade_lift_off_low_min_pct: float = 8.0
-    premium_fade_lift_collapse_pct: float = -4.0
-    execution_chart_candle_count: int = 60  # legacy; execution uses spot_chart_* warmup bars
+    execution_chart_candle_count: int = 60
     # Confirmed near-base FTV first-lifts may fill THROUGH a shallow premium dip — that dip is
     # the base retest right before the vertical, not a collapse. Without this the execution
     # premium-fading gate blocked every confirmed FTV first-lift (they always ticked back a
@@ -3095,23 +2976,12 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
-    # Macro side check 09:25–09:45. Idle before 09:25 and after 09:45.
-    # The cash-candle hold covers 09:15–09:45. The first order stays 09:20.
-    # A 09:15 start locked the opening push before three closes existed.
+    # 09:16 → 09:45: side must match today's index tape. The first minute (09:15)
+    # is blocked so a blind open print cannot pick the wrong side (Oct 13 22300 PE).
     open_side_confirmation_enabled: bool = True
-    open_side_confirmation_start_hour: int = 9
-    open_side_confirmation_start_minute: int = 25
     open_side_confirmation_min_minutes: float = 1.0
     open_side_confirmation_min_index_move_pct: float = 0.10
     open_side_confirmation_min_range_position: float = 0.6
-    # PR #676 agenda: ATM/ITM base + first-lift may enter before index +0.10% / range half.
-    open_side_top_moment_capture_waive_enabled: bool = True
-    # 09:15–09:45. A call must still be holding the cash high (last closes not
-    # stepping down). A put must still be holding the low. First-lift and
-    # premium-rip waivers do not skip this. Idle from 09:45.
-    index_candle_rollover_block_enabled: bool = True
-    index_candle_rollover_steps: int = 3
-    index_candle_rollover_min_giveback_pct: float = 0.04
     open_caution_min_explosion_score: int = 45
     open_caution_score_bonus: int = 0
     open_caution_min_rank_score: float = 55.0
@@ -3128,10 +2998,8 @@ class Settings(BaseSettings):
     neutral_breadth_explosion_min_score: float = 55.0
     sensex_rank_bonus: float = 10.0
     nifty_rank_penalty_chop: float = 5.0
-    # Daily loss stop is 15% of today's book. The INR value is the fallback when
-    # the percentage is off. This is a ceiling that halts new entries, not a target.
-    daily_loss_stop_from_capital: bool = True
-    daily_loss_stop_pct: float = 0.15
+    # Daily risk budget = 10% of the ~200k sizing capital. This is a CEILING that halts
+    # new entries, not a target — selectivity + per-trade caps keep us far below it.
     daily_loss_stop_inr: float = 20_000.0
     daily_max_trades_chop: int = 20
     daily_max_trades_pre10_chop: int = 5
@@ -3360,10 +3228,6 @@ class Settings(BaseSettings):
     max_option_premium_inr: float = 350.0
     explosion_max_premium_inr: float = 350.0
     explosion_ict_max_premium_inr: float = 350.0
-    # Oct 1 / Oct 5 paper replica entry stack (see live_paper_parity.oct_paper_replica_active).
-    oct_paper_replica_enabled: bool = False
-    # Paper deploy (#676 era): Oct 1/5 entry choke — base-capture rank arm; no live_best_trades wire.
-    paper_676_entry_choke_enabled: bool = False
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0
@@ -3440,8 +3304,8 @@ class Settings(BaseSettings):
 
     # Capital / risk — ranked FTV allocation keeps cash reserved and fills the
     # strongest approved contracts first instead of spending the whole book on one leg.
-    fallback_capital_inr: float = 275_000
-    max_sizing_capital_inr: float = 275_000
+    fallback_capital_inr: float = 200_000
+    max_sizing_capital_inr: float = 200_000
     per_trade_capital_pct: float = 0.90
     ftv_ranked_allocation_enabled: bool = True
     ftv_allocation_weights_csv: str = "0.60,0.25,0.10"
@@ -3542,23 +3406,6 @@ class Settings(BaseSettings):
     explosion_reentry_ml_win_prob_gate_enabled: bool = True
     explosion_reentry_ml_win_prob_min: float = 0.52
     explosion_reentry_ml_win_prob_same_strike_min: float = 0.55
-    # 26 Oct NIFTY 22500 CE: after the morning win the same call rebuilt a base
-    # and the premium was lifting. A put with the same shape is a new entry too,
-    # so the reentry ML floor does not apply. A chase with no new base, on
-    # either side, stays on the floor.
-    ce_new_base_fresh_entry_enabled: bool = True
-    # FTV / V / explosive structural moments waive post-win ML re-entry floor (not after losses).
-    quality_moment_passport_enabled: bool = True
-    quality_moment_waive_reentry_ml_after_win: bool = True
-    quality_moment_waive_reentry_ml_after_loss: bool = False
-    # First-entry (selector / elite engine) — FTV/V + structure, not flat-extension FOMO.
-    quality_moment_passport_waives_elite_entry: bool = True
-    quality_moment_passport_elite_score_floor: float = 82.0
-    quality_moment_passport_waives_entry_peak_chase: bool = True
-    # PR #676 parity: structural ATM/ITM base re-entries skip ML (not mid-chase re-entries).
-    reentry_ml_waive_on_base_capture_eligible_enabled: bool = True
-    # Same bar waives post-win fake-trap hard blocks (velocity, afternoon, extended chase).
-    fake_explosion_trap_post_win_waive_on_base_capture_eligible_enabled: bool = True
     # 2) Legacy INR exit caps — disabled (0). Exits use structural/point SL only.
     explosion_per_trade_max_loss_inr: float = 0.0
     explosion_exceptional_per_trade_max_loss_inr: float = 0.0
@@ -3818,8 +3665,6 @@ class Settings(BaseSettings):
     ict_good_day_force_max_lots: bool = True
     # Late fade-chase: skip new entries when peak already extended and live velocity cooling.
     # Was 120% — too late (24250-style +91% chases still passed).
-    # A high that has not yet aged (explosion_post_peak_chase_min_peak_age_seconds)
-    # is the lift, not a fade — cold or not-yet-measured velocity must not block it.
     ict_late_chase_block_enabled: bool = True
     ict_late_chase_min_peak_pct: float = 75.0
     ict_late_chase_max_live_velocity_3s: float = 1.0

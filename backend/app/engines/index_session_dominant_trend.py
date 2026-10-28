@@ -29,48 +29,6 @@ def index_trend_features_active(settings: Any = None) -> bool:
     )
 
 
-def index_trough_rally_context_active(
-    symbol: str,
-    snap: SymbolSnapshot,
-    state: Any = None,
-    *,
-    settings: Any = None,
-) -> tuple[bool, dict[str, Any]]:
-    """#676 index call-leg preference — delegates to best_trade_policy + pe_win soft rally."""
-    settings = settings or get_settings()
-    if not index_trend_features_active(settings):
-        return False, {}
-    from app.engines.best_trade_policy import call_atm_itm_index_call_leg_active
-
-    ok, meta = call_atm_itm_index_call_leg_active(
-        symbol, snap, state=state, settings=settings,
-    )
-    if ok:
-        meta.setdefault("indexTroughRallyContext", meta.get("callAtmItm676IndexCallLeg"))
-    return ok, meta
-
-
-def index_peak_slide_context_active(
-    symbol: str,
-    snap: SymbolSnapshot,
-    state: Any = None,
-    *,
-    settings: Any = None,
-) -> tuple[bool, dict[str, Any]]:
-    """PE mirror — put_slide soft slide bar when index turns off session high."""
-    settings = settings or get_settings()
-    if not index_trend_features_active(settings):
-        return False, {}
-    from app.engines.best_trade_policy import call_atm_itm_index_put_leg_active
-
-    ok, meta = call_atm_itm_index_put_leg_active(
-        symbol, snap, state=state, settings=settings,
-    )
-    if ok:
-        meta.setdefault("indexPeakSlideContext", meta.get("callAtmItm676IndexPutLeg"))
-    return ok, meta
-
-
 def _resolve_trend_arms(
     sym: str,
     snap: SymbolSnapshot,
@@ -120,22 +78,6 @@ def _resolve_trend_arms(
     if mom5 < -0.02:
         meta["indexTrendFlip"] = "mom5_slide"
         return False, True, meta
-
-    trough_rally, trough_meta = index_trough_rally_context_active(
-        sym, snap, state, settings=settings,
-    )
-    if trough_rally:
-        meta.update(trough_meta)
-        meta["indexTrendFlip"] = "trough_momentum_rally"
-        return True, False, meta
-    peak_slide, peak_meta = index_peak_slide_context_active(
-        sym, snap, state, settings=settings,
-    )
-    if peak_slide:
-        meta.update(peak_meta)
-        meta["indexTrendFlip"] = "peak_momentum_slide"
-        return False, True, meta
-
     meta["indexTrendFlip"] = "both_neutral"
     return False, False, meta
 
@@ -168,9 +110,9 @@ def index_session_dominant_trend(
         dominant = "SLIDE"
     elif call_armed and put_armed:
         flip = str(meta.get("indexTrendFlip") or "")
-        if flip in ("rally_dominant", "mom5_rally", "trough_momentum_rally"):
+        if flip in ("rally_dominant", "mom5_rally"):
             dominant = "RALLY"
-        elif flip in ("slide_dominant", "mom5_slide", "peak_momentum_slide"):
+        elif flip in ("slide_dominant", "mom5_slide"):
             dominant = "SLIDE"
 
     meta["dominantTrend"] = dominant
@@ -257,21 +199,6 @@ def index_trend_rank_adjustment(
         sym, snap, state, settings=settings, track_flip=True,
     )
     if dominant == "NEUTRAL":
-        trough_rally, _ = index_trough_rally_context_active(
-            sym, snap, state, settings=settings,
-        )
-        peak_slide, _ = index_peak_slide_context_active(
-            sym, snap, state, settings=settings,
-        )
-        side_u = str(side or "").upper()
-        bonus = float(getattr(settings, "index_trend_rank_bonus_aligned", 8.0) or 8.0)
-        penalty = float(
-            getattr(settings, "index_trend_rank_penalty_opposite", 6.0) or 6.0
-        )
-        if trough_rally:
-            return bonus if side_u == "CALL" else -penalty
-        if peak_slide:
-            return bonus if side_u == "PUT" else -penalty
         return 0.0
     bonus = float(getattr(settings, "index_trend_rank_bonus_aligned", 8.0) or 8.0)
     penalty = float(getattr(settings, "index_trend_rank_penalty_opposite", 6.0) or 6.0)

@@ -50,48 +50,6 @@ def _symmetric_settings():
     return s
 
 
-def test_blocks_put_on_neutral_when_trough_rally_context():
-    patches = [
-        patch(
-            "app.engines.index_tick_helpers.index_trend_breakout",
-            return_value={"breakout": False},
-        ),
-        patch(
-            "app.engines.worst_day_guard._put_rally_bullish_context",
-            return_value=(False, {}),
-        ),
-        patch(
-            "app.engines.index_session_dominant_trend.index_session_dominant_trend",
-            return_value=("NEUTRAL", {"dominantTrend": "NEUTRAL"}),
-        ),
-        patch(
-            "app.engines.index_session_dominant_trend.index_trough_rally_context_active",
-            return_value=(True, {"indexTroughRallyContext": {"rallyPoints": 50}}),
-        ),
-        patch(
-            "app.engines.index_session_dominant_trend.index_peak_slide_context_active",
-            return_value=(False, {}),
-        ),
-    ]
-    for p in patches:
-        p.start()
-    try:
-        with patch(
-            "app.engines.index_trend_opposite_side_guard.get_settings",
-            return_value=_symmetric_settings(),
-        ):
-            blocked, reason, _ = index_trend_opposite_side_blocks_entry(
-                _Cand(side=Side.PUT),
-                AutoTraderState(),
-                {"NIFTY": _snap()},
-            )
-        assert blocked is True
-        assert reason == "index_trend_put_blocked_call_rally"
-    finally:
-        for p in patches:
-            p.stop()
-
-
 def test_blocks_put_when_call_rally_armed():
     patches = [
         patch(

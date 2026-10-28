@@ -31,14 +31,12 @@ def test_live_10k_profile_is_removed():
     assert "env.live-10k.overlay" not in blob
     assert "ARM-LIVE-10K" not in blob
     settings = Settings()
-    assert settings.live_best_trades_only_enabled is True
-    assert settings.live_best_trades_min_grade == "A"
+    assert settings.live_best_trades_only_enabled is False
     assert settings.live_disable_session_lift is False
     assert settings.chop_live_disable_session_lift is False
     assert settings.live_early_fail_exit_enabled is False
     assert settings.chop_live_early_fail_exit_enabled is False
-    assert settings.fallback_capital_inr == 275_000
-    assert settings.max_sizing_capital_inr == 275_000
+    assert settings.fallback_capital_inr == 200_000
     assert settings.daily_loss_stop_inr == 20_000
 
 
@@ -53,7 +51,6 @@ def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
                 "EMERGENCY_STOP_INR=1000",
                 "TOP_MOMENTS_MIN_GRADE=S",
                 "LIVE_BEST_TRADES_ONLY_ENABLED=true",
-                "LIVE_BEST_TRADES_MIN_GRADE=S",
                 "LIVE_EARLY_FAIL_EXIT_ENABLED=true",
                 "LIVE_DISABLE_SESSION_LIFT=true",
                 "CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED=true",
@@ -86,13 +83,12 @@ def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
         if "=" in line and not line.lstrip().startswith("#"):
             key, value = line.split("=", 1)
             values[key] = value
-    assert values["FALLBACK_CAPITAL_INR"] == "275000"
-    assert values["MAX_SIZING_CAPITAL_INR"] == "275000"
+    assert values["FALLBACK_CAPITAL_INR"] == "200000"
+    assert values["MAX_SIZING_CAPITAL_INR"] == "200000"
     assert values["DAILY_LOSS_STOP_INR"] == "20000"
     assert values["EMERGENCY_STOP_INR"] == "20000"
     assert values["TOP_MOMENTS_MIN_GRADE"] == "A"
-    assert values["LIVE_BEST_TRADES_ONLY_ENABLED"] == "true"
-    assert values["LIVE_BEST_TRADES_MIN_GRADE"] == "A"
+    assert values["LIVE_BEST_TRADES_ONLY_ENABLED"] == "false"
     assert values["LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
     assert values["LIVE_DISABLE_SESSION_LIFT"] == "false"
     assert values["CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"

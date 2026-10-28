@@ -24,21 +24,6 @@ SCALP_TIMEFRAMES: list[dict[str, Any]] = [
 ]
 
 
-def prefer_warmup_series(native: list | None, resampled: list | None) -> list:
-    """Keep today's native frame once it can carry MACD. Otherwise use the longer 1m seed."""
-    from app.engines.indicator_readiness import MACD_MIN_CLOSES
-
-    native_rows = list(native or [])
-    resampled_rows = list(resampled or [])
-    if len(resampled_rows) >= MACD_MIN_CLOSES and len(resampled_rows) >= len(native_rows):
-        return resampled_rows
-    if len(native_rows) >= MACD_MIN_CLOSES:
-        return native_rows
-    if len(resampled_rows) > len(native_rows):
-        return resampled_rows
-    return native_rows
-
-
 def resample_ohlc_bars(candles: list, bars_per_bucket: int) -> list[list[float]]:
     """Aggregate OHLCV every N bars (works for 1m→5m or 5m→15m grouping)."""
     if bars_per_bucket <= 1 or not candles:
@@ -85,17 +70,13 @@ def resample_candles(candles_1m: list, period: int) -> list[list[float]]:
 
 def analyze_timeframe(candles: list, price: float, label: str) -> TimeframeChartRead:
     """Direction + momentum read for one timeframe."""
-    opens, _, lows, closes = _candle_rows(candles)
+    opens, _, _, closes = _candle_rows(candles)
     if not closes or price <= 0:
         return TimeframeChartRead(label=label, price=round(price, 2))
 
     from app.engines.spot_direction import _patch_live_close
-    from app.engines.winner_entry_guards import FADE_OFF_LOW_BARS, premium_off_low_pct
 
     closes = _patch_live_close(closes, price)
-    off_low = premium_off_low_pct(
-        lows, price, bars=FADE_OFF_LOW_BARS.get(label, 20),
-    )
 
     lookback = min(5, len(closes) - 1) if len(closes) > 1 else 1
     mom = _pct_change(closes, lookback)
@@ -131,20 +112,16 @@ def analyze_timeframe(candles: list, price: float, label: str) -> TimeframeChart
     elif red >= green + 1:
         bearish += 1
 
-    from app.engines.indicator_readiness import readiness_from_closes
-
-    readiness = readiness_from_closes(closes)
     rsi_read = compute_rsi(closes)
     macd_read = compute_macd(closes)
     if rsi_read.bias == "OVERSOLD":
         bullish += 1
     elif rsi_read.bias == "OVERBOUGHT":
         bearish += 1
-    if readiness.macd_ready:
-        if macd_read.bias == "BULLISH":
-            bullish += 1
-        elif macd_read.bias == "BEARISH":
-            bearish += 1
+    if macd_read.bias == "BULLISH":
+        bullish += 1
+    elif macd_read.bias == "BEARISH":
+        bearish += 1
 
     if bullish >= bearish + 2:
         direction = "BULLISH"
@@ -163,24 +140,21 @@ def analyze_timeframe(candles: list, price: float, label: str) -> TimeframeChart
         + abs(rsi_read.value - 50) * 0.2,
     )
 
-    macd_out = macd_read if readiness.macd_ready else type(macd_read)()
-
     return TimeframeChartRead(
         label=label,
         direction=direction,
         momentumPct=round(mom, 3),
         momentum3Pct=round(mom3, 3),
-        offLowPct=round(off_low, 2),
         trendStrength=round(strength, 1),
         emaBias=ema_bias,
         price=round(price, 2),
         barCount=len(closes),
         rsi=rsi_read.value,
         rsiBias=rsi_read.bias,
-        macd=macd_out.line,
-        macdSignal=macd_out.signal,
-        macdHistogram=macd_out.histogram,
-        macdBias=macd_out.bias,
+        macd=macd_read.line,
+        macdSignal=macd_read.signal,
+        macdHistogram=macd_read.histogram,
+        macdBias=macd_read.bias,
     )
 
 
@@ -190,7 +164,6 @@ def _tf_dict(read: TimeframeChartRead) -> dict[str, Any]:
         "direction": read.direction,
         "momentumPct": read.momentumPct,
         "momentum3Pct": read.momentum3Pct,
-        "offLowPct": read.offLowPct,
         "trendStrength": read.trendStrength,
         "emaBias": read.emaBias,
         "barCount": read.barCount,
@@ -242,22 +215,14 @@ async def fetch_mtf_charts(
     price: float,
     *,
     force_refresh: bool = True,
-    lookback_days: int | None = None,
 ) -> dict[str, TimeframeChartRead]:
-    """Fetch and analyze all scalp timeframes for index or option leg.
-
-    Index callers pass ``lookback_days`` so MACD on each frame sees the previous
-    cash session plus today. Option premium keeps the short default window.
-    """
+    """Fetch and analyze all scalp timeframes for index or option leg."""
     settings = get_settings()
-    from app.engines.indicator_series import mtf_1m_bar_count
-
     candles_1m = await client.get_historical_candles(
         instrument_key,
         interval="1minute",
-        count=mtf_1m_bar_count(settings),
+        count=settings.execution_mtf_1m_bars,
         force_refresh=force_refresh,
-        lookback_days=lookback_days,
     )
 
     reads: dict[str, TimeframeChartRead] = {}
@@ -265,19 +230,19 @@ async def fetch_mtf_charts(
 
     async def _native_or_resample(frame: dict[str, Any]) -> tuple[str, list]:
         label = frame["label"]
-        resampled = resample_candles(candles_1m, frame["resample"])
-        native: list = []
         if settings.execution_mtf_use_v3_native:
             try:
-                native = await client.get_intraday_candles_v3(
+                candles = await client.get_intraday_candles_v3(
                     instrument_key,
                     unit=frame["unit"],
                     interval=frame["interval"],
                     force_refresh=force_refresh,
                 )
+                if candles:
+                    return label, candles
             except Exception as exc:
                 logger.debug("V3 %s failed, resampling 1m: %s", label, exc)
-        return label, prefer_warmup_series(native, resampled)
+        return label, resample_candles(candles_1m, frame["resample"])
 
     other_frames = [f for f in SCALP_TIMEFRAMES if f["label"] != "1m"]
     results = await asyncio.gather(*[_native_or_resample(f) for f in other_frames])
@@ -286,39 +251,6 @@ async def fetch_mtf_charts(
             label=label, price=round(price, 2),
         )
     return reads
-
-
-def _premium_mtf_fading(
-    pt: TimeframeChartRead | None,
-    settings: Any,
-    *,
-    shallow_floor: float | None = None,
-) -> bool:
-    """Premium 1m/5m fade. A reclaim off the recent low is not the open flush.
-
-    5m momentumPct is five bars (25 minutes) and still contains the 09:20 drop
-    after price has turned. The collapse check on 5m uses the 3-bar change
-    (15 minutes). The 1-minute execution gate still blocks a fresh -4% dump.
-    """
-    if pt is None or pt.direction != "BEARISH":
-        return False
-    mom = float(pt.momentumPct or 0)
-    min_mom = float(getattr(settings, "execution_chart_min_premium_momentum_pct", -0.15) or -0.15)
-    if mom >= min_mom:
-        return False
-    if shallow_floor is not None and mom >= shallow_floor:
-        return False
-    from app.engines.winner_entry_guards import premium_lift_clears_fade
-
-    fresh = float(pt.momentum3Pct or 0) if pt.label == "5m" else mom
-    if premium_lift_clears_fade(
-        settings,
-        off_low_pct=float(pt.offLowPct or 0),
-        momentum_pct=fresh,
-        momentum_3_pct=float(pt.momentum3Pct or 0),
-    ):
-        return False
-    return True
 
 
 def validate_mtf_scalp(
@@ -364,7 +296,8 @@ def validate_mtf_scalp(
             and not first_lift_bypass
         ):
             for req in ("1m", "5m"):
-                if _premium_mtf_fading(premium_mtf.get(req), settings):
+                pt = premium_mtf.get(req)
+                if pt and pt.direction == "BEARISH" and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct:
                     meta["passed"] = False
                     return False, f"exec_mtf_premium_{req}_fading", meta
         if premium_mtf and settings.execution_chart_premium_check_enabled and (
@@ -375,8 +308,12 @@ def validate_mtf_scalp(
                 or -1.2
             )
             for req in ("1m", "5m"):
-                if _premium_mtf_fading(
-                    premium_mtf.get(req), settings, shallow_floor=shallow_floor,
+                pt = premium_mtf.get(req)
+                if (
+                    pt
+                    and pt.direction == "BEARISH"
+                    and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct
+                    and pt.momentumPct < shallow_floor
                 ):
                     meta["passed"] = False
                     return False, f"exec_mtf_premium_{req}_fading", meta
@@ -438,7 +375,8 @@ def validate_mtf_scalp(
 
     if premium_mtf and settings.execution_chart_premium_check_enabled:
         for req in ("1m", "5m"):
-            if _premium_mtf_fading(premium_mtf.get(req), settings):
+            pt = premium_mtf.get(req)
+            if pt and pt.direction == "BEARISH" and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct:
                 meta["passed"] = False
                 return False, f"exec_mtf_premium_{req}_fading", meta
 

@@ -48,37 +48,13 @@ def live_best_trade_entry_blocked(
     ranking: Mapping[str, Any] | None = None,
     chart_meta: dict[str, Any] | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
-    """Live explosion orders require grade A or S.
+    """October 1 paper never applied this grade-S live bar. Live skips it too.
 
-    Score, chart alignment, pad maturity, position count, and the one-loss
-    pause stay on the shared gates. This bar is only the grade.
+    ``LIVE_BEST_TRADES_ONLY_ENABLED`` is ignored. Grade, pad, chart, position
+    count, and the post-loss pause stay on the shared paper gates.
     """
-    del state, snapshots, chart_meta
-    settings = get_settings()
-    if not bool(getattr(settings, "live_best_trades_only_enabled", False)):
-        return False, "ok", {"liveBestTradeGate": False}
-    from app.engines.execution_mode import live_entry_gates_active
-
-    if not live_entry_gates_active(settings):
-        return False, "ok", {"liveBestTradeGate": False}
-    if str(getattr(candidate, "mode", "") or "") != "explosion":
-        return False, "ok", {"liveBestTradeGate": False}
-
-    meta: dict[str, Any] = {"liveBestTradeGate": True}
-    resolved = dict(ranking or {})
-    if not resolved.get("grade") and getattr(candidate, "explosion_event", None) is not None:
-        from app.engines.trade_ranking import rank_entry_candidate
-
-        resolved = rank_entry_candidate(candidate, snapshot=snap) or {}
-    grade = str(resolved.get("grade") or "").upper()
-    min_grade = str(getattr(settings, "live_best_trades_min_grade", "A") or "A").upper()
-    meta["grade"] = grade
-    meta["minGrade"] = min_grade
-    if min_grade == "S" and grade != "S":
-        return True, "live_best_trades_requires_grade_s", meta
-    if min_grade == "A" and grade not in {"S", "A"}:
-        return True, "live_best_trades_requires_grade_a_or_s", meta
-    return False, "ok", meta
+    del candidate, snap, state, snapshots, ranking, chart_meta
+    return False, "ok", {"liveBestTradeGate": False}
 
 
 def live_early_fail_exit_reason(

@@ -22,7 +22,6 @@ def _settings(**overrides):
         explosion_coil_top_max_position_frac=0.50,
         explosion_coil_top_tiers_csv="WATCH,BUILDING",
         explosion_coil_top_breakout_min_velocity_3s=2.0,
-        explosion_coil_top_min_ceiling_age_seconds=45.0,
     )
     for k, v in overrides.items():
         setattr(s, k, v)
@@ -45,8 +44,7 @@ def teardown_function(_):
 
 def test_blocks_sep04_style_building_entry_at_coil_top():
     """NIFTY 23900 CE: base ~135, coil high ~150, entry ~147 = top 80% of range."""
-    # Ceiling (148/149) already traded for a minute before the 147 entry.
-    prems = [135 + (i % 4) * 1.5 for i in range(25)] + [148, 149, 148.5, 147]
+    prems = [135 + (i % 4) * 1.5 for i in range(25)] + [148, 149, 147]
     _seed("NIFTY", 23900.0, Side.CALL, prems)
     ev = SimpleNamespace(
         symbol="NIFTY",
@@ -106,7 +104,7 @@ def test_elite_hot_breakout_at_coil_top_allowed():
 
 
 def test_watch_tier_symmetric_put_coil_top():
-    prems = [80 + (i % 3) * 1.0 for i in range(25)] + [92, 93, 92.5, 91.5]
+    prems = [80 + (i % 3) * 1.0 for i in range(25)] + [92, 93, 91.5]
     _seed("SENSEX", 76600.0, Side.PUT, prems)
     ev = SimpleNamespace(
         symbol="SENSEX",
@@ -123,45 +121,3 @@ def test_watch_tier_symmetric_put_coil_top():
         blocked, reason = coil_top_entry_blocked(ev, tier="WATCH", velocity_3s=0.6)
     assert blocked is True
     assert "coil_top" in reason
-
-
-def test_fresh_lift_printing_the_range_high_is_not_a_coil_ceiling():
-    """A 12% lift that is the new high has position 1.0 and is still the moment."""
-    prems = [100.0] * 20 + [112.0]
-    _seed("NIFTY", 24500.0, Side.CALL, prems, step_s=1.0)
-    ev = SimpleNamespace(
-        symbol="NIFTY",
-        side=Side.CALL,
-        strike=24500.0,
-        premium=112.0,
-        tier="BUILDING",
-        velocity_3s=4.0,
-    )
-    with patch(
-        "app.engines.explosion_entry_guards.get_settings",
-        return_value=_settings(),
-    ):
-        blocked, reason = coil_top_entry_blocked(ev, tier="BUILDING", velocity_3s=4.0)
-    assert blocked is False
-    assert reason == ""
-
-
-def test_lift_still_allowed_one_second_after_the_new_high():
-    """The next sample, about a second later, is still that same new high."""
-    prems = [100.0] * 20 + [112.0, 112.0]
-    _seed("SENSEX", 77000.0, Side.PUT, prems, step_s=1.5)
-    ev = SimpleNamespace(
-        symbol="SENSEX",
-        side=Side.PUT,
-        strike=77000.0,
-        premium=112.0,
-        tier="WATCH",
-        velocity_3s=0.0,
-    )
-    with patch(
-        "app.engines.explosion_entry_guards.get_settings",
-        return_value=_settings(),
-    ):
-        blocked, reason = coil_top_entry_blocked(ev, tier="WATCH", velocity_3s=0.0)
-    assert blocked is False
-    assert reason == ""

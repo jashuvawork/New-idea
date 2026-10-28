@@ -1146,13 +1146,6 @@ def elite_v_rip_shallow_lift_blocked(
     settings = settings or get_settings()
     if not bool(getattr(settings, "elite_v_rip_shallow_require_first_lift_enabled", True)):
         return False, ""
-    from app.engines.best_trade_policy import call_atm_itm_near_base_pad
-
-    pad_evidence = dict(evidence)
-    if not pad_evidence.get("localBaseMovePct"):
-        pad_evidence["localBaseMovePct"] = assessment.get("localBasePct")
-    if call_atm_itm_near_base_pad(pad_evidence, settings=settings):
-        return False, ""
     if str(assessment.get("setup") or "") != "V":
         return False, ""
     if bool(evidence.get("armedBaseLaunch")):
@@ -1658,72 +1651,19 @@ def elite_entry_allowed(
     if setup not in VALID_SETUPS:
         return False, "elite_setup_not_ftv_v_or_explosive", assessment
 
-    from app.engines.best_trade_policy import (
-        elite_base_setup_allowed,
-        quality_moment_passport_active,
-        quality_moment_passport_waives_elite_entry,
-    )
-
-    passport_ok, passport_mode = quality_moment_passport_active(
-        evidence, settings=settings,
-    )
-    passport_entry = passport_ok and quality_moment_passport_waives_elite_entry(settings)
-    if passport_entry:
-        assessment = {
-            **assessment,
-            "qualityMomentPassportEntry": True,
-            "qualityMomentPassportMode": passport_mode,
-        }
-
-    fresh_base_reentry = False
-    if state is not None and bool(
-        getattr(settings, "same_strike_post_win_fresh_base_reentry_enabled", True)
-    ):
-        from app.engines.session_mode_feedback import (
-            same_strike_post_win_fresh_base_reentry,
-        )
-
-        try:
-            strike_v = float(evidence.get("strike") or 0)
-        except (TypeError, ValueError):
-            strike_v = 0.0
-        try:
-            prem_v = float(evidence.get("premium") or 0)
-        except (TypeError, ValueError):
-            prem_v = 0.0
-        try:
-            v3 = float(evidence.get("velocity3s") or evidence.get("velocity_3s") or 0)
-        except (TypeError, ValueError):
-            v3 = 0.0
-        alert_d = dict(evidence) if isinstance(evidence, Mapping) else None
-        fresh_base_reentry, _fresh_meta = same_strike_post_win_fresh_base_reentry(
-            state,
-            symbol=str(evidence.get("symbol") or ""),
-            side=resolved_side,
-            strike=strike_v,
-            premium=prem_v,
-            velocity_3s=v3,
-            alert=alert_d,
-        )
-        if fresh_base_reentry:
-            assessment = {**assessment, "sameStrikePostWinFreshBase": True}
+    from app.engines.best_trade_policy import elite_base_setup_allowed
 
     if not elite_base_setup_allowed(
         setup,
         mega_ok=mega_ok or building_rip_helper_ok,
         settings=settings,
     ):
-        if (
-            passport_entry and setup.upper() in ("EXPLOSIVE", "FTV", "V")
-        ) or fresh_base_reentry:
-            pass
-        elif bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)):
+        if bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)):
             assessment = {**assessment, "side": resolved_side}
             return False, "elite_v_rip_only", assessment
-        else:
-            local = _number(assessment.get("localBasePct"))
-            assessment = {**assessment, "side": resolved_side}
-            return False, f"elite_explosive_chase_local_{local:.0f}pct", assessment
+        local = _number(assessment.get("localBasePct"))
+        assessment = {**assessment, "side": resolved_side}
+        return False, f"elite_explosive_chase_local_{local:.0f}pct", assessment
 
     milestone_blocked, milestone_reason = elite_milestone_depth_blocked(
         evidence, settings=settings,
@@ -1740,10 +1680,6 @@ def elite_entry_allowed(
             or 0.92
         )
         score = max(score, live * blend)
-    if passport_entry:
-        from app.engines.best_trade_policy import quality_moment_passport_elite_score_floor
-
-        min_score = min(min_score, quality_moment_passport_elite_score_floor(settings))
     if score < min_score - 1e-6:
         return False, f"elite_score_below_{min_score:g}", assessment
 
@@ -1758,7 +1694,7 @@ def elite_entry_allowed(
         side=resolved_side,
         ranking=ranking,
     )
-    if fvq_blocked and not fresh_base_reentry:
+    if fvq_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, fvq_reason, assessment
 
@@ -1804,9 +1740,6 @@ def elite_entry_allowed(
     ):
         v_rip_shallow_blocked = False
         v_rip_shallow_reason = ""
-    if v_rip_shallow_blocked and passport_entry:
-        v_rip_shallow_blocked = False
-        v_rip_shallow_reason = ""
     if v_rip_shallow_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, v_rip_shallow_reason, assessment
@@ -1817,7 +1750,7 @@ def elite_entry_allowed(
         settings=settings,
         call_capture_waive=call_capture_waive,
     )
-    if perfect_blocked and not fresh_base_reentry:
+    if perfect_blocked:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, perfect_reason, assessment
 
@@ -1832,7 +1765,7 @@ def elite_entry_allowed(
         return False, shallow_reason, assessment
 
     local = _number(assessment.get("localBasePct"))
-    if local > max_local + 1e-6 and not fresh_base_reentry:
+    if local > max_local + 1e-6:
         from app.engines.best_trade_policy import symmetric_best_trade_capture_active
 
         assessment = {**assessment, "side": resolved_side, "localBaseCapPct": round(max_local, 2)}
@@ -1852,7 +1785,7 @@ def elite_entry_allowed(
             and bool(
                 getattr(settings, "live_entry_best_trade_capture_waives_elite_timing", True)
             )
-        ) and not building_rip_helper_ok and not call_capture_waive and not passport_entry:
+        ) and not building_rip_helper_ok and not call_capture_waive:
             return False, "elite_timing_not_good_or_ok", assessment
 
     assessment = {

@@ -21,27 +21,17 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["TOP_FTV_A_ENABLED"] == "true"
     assert env["TOP_FTV_A_MAX_CAPITAL_PCT"] == "0.90"
     assert env["TOP_FTV_A_EXCEPTIONAL_MAX_MOVE_PCT"] == "40"
-    # 15% of today's book. ₹2.75L → ₹41,250. The INR value is the fallback.
-    assert env["DAILY_LOSS_STOP_FROM_CAPITAL"] == "true"
-    assert env["DAILY_LOSS_STOP_PCT"] == "0.15"
+    # 10%/day budget — aligned with emergency_stop_inr and the worst-day pause (both ₹20k)
+    # so a full-capital ELITE base runner rides its natural SL instead of a stale ₹6k halt.
     assert env["DAILY_LOSS_STOP_INR"] == "20000"
-    assert env["FALLBACK_CAPITAL_INR"] == "275000"
-    assert env["MAX_SIZING_CAPITAL_INR"] == "275000"
+    assert env["FALLBACK_CAPITAL_INR"] == "200000"
+    assert env["MAX_SIZING_CAPITAL_INR"] == "200000"
     assert env["UNIFIED_PROFIT_LADDER_ENABLED"] == "true"
     assert env["UNIFIED_PROFIT_LADDER_BREAKEVEN_ENABLED"] == "false"
     assert env["WORST_DAY_BLOCKS_LIVE"] == "false"
     assert env["CHOP_LIVE_HARD_BLOCK_WORST_DAY"] == "false"
-    assert env["BEST_TRADE_BLOCK_CHOP_DEEP_CHASE_ENABLED"] == "true"
-    assert env["LIVE_BEST_TRADES_ONLY_ENABLED"] == "true"
-    assert env["LIVE_BEST_TRADES_MIN_GRADE"] == "A"
-    assert env["WIN_REENTRY_REQUIRES_VELOCITY_ENABLED"] == "false"
-    assert env["OPEN_SIDE_CONFIRMATION_ENABLED"] == "true"
-    assert env["OPEN_SIDE_CONFIRMATION_START_HOUR"] == "9"
-    assert env["OPEN_SIDE_CONFIRMATION_START_MINUTE"] == "25"
-    assert env["OPEN_SIDE_CONFIRMATION_MIN_MINUTES"] == "1"
-    assert env["INDEX_CANDLE_ROLLOVER_BLOCK_ENABLED"] == "true"
-    assert env["INDEX_CANDLE_ROLLOVER_STEPS"] == "3"
-    assert env["INDEX_CANDLE_ROLLOVER_MIN_GIVEBACK_PCT"] == "0.04"
+    assert env["BEST_TRADE_BLOCK_CHOP_DEEP_CHASE_ENABLED"] == "false"
+    assert env["LIVE_BEST_TRADES_ONLY_ENABLED"] == "false"
     assert env["LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
     assert env["LIVE_DISABLE_SESSION_LIFT"] == "false"
     assert env["CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED"] == "false"
@@ -78,24 +68,6 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["ICT_ELITE_BASE_READY_MIN_VELOCITY_9S"] == "1.5"
 
 
-def test_deploy_leaves_the_day_capital_in_place():
-    workflow = (ROOT / ".github/workflows/deploy-ec2.yml").read_text()
-    updater = (ROOT / "deploy/ec2-update.sh").read_text()
-    assert "FALLBACK_CAPITAL_INR" not in workflow
-    assert "MAX_SIZING_CAPITAL_INR" not in workflow
-    assert "FALLBACK_CAPITAL_INR" not in updater
-    assert "MAX_SIZING_CAPITAL_INR" not in updater
-    assert (ROOT / "deploy/set-day-capital.sh").is_file()
-    assert (ROOT / ".github/workflows/set-day-capital-ec2.yml").is_file()
-
-
-def test_deploy_does_not_overwrite_live_vs_paper_flags():
-    workflow = (ROOT / ".github/workflows/deploy-ec2.yml").read_text()
-    sync_keys = workflow.split("for k in", 1)[1].split("; do", 1)[0]
-    assert "ENABLE_LIVE_TRADING" not in sync_keys
-    assert "PAPER_TRADING" not in sync_keys
-
-
 def test_deploy_paths_sync_every_bounded_loss_setting():
     workflow = (ROOT / ".github/workflows/deploy-ec2.yml").read_text()
     updater = (ROOT / "deploy/ec2-update.sh").read_text()
@@ -119,15 +91,6 @@ def test_deploy_paths_sync_every_bounded_loss_setting():
         "CHOP_LIVE_HARD_BLOCK_WORST_DAY",
         "BEST_TRADE_BLOCK_CHOP_DEEP_CHASE_ENABLED",
         "LIVE_BEST_TRADES_ONLY_ENABLED",
-        "OPEN_SIDE_CONFIRMATION_ENABLED",
-        "OPEN_SIDE_CONFIRMATION_START_HOUR",
-        "OPEN_SIDE_CONFIRMATION_START_MINUTE",
-        "OPEN_SIDE_CONFIRMATION_MIN_MINUTES",
-        "INDEX_CANDLE_ROLLOVER_BLOCK_ENABLED",
-        "INDEX_CANDLE_ROLLOVER_STEPS",
-        "INDEX_CANDLE_ROLLOVER_MIN_GIVEBACK_PCT",
-        "LIVE_BEST_TRADES_MIN_GRADE",
-        "WIN_REENTRY_REQUIRES_VELOCITY_ENABLED",
         "LIVE_EARLY_FAIL_EXIT_ENABLED",
         "LIVE_DISABLE_SESSION_LIFT",
         "CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED",
@@ -141,8 +104,6 @@ def test_deploy_paths_sync_every_bounded_loss_setting():
         "EXPIRY_EVENING_BLOCK_ENABLED",
         "POWER_HOUR_TOP_ONLY_ENABLED",
         "DAILY_LOSS_STOP_INR",
-        "DAILY_LOSS_STOP_FROM_CAPITAL",
-        "DAILY_LOSS_STOP_PCT",
         "PER_TRADE_CAPITAL_PCT",
         "ORDINARY_ENTRY_MAX_CAPITAL_PCT",
         "FULL_SLEEVE_REQUIRES_ARMED_LAUNCH",

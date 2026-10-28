@@ -30,10 +30,6 @@ def _settings(**overrides):
     s.fake_explosion_trap_post_win_fresh_near_base_enabled = True
     s.fake_explosion_trap_enabled = True
     s.fake_explosion_trap_post_win_lookback = 1
-    s.post_win_late_reentry_waive_lookback_seconds = 14400
-    s.post_win_late_reentry_waive_enabled = True
-    s.post_win_continuation_leg_min_velocity_3s = 2.0
-    s.post_win_new_local_base_max_pad_pct = 22.0
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -106,58 +102,28 @@ def test_post_win_requires_fresh_near_base(mock_settings, side):
     mock_settings.return_value = _settings()
     event = _event()
     event.side = side
-    from datetime import timedelta
-    from zoneinfo import ZoneInfo
-
-    from app.models.schemas import AutoTraderState, PaperTrade, StrategyType
-
-    IST = ZoneInfo("Asia/Kolkata")
-    strike = 23450.0
     cand = MagicMock()
     cand.mode = "explosion"
     cand.pretrade_meta = {}
     cand.alert = {}
-    cand.symbol = "NIFTY"
-    cand.side = side
-    cand.strike = strike
-    cand.premium = 140.0
-    cand.explosion_event = MagicMock(velocity_3s=0.5)
 
-    closed_at = datetime.now(IST) - timedelta(minutes=20)
-    prior = PaperTrade(
-        id="fresh-base-prior",
-        symbol="NIFTY",
-        side=side,
-        strike=strike,
-        entryPremium=120.0,
-        currentPremium=135.0,
-        lots=2,
-        openedAt=closed_at - timedelta(minutes=5),
-        closedAt=closed_at,
-        status="CLOSED",
-        exitReason="explosion_peak_keep_trail",
-        strategyType=StrategyType.EXPLOSIVE,
-        pnlInr=11603.79,
-        entryContext={"selectionMode": "explosion"},
-    )
-    state = AutoTraderState(closedPaperTrades=[prior])
-
-    cfg = _settings()
     with patch(
-        "app.engines.explosion_entry_guards.get_settings",
-        return_value=cfg,
-    ), patch(
-        "app.engines.session_mode_feedback.get_settings",
-        return_value=cfg,
-    ), patch(
-        "app.engines.explosion_detector.post_close_base_reacceleration",
-        return_value=(False, {}),
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="NIFTY",
+                side=side,
+                pnl_inr=11603.79,
+                exit_reason="explosion_peak_keep_trail",
+                strike=23450.0,
+            ),
+        ],
     ):
         blocked, reason, meta = post_win_fresh_near_base_blocked(
             cand,
-            local_pad=18.0,
-            ict=_ict(base_rel=18.0, armed_minutes_ago=6.9),
-            state=state,
+            local_pad=13.7,
+            ict=_ict(base_rel=13.7, armed_minutes_ago=6.9),
+            state=MagicMock(),
         )
 
     assert blocked is True
