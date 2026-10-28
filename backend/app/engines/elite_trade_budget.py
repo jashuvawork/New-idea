@@ -134,6 +134,8 @@ def elite_budget_blocks_entry(
     snapshots: Any = None,
     day_mode: str = "",
     confidence_tier: str = "",
+    candidate: Any = None,
+    when: datetime | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Return (blocked, reason, assessment) for order-boundary weekly cap."""
     from app.config import get_settings
@@ -142,6 +144,28 @@ def elite_budget_blocks_entry(
     settings = settings or get_settings()
     if not bool(getattr(settings, "elite_trade_engine_enabled", False)):
         return False, "disabled", {}
+
+    if candidate is not None:
+        from app.engines.open_index_lane import open_index_lane_qualified
+
+        lane_pass, _, lane_meta = open_index_lane_qualified(
+            candidate, settings=settings, when=when,
+        )
+        if lane_pass:
+            assessment = {
+                **lane_meta,
+                "openIndexLane": True,
+                "eliteScore": lane_meta.get("eliteScore"),
+                "eliteBand": lane_meta.get("eliteBand"),
+                "setup": lane_meta.get("setup"),
+                "stage": lane_meta.get("stage"),
+            }
+            budget_ok, budget_reason, _ = elite_trade_budget_allows(
+                state, assessment, settings=settings,
+            )
+            if not budget_ok:
+                return True, budget_reason, assessment
+            return False, "ok", assessment
 
     ok, reason, assessment = elite_entry_allowed(
         evidence,

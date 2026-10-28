@@ -10,7 +10,9 @@ from zoneinfo import ZoneInfo
 from app.config import Settings
 from app.engines.open_index_lane import (
     in_open_caution_window_at,
+    open_index_lane_qualified,
     open_index_lane_summary,
+    resolve_lane_when,
     validate_open_index_lane,
 )
 from app.models.schemas import Side
@@ -107,6 +109,20 @@ def test_nifty_put_lane_opt_in_blocks_call():
     ok, reason, _ = validate_open_index_lane(cand, settings=s, when=OPEN_TIME)
     assert ok is False
     assert reason == "open_index_lane_nifty_put_only"
+
+
+def test_resolve_lane_when_uses_snap_timestamp():
+    ts = datetime(2026, 10, 21, 9, 25, tzinfo=IST)
+    cand = _candidate(symbol="SENSEX", side="CALL")
+    cand.snap = type("Snap", (), {"timestamp": ts})()
+    assert resolve_lane_when(cand) == ts
+
+
+def test_open_index_lane_qualified_requires_passed_quality():
+    cand = _candidate(symbol="SENSEX", side="PUT")
+    ok, reason, _ = open_index_lane_qualified(cand, when=OPEN_TIME)
+    assert ok is False
+    assert reason == "open_index_lane_sensex_call_only"
 
 
 def test_in_open_caution_window_at_boundaries():

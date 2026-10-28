@@ -623,9 +623,13 @@ def validate_candidate(
     ):
         return False, "power_hour_top_only", policy_meta
 
-    from app.engines.open_index_lane import validate_open_index_lane
+    from app.engines.open_index_lane import resolve_lane_when, validate_open_index_lane
 
-    lane_ok, lane_reason, lane_meta = validate_open_index_lane(candidate, settings=settings)
+    lane_ok, lane_reason, lane_meta = validate_open_index_lane(
+        candidate,
+        settings=settings,
+        when=resolve_lane_when(candidate),
+    )
     policy_meta.update(lane_meta)
     if not lane_ok:
         return False, lane_reason, policy_meta

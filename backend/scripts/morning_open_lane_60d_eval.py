@@ -258,7 +258,7 @@ def _radar_lane_eval(s: Settings) -> dict[str, Any]:
             "winRate": wins / n if n else 0.0,
             "netPnlInr": sum(float(t.get("pnlInr") or 0) for t in all_trades),
         },
-        "note": "Option tape replay; often 0 morning entries under full live gates.",
+        "note": "Option tape replay with open_index_lane merge + replay clock (09:20–09:45).",
     }
 
 
