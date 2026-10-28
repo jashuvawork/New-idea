@@ -1146,12 +1146,24 @@ def elite_v_rip_shallow_lift_blocked(
     settings = settings or get_settings()
     if not bool(getattr(settings, "elite_v_rip_shallow_require_first_lift_enabled", True)):
         return False, ""
-    from app.engines.best_trade_policy import call_atm_itm_near_base_pad
+    from app.engines.best_trade_policy import (
+        atm_itm_676_base_pad,
+        call_atm_itm_near_base_pad,
+    )
 
     pad_evidence = dict(evidence)
     if not pad_evidence.get("localBaseMovePct"):
         pad_evidence["localBaseMovePct"] = assessment.get("localBasePct")
-    if call_atm_itm_near_base_pad(pad_evidence, settings=settings):
+    # A side-less print keeps the old call-only check. Naming PUT (or CALL)
+    # uses the full #676 pad so a put at the base is not a shallow miss.
+    side_u = str(pad_evidence.get("side") or "").upper()
+    if side_u in ("CALL", "PUT"):
+        on_676_pad = atm_itm_676_base_pad(
+            pad_evidence, side=side_u, settings=settings,
+        )
+    else:
+        on_676_pad = call_atm_itm_near_base_pad(pad_evidence, settings=settings)
+    if on_676_pad:
         return False, ""
     if str(assessment.get("setup") or "") != "V":
         return False, ""
