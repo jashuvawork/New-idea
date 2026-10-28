@@ -52,7 +52,7 @@ def test_summary_defaults():
     summary = open_index_lane_summary(s)
     assert summary["enabled"] is True
     assert summary["sensexCallLane"] is True
-    assert summary["niftyPutLane"] is False
+    assert summary["niftyPutLane"] is True
 
 
 def test_idle_after_0945():
@@ -87,6 +87,14 @@ def test_sensex_call_passes_lane(mock_rank, mock_setup, mock_stage, mock_elite):
     ok, reason, meta = validate_open_index_lane(cand, settings=s, when=OPEN_TIME)
     assert ok is True
     assert meta.get("openIndexLaneLane") == "SENSEX_CALL"
+
+
+def test_default_nifty_call_blocked_during_open():
+    s = Settings()
+    cand = _candidate(symbol="NIFTY", side="CALL")
+    ok, reason, _ = validate_open_index_lane(cand, settings=s, when=OPEN_TIME)
+    assert ok is False
+    assert reason == "open_index_lane_nifty_put_only"
 
 
 def test_nifty_put_lane_opt_in_blocks_call():
