@@ -45,7 +45,6 @@ class SqueezeRead:
     momentum: float = 0.0      # regression momentum of de-trended price
     direction: str = "NEUTRAL"  # BULLISH | BEARISH | NEUTRAL (break direction)
     state: str = "NONE"        # SQUEEZE | FIRED | OFF | NONE
-    ready: bool = False
 
     def fresh_fire(self, side: str = "", *, window: int = 3) -> bool:
         """True when the coil released within ``window`` bars and momentum is expanding
@@ -65,9 +64,8 @@ class AdxRead:
     adx: float = 0.0
     plus_di: float = 0.0
     minus_di: float = 0.0
-    regime: str = "NEUTRAL"    # TREND | TRANSITION | CHOP (NEUTRAL when not ready)
+    regime: str = "CHOP"       # TREND | TRANSITION | CHOP
     direction: str = "NEUTRAL"  # BULLISH | BEARISH | NEUTRAL
-    ready: bool = False
 
 
 @dataclass(frozen=True)
@@ -148,8 +146,6 @@ def index_adx_rank_adjust(side: Any, snap: Any) -> float:
     ca = getattr(snap, "chartAnalysis", None) if snap is not None else None
     adx = getattr(ca, "adx", None) if ca is not None else None
     if not isinstance(adx, dict) or not adx:
-        return 0.0
-    if adx.get("ready") is False:
         return 0.0
     regime = str(adx.get("regime") or "").upper()
     direction = str(adx.get("direction") or "NEUTRAL").upper()
@@ -476,7 +472,7 @@ def compute_squeeze(
     """TTM-style squeeze: Bollinger inside Keltner = compression; release = explosion."""
     n = min(len(highs), len(lows), len(closes))
     if n < period + 1:
-        return SqueezeRead(ready=False)
+        return SqueezeRead()
     highs = [float(x) for x in highs[:n]]
     lows = [float(x) for x in lows[:n]]
     closes = [float(x) for x in closes[:n]]
@@ -527,7 +523,7 @@ def compute_squeeze(
         state = "OFF"
     return SqueezeRead(
         on=on_now, fired=fired, bars_on=bars_on, bars_since_fired=bars_since_fired,
-        momentum=round(momentum, 4), direction=direction, state=state, ready=True,
+        momentum=round(momentum, 4), direction=direction, state=state,
     )
 
 
@@ -538,7 +534,7 @@ def compute_adx(
     """Wilder ADX with +DI/-DI and a trend/chop regime label."""
     n = min(len(highs), len(lows), len(closes))
     if n < period * 2:
-        return AdxRead(ready=False)
+        return AdxRead()
     highs = [float(x) for x in highs[:n]]
     lows = [float(x) for x in lows[:n]]
     closes = [float(x) for x in closes[:n]]
@@ -579,7 +575,7 @@ def compute_adx(
         dxs.append(100.0 * abs(pdi - mdi) / denom)
 
     if len(dxs) < period:
-        return AdxRead(ready=False)
+        return AdxRead()
     adx = sum(dxs[:period]) / period
     for i in range(period, len(dxs)):
         adx = (adx * (period - 1) + dxs[i]) / period
@@ -601,7 +597,7 @@ def compute_adx(
         direction = "NEUTRAL"
     return AdxRead(
         adx=round(adx, 2), plus_di=round(plus_di, 2), minus_di=round(minus_di, 2),
-        regime=regime, direction=direction, ready=True,
+        regime=regime, direction=direction,
     )
 
 

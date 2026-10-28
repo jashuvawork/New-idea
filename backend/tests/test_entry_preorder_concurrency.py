@@ -219,13 +219,6 @@ def _process_patches(state, candidate, events, opener):
             return_value=False,
         )
     )
-    # This gate is live only in the opening minutes. The replay must not depend on the clock.
-    stack.enter_context(
-        patch(
-            "app.engines.open_side_confirmation.open_side_confirmation",
-            return_value=(False, "ok", {}),
-        )
-    )
     return stack
 
 

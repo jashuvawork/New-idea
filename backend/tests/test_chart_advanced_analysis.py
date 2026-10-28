@@ -1,6 +1,6 @@
 """Advanced chart analysis — MTF, Fibonacci, patterns, SMC."""
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.engines.chart_advanced_analysis import (
@@ -69,46 +69,6 @@ def test_smt_divergence_bearish():
     assert smt["type"] == "bearish_smt"
 
 
-def test_session_range_ignores_yesterday():
-    # cash_session_candles uses the live IST date. A hardcoded session date
-    # becomes yesterday after midnight and the filter drops today's bars.
-    today = datetime.now(IST).date()
-    prior = today - timedelta(days=1)
-    yesterday = [f"{prior.isoformat()}T15:20:00+05:30", 100, 110, 90, 100, 0]
-    today_open = [f"{today.isoformat()}T09:15:00+05:30", 200, 206, 198, 204, 0]
-    today_next = [f"{today.isoformat()}T09:16:00+05:30", 204, 210, 202, 208, 0]
-    profile = MarketProfile(poc=208, openingRangeHigh=210, openingRangeLow=198)
-    analysis = build_chart_analysis(
-        [yesterday, today_open, today_next],
-        [],
-        208.0,
-        profile,
-        symbol="NIFTY",
-    )
-    assert analysis.institutional["sessionHigh"] == 210.0
-    assert analysis.institutional["sessionLow"] == 198.0
-    assert analysis.pivots["P"] == round((210 + 198 + 100) / 3, 2)
-    assert analysis.vwap["vwap"] > 190
-
-
-def test_yesterday_only_chart_is_not_todays_session():
-    prior = datetime.now(IST).date() - timedelta(days=1)
-    yesterday = [f"{prior.isoformat()}T15:20:00+05:30", 100, 110, 90, 100, 1000]
-    analysis = build_chart_analysis(
-        [yesterday],
-        [],
-        100.0,
-        MarketProfile(poc=100),
-        symbol="NIFTY",
-    )
-    assert analysis.institutional["sessionHigh"] == 0.0
-    assert analysis.institutional["sessionLow"] == 0.0
-    assert analysis.institutional["premiumDiscount"] == "EQUILIBRIUM"
-    assert analysis.institutional["bos"] is None
-    assert analysis.pivots == {}
-    assert analysis.vwap["vwap"] == 0.0
-
-
 def test_build_chart_analysis_mtf():
     closes = [100 + i * 0.2 for i in range(80)]
     candles_1m = _candles(closes)
@@ -128,7 +88,6 @@ def test_build_chart_analysis_mtf():
     assert "5m" in analysis.timeframes
     assert analysis.ichimoku.get("cloudBias")
     assert len(analysis.recentCloses) > 0
-    assert 0 < len(analysis.indicatorWarmCloses) <= 120
 
 
 def test_build_chart_analysis_mtf_fallback_from_5m_only():

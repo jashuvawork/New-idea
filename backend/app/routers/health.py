@@ -3,12 +3,7 @@
 from fastapi import APIRouter
 
 from app.config import audit_week_local_base_overrides, get_settings
-from app.engines.capital_allocator import (
-    book_capital_inr,
-    effective_daily_loss_stop_inr,
-    get_lot_sizes_meta,
-)
-from app.engines.execution_mode import execution_mode_label, paper_execution_active
+from app.engines.capital_allocator import get_lot_sizes_meta
 from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.engines.sep917_legacy_profile import sep917_legacy_profile_summary as _sep917_legacy_profile_summary
 from app.engines.structural_guard_settings import structural_guard_summary
@@ -46,7 +41,6 @@ async def loop_stalls(limit: int = 10):
 
 @router.get("/api/deployment/status")
 async def deployment_status():
-    from app.engines.live_paper_parity import paper_676_entry_choke_active
     from app.loop_watchdog import watchdog_status
     from app.services.radar_health import health_status
 
@@ -76,7 +70,7 @@ async def deployment_status():
             "symbols": settings.symbols,
             "enableLiveTrading": settings.enable_live_trading,
             "autoTradingEnabled": settings.auto_trading_enabled,
-            "paperTrading": paper_execution_active(settings),
+            "paperTrading": settings.paper_trading,
             "simpleProfitMode": settings.paper_simple_profit_mode,
             "dualStrategyEnabled": settings.paper_dual_strategy_enabled,
             "explosionCaptureMode": settings.explosion_capture_mode,
@@ -91,7 +85,6 @@ async def deployment_status():
             "perTradeCapitalPct": settings.per_trade_capital_pct,
             "fallbackCapitalInr": settings.fallback_capital_inr,
             "maxSizingCapitalInr": settings.max_sizing_capital_inr,
-            "bookCapitalInr": book_capital_inr(),
             "aggressiveLotSizing": settings.aggressive_lot_sizing,
             "maxLotsPerTrade": settings.max_lots_per_trade,
             "emergencyStopEnabled": settings.emergency_stop_enabled,
@@ -100,14 +93,6 @@ async def deployment_status():
             "scalpStopPoints": settings.scalp_stop_points,
             "explosionInitialStopPoints": settings.explosion_initial_stop_points,
             "entryEarliestIst": f"{settings.entry_earliest_hour:02d}:{settings.entry_earliest_minute:02d}",
-            "explosionEntryEarliestIst": (
-                f"{settings.explosion_entry_earliest_hour:02d}:"
-                f"{settings.explosion_entry_earliest_minute:02d}"
-            ),
-            "openSideConfirmationStartIst": (
-                f"{settings.open_side_confirmation_start_hour:02d}:"
-                f"{settings.open_side_confirmation_start_minute:02d}"
-            ),
             "openCautionUntilIst": f"{settings.open_caution_until_hour:02d}:{settings.open_caution_until_minute:02d}",
             "openCautionMinExplosionScore": settings.open_caution_min_explosion_score,
             "aggressiveMinExplosionScore": settings.aggressive_min_explosion_score,
@@ -124,9 +109,7 @@ async def deployment_status():
             "constituentStockBreadthOverrideEnabled": settings.constituent_stock_breadth_override_enabled,
             "indexPinPutBlockEnabled": settings.index_pin_put_block_enabled,
             "indexMomentumEnabled": settings.index_momentum_enabled,
-            "dailyLossStopInr": effective_daily_loss_stop_inr(settings),
-            "dailyLossStopPct": settings.daily_loss_stop_pct,
-            "dailyLossStopFromCapital": settings.daily_loss_stop_from_capital,
+            "dailyLossStopInr": settings.daily_loss_stop_inr,
             "dailyMaxTradesChop": settings.daily_max_trades_chop,
             "primaryWindowStartIst": f"{settings.primary_window_start_hour:02d}:{settings.primary_window_start_minute:02d}",
             "sureShotModeEnabled": settings.sure_shot_mode_enabled,
@@ -152,10 +135,6 @@ async def deployment_status():
             "composerApiConfigured": bool(settings.cursor_api_key),
             "paperSlippageEnabled": settings.paper_slippage_enabled,
             "paperLiveParityEnabled": settings.paper_live_parity_enabled,
-            "paper676EntryChoke": paper_676_entry_choke_active(settings),
-            "liveBestTradesOnlyEnabled": bool(
-                getattr(settings, "live_best_trades_only_enabled", True)
-            ),
             "sep917LegacyProfile": _sep917_legacy_profile_summary(settings),
         },
         "paperSlippage": slippage_config_summary(),
@@ -263,7 +242,7 @@ async def deployment_readiness():
         "riskEngineOk": not risk.safe_mode,
         "calibrationClear": not any(state.calibrationBlocks.values()),
         "liveTradingFlagSet": settings.enable_live_trading,
-        "paperTradingActive": paper_execution_active(settings),
+        "paperTradingActive": settings.paper_trading,
         "eventLoopHealthy": bool(loop_healthy),
         "upstoxRateLimitClear": not rate_limit_active(),
         "websocketHealthy": bool(
@@ -341,7 +320,11 @@ async def deployment_readiness():
             live_ready
             and checks.get("worstDayClear", True)
         ),
-        "executionMode": execution_mode_label(settings),
+        "executionMode": (
+            "LIVE"
+            if settings.enable_live_trading and settings.auto_trading_enabled
+            else "PAPER"
+        ),
         "tradingPolicy": {
             "ftvEliteTopOnlyEnabled": bool(
                 getattr(settings, "ftv_elite_top_only_enabled", True)

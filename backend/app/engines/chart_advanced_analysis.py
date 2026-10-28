@@ -143,17 +143,10 @@ def _compute_classic_ichimoku(
 ) -> dict[str, Any]:
     """Classic Donchian-mid Ichimoku (pre-#266) — levels for SL/TP."""
 
-    from app.engines.indicator_readiness import ICHIMOKU_SENKOU_B_MIN
-
-    n = min(len(highs), len(lows), len(closes))
-    ichimoku_ready = n >= ICHIMOKU_SENKOU_B_MIN
-
     def _mid(h: list[float], l: list[float], period: int) -> float:
         if not h or not l:
             return spot
-        if len(h) < period or len(l) < period:
-            return spot
-        p = period
+        p = min(period, len(h))
         return (max(h[-p:]) + min(l[-p:])) / 2
 
     tenkan = _mid(highs, lows, 9)
@@ -163,23 +156,14 @@ def _compute_classic_ichimoku(
     cloud_top = max(senkou_a, senkou_b)
     cloud_bottom = min(senkou_a, senkou_b)
 
-    if not ichimoku_ready:
-        cloud_bias = "NEUTRAL"
-        price_vs = "INSIDE"
-        tk_cross = "NEUTRAL"
-    elif spot > cloud_top:
+    if spot > cloud_top:
         cloud_bias = "BULLISH"
-        price_vs = "ABOVE"
-        tk_cross = "BULLISH" if tenkan > kijun else "BEARISH" if tenkan < kijun else "NEUTRAL"
     elif spot < cloud_bottom:
         cloud_bias = "BEARISH"
-        price_vs = "BELOW"
-        tk_cross = "BULLISH" if tenkan > kijun else "BEARISH" if tenkan < kijun else "NEUTRAL"
     else:
         cloud_bias = "NEUTRAL"
-        price_vs = "INSIDE"
-        tk_cross = "BULLISH" if tenkan > kijun else "BEARISH" if tenkan < kijun else "NEUTRAL"
 
+    tk_cross = "BULLISH" if tenkan > kijun else "BEARISH" if tenkan < kijun else "NEUTRAL"
     return {
         "tenkan": round(tenkan, 2),
         "kijun": round(kijun, 2),
@@ -189,9 +173,8 @@ def _compute_classic_ichimoku(
         "cloudBottom": round(cloud_bottom, 2),
         "cloudBias": cloud_bias,
         "tkCross": tk_cross,
-        "priceVsCloud": price_vs,
+        "priceVsCloud": "ABOVE" if spot > cloud_top else "BELOW" if spot < cloud_bottom else "INSIDE",
         "levelsEngine": "classic",
-        "ichimokuReady": ichimoku_ready,
     }
 
 
@@ -247,15 +230,6 @@ def compute_ichimoku(
     out["smartPriceVsCloud"] = smart.get("priceVsCloud") or classic.get("priceVsCloud")
     out["smartCloudBias"] = smart.get("cloudBias") or classic.get("cloudBias")
     out["smartTkCross"] = smart.get("tkCross") or classic.get("tkCross")
-    # A short series is not a cloud. The lines above would otherwise copy the
-    # clipped HMA read back onto the gate fields.
-    if not classic.get("ichimokuReady"):
-        out["smartPriceVsCloud"] = "INSIDE"
-        out["smartCloudBias"] = "NEUTRAL"
-        out["smartTkCross"] = "NEUTRAL"
-        out["smartBias"] = "NEUTRAL"
-        out["breakConfirmed"] = False
-        out["breakSide"] = "NONE"
     return out
 
 
@@ -546,18 +520,8 @@ def build_chart_analysis(
     mtf_reads = build_mtf_reads(candles_1m, spot, candles_5m=candles_5m)
     consensus = _consensus(mtf_reads)
 
-    from app.engines.indicator_series import (
-        extended_5m_candles,
-        session_5m_candles,
-        session_ohlc,
-        warmup_ohlc,
-    )
-
-    primary_candles = session_5m_candles(candles_1m, candles_5m) or candles_1m or []
+    primary_candles = candles_5m or candles_1m
     opens, highs, lows, closes = _candle_rows(primary_candles)
-    if not closes and candles_1m:
-        primary_candles = extended_5m_candles(candles_1m, candles_5m)
-        opens, highs, lows, closes = _candle_rows(primary_candles)
     if not closes:
         return ChartAnalysis(consensus=consensus, timeframes={k: v.model_dump() for k, v in mtf_reads.items()})
 
@@ -571,83 +535,21 @@ def build_chart_analysis(
         lows = list(lows)
         lows[-1] = min(lows[-1], spot)
 
-    w_opens, w_highs, w_lows, w_closes = warmup_ohlc(candles_1m, candles_5m, spot)
-    s_opens, s_highs, s_lows, s_closes = session_ohlc(candles_1m, candles_5m, spot)
-
     swing_highs, swing_lows = _find_swings(highs, lows)
     sh = swing_highs[-1][1] if swing_highs else max(highs)
     sl = swing_lows[-1][1] if swing_lows else min(lows)
     trend = "UP" if closes[-1] >= closes[min(5, len(closes) - 1)] else "DOWN"
 
-    from app.engines.index_candle_rollover import (
-        cash_session_candles,
-        prior_close_before_cash_session,
-    )
-
-    session_rows = cash_session_candles(candles_1m if candles_1m else primary_candles)
-    _session_opens, session_highs, session_lows, session_closes = _candle_rows(session_rows)
-    if session_highs and spot > 0:
-        session_highs = list(session_highs)
-        session_lows = list(session_lows)
-        session_closes = list(session_closes)
-        session_highs[-1] = max(session_highs[-1], spot)
-        session_lows[-1] = min(session_lows[-1], spot)
-        session_closes[-1] = spot
-
-    from app.services.upstox import _candle_ts
-
-    stamp_source = candles_1m if candles_1m else primary_candles
-    stamped = any(_candle_ts(row) is not None for row in stamp_source)
-    # A timestamped chart is a live Upstox series. Today's high is the cash
-    # session or the quote. The multi-day window, and the live spot, are not
-    # a substitute. An untimestamped series is a self-contained replay.
-    dh = float(day_high or 0)
-    dl = float(day_low or 0)
-    if dh <= 0:
-        if session_highs:
-            dh = max(session_highs)
-        elif not stamped and highs:
-            dh = max(highs)
-    if dl <= 0:
-        if session_lows:
-            dl = min(session_lows)
-        elif not stamped and lows:
-            dl = min(lows)
-    pc = float(prev_close or 0)
-    if pc <= 0:
-        pc_source = candles_1m if candles_1m else primary_candles
-        pc = prior_close_before_cash_session(pc_source)
-    if pc <= 0 and not stamped and closes:
-        pc = closes[0]
+    dh = day_high or (max(highs) if highs else spot)
+    dl = day_low or (min(lows) if lows else spot)
+    pc = prev_close or (closes[0] if closes else spot)
 
     fib = compute_fibonacci_levels(sl, sh, spot, trend=trend)
     pivots = compute_pivot_points(dh, dl, pc)
     gann = compute_gann_levels(dl, dh)
     pitchfork = compute_andrews_pitchfork(swing_lows, swing_highs, spot)
-    ichimoku = compute_ichimoku(
-        w_highs or highs, w_lows or lows, w_closes or closes, spot,
-    )
-    if session_highs and session_lows:
-        # Structure, premium/discount, and session high from today's cash bars.
-        # The 300-bar window still feeds Ichimoku and RSI, which need warmup.
-        smc = analyze_smc_ict(
-            _session_opens, session_highs, session_lows, session_closes, spot,
-        )
-    else:
-        smc = analyze_smc_ict(opens, highs, lows, closes, spot)
-        if stamped:
-            # Yesterday's swing is still in the warmup window. It is not
-            # today's session, and it must not score a premium or a BOS.
-            smc = dict(smc)
-            smc["sessionHigh"] = 0.0
-            smc["sessionLow"] = 0.0
-            smc["equilibrium"] = 0.0
-            smc["premiumDiscount"] = "EQUILIBRIUM"
-            smc["bos"] = None
-            smc["choch"] = None
-            smc["stopHunt"] = None
-            smc["judasSwing"] = False
-            smc["displacement"] = False
+    ichimoku = compute_ichimoku(highs, lows, closes, spot)
+    smc = analyze_smc_ict(opens, highs, lows, closes, spot)
 
     patterns: list[dict[str, Any]] = []
     pattern_sources: list[tuple[str, list]] = []
@@ -675,13 +577,6 @@ def build_chart_analysis(
 
     aligned = _mtf_aligned_count(mtf_reads, consensus)
     recent_closes = [round(c, 2) for c in closes[-30:]]
-    from app.config import get_settings as _gs_warm
-
-    _warm_cap = int(
-        getattr(_gs_warm(), "spot_chart_indicator_warm_closes_cap", 120) or 120
-    )
-    warm_source = w_closes if w_closes else closes
-    indicator_warm_closes = [round(c, 2) for c in warm_source[-_warm_cap:]]
 
     # Advanced indicators — squeeze (base->explosion), ADX (trend/chop), Supertrend, VWAP.
     from dataclasses import asdict
@@ -694,42 +589,26 @@ def build_chart_analysis(
         compute_vwap,
     )
 
-    def _bar_volume(row: Any) -> float:
-        if isinstance(row, list) and len(row) > 5:
-            return float(row[5] or 0)
-        if isinstance(row, dict):
-            return float(row.get("volume", 0) or 0)
-        return 0.0
-
-    if stamped and session_rows:
-        vwap_bars = session_rows
-        vwap_highs, vwap_lows, vwap_closes = session_highs, session_lows, session_closes
-    elif stamped:
-        vwap_bars, vwap_highs, vwap_lows, vwap_closes = [], [], [], []
-    else:
-        vwap_bars = primary_candles
-        vwap_highs, vwap_lows, vwap_closes = highs, lows, closes
-    volumes = [_bar_volume(row) for row in vwap_bars]
-    wh, wl, wc = w_highs or highs, w_lows or lows, w_closes or closes
-    squeeze = asdict(compute_squeeze(wh, wl, wc))
-    adx = asdict(compute_adx(wh, wl, wc))
-    supertrend = asdict(compute_supertrend(wh, wl, wc))
+    volumes = [
+        float(c[5]) if isinstance(c, list) and len(c) > 5
+        else float(c.get("volume", 0) or 0) if isinstance(c, dict) else 0.0
+        for c in primary_candles
+    ]
+    squeeze = asdict(compute_squeeze(highs, lows, closes))
+    adx = asdict(compute_adx(highs, lows, closes))
+    supertrend = asdict(compute_supertrend(highs, lows, closes))
     from app.config import get_settings as _gs
 
     _s = _gs()
-    dc_o = s_opens or opens
-    dc_h = s_highs or highs
-    dc_l = s_lows or lows
-    dc_c = s_closes or closes
     decisive_candle = asdict(compute_decisive_candle(
-        dc_o, dc_h, dc_l, dc_c,
+        opens, highs, lows, closes,
         body_ratio_min=float(getattr(_s, "decisive_candle_body_ratio_min", 0.6) or 0.6),
         rsi_ceiling=float(getattr(_s, "decisive_candle_rsi_ceiling", 80.0) or 80.0),
         pullback_lookback=int(getattr(_s, "decisive_candle_pullback_lookback", 5) or 5),
     ))
-    # Session VWAP is today's cash bars. The chart window also holds yesterday,
-    # and that mean is not the session the reclaim check is named for.
-    vwap = asdict(compute_vwap(vwap_highs, vwap_lows, vwap_closes, volumes))
+    # Always compute VWAP — indices carry no candle volume, so it falls back to a
+    # price-anchored session mean (still gives position + reclaim for turn confirmation).
+    vwap = asdict(compute_vwap(highs, lows, closes, volumes))
 
     return ChartAnalysis(
         consensus=consensus,
@@ -737,7 +616,6 @@ def build_chart_analysis(
         totalTimeframes=len(mtf_reads),
         timeframes={k: v.model_dump() for k, v in mtf_reads.items()},
         recentCloses=recent_closes,
-        indicatorWarmCloses=indicator_warm_closes,
         fibonacci=fib,
         fibExtension=fib.get("extension", {}),
         pivots=pivots,

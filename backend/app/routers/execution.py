@@ -5,7 +5,6 @@ from pydantic import BaseModel
 
 from app.config import get_settings
 from app.engines.auto_trader import entries_execution_active, get_state, resume_trading, stop_trading
-from app.engines.execution_mode import execution_mode_label, paper_execution_active
 from app.engines.realtime_engine import build_symbol_snapshot
 from app.models.schemas import Side
 from app.services.order_executor import place_entry_order
@@ -50,8 +49,8 @@ async def execution_status():
         "running": entries_active,
         "autoTradingEnabled": settings.auto_trading_enabled,
         "liveTradingEnabled": settings.enable_live_trading,
-        "paperTrading": paper_execution_active(settings),
-        "executionMode": execution_mode_label(settings),
+        "paperTrading": settings.paper_trading,
+        "executionMode": "LIVE" if settings.enable_live_trading else "PAPER",
         "openTrades": len(state.openPaperTrades),
         "liveOrdersPlaced": state.liveOrdersPlaced,
         "lastEntry": state.lastEntry,

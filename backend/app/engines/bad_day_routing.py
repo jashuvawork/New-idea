@@ -693,9 +693,7 @@ def expiry_daily_loss_stop_bypass_active(
         return False
     if not settings.expiry_day_guards_enabled or not is_expiry_session(snapshots):
         return False
-    from app.engines.capital_allocator import effective_daily_loss_stop_inr
-
-    loss_stop = effective_daily_loss_stop_inr(settings)
+    loss_stop = float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
     if loss_stop <= 0:
         return False
     session_pnl = compute_session_pnl(state)

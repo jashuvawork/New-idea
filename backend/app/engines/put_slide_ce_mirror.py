@@ -146,12 +146,7 @@ def ce_win_pe_mirror_call_chase_blocked(
     *,
     settings: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
-    """Symmetric to pe_win_ce_mirror_put_chase_blocked — CE chase after CALL win.
-
-    A rally breakout passes on either index. The same index passes without one
-    unless its PUT mirror is already armed. The other index without a breakout
-    stays blocked for the 15-minute window.
-    """
+    """Symmetric to pe_win_ce_mirror_put_chase_blocked — CE chase after CALL win."""
     settings = settings or get_settings()
     meta: dict[str, Any] = {}
     if not bool(getattr(settings, "ce_win_pe_mirror_enabled", True)):
@@ -180,7 +175,6 @@ def ce_win_pe_mirror_call_chase_blocked(
 
     sym = str(getattr(candidate, "symbol", "") or "").upper()
     snap = snapshots.get(sym) or getattr(candidate, "snap", None)
-    win_sym = str(call_meta.get("callWinSymbol") or "").upper()
     if snap is not None:
         from app.engines.index_tick_helpers import index_trend_breakout
 
@@ -188,6 +182,7 @@ def ce_win_pe_mirror_call_chase_blocked(
             meta["callRallyBreakout"] = True
             return False, "ok", meta
 
+    win_sym = str(call_meta.get("callWinSymbol") or "").upper()
     if win_sym and sym != win_sym:
         return True, "ce_win_pe_mirror_block_cross_index_call", meta
 
@@ -203,7 +198,7 @@ def ce_win_pe_mirror_call_chase_blocked(
             meta.update(arm_meta)
             return True, "ce_win_pe_mirror_block_call_for_put_leg", meta
 
-    return False, "ok", meta
+    return True, "ce_win_pe_mirror_block_call_chase_window", meta
 
 
 def _soft_index_slide_ok(

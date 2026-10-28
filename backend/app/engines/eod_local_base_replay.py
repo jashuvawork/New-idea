@@ -478,33 +478,6 @@ def evaluate_replay_structural_gates(
             if blocked:
                 return False, str(meta.get("reason") or "session_reentry_blocked")
 
-        if bool(getattr(s, "eod_replay_reentry_ml_gate_enabled", True)):
-            from app.engines.session_mode_feedback import reentry_ml_win_prob_blocked
-
-            alert_row = alert if isinstance(alert, dict) else {}
-            ml_blocked, ml_meta = reentry_ml_win_prob_blocked(
-                replay_state,
-                symbol=sym,
-                side=side,
-                strike=strike,
-                snap=snap,
-                confidence=float(
-                    alert_row.get("score")
-                    or alert_row.get("explosionScore")
-                    or getattr(candidate, "score", 0)
-                    or 0
-                ),
-                alert=alert_row,
-                velocity_3s=float(
-                    alert_row.get("velocity3s")
-                    or alert_row.get("velocity_3s")
-                    or getattr(getattr(candidate, "explosion_event", None), "velocity_3s", 0)
-                    or 0
-                ),
-            )
-            if ml_blocked:
-                return False, str(ml_meta.get("reason") or "reentry_ml_win_prob_low")
-
     if pretrade:
         from app.engines.pretrade_validator import validate_candidate
 
@@ -541,49 +514,6 @@ def evaluate_replay_structural_gates(
     )
     if immature:
         return False, imm_reason
-
-    alert_row = alert if isinstance(alert, dict) else {}
-    reentry_velocity = float(
-        alert_row.get("velocity3s")
-        or alert_row.get("velocity_3s")
-        or getattr(event, "velocity_3s", 0)
-        or 0
-    )
-    if bool(getattr(s, "eod_replay_reentry_velocity_gate_enabled", True)):
-        from app.engines.session_mode_feedback import win_reentry_velocity_blocked
-
-        win_blocked, win_reason = win_reentry_velocity_blocked(
-            replay_state,
-            symbol=sym,
-            side=side,
-            strike=strike,
-            velocity_3s=reentry_velocity,
-            premium=float(
-                alert_row.get("premium") or getattr(event, "premium", 0) or 0
-            ),
-            alert=alert_row,
-        )
-        if win_blocked:
-            return False, win_reason or "win_reentry_velocity_required"
-
-    if bool(getattr(s, "eod_replay_exhausted_ftv_gate_enabled", True)):
-        from app.engines.session_mode_feedback import exhausted_ftv_reentry_blocked
-
-        exhausted, ex_meta = exhausted_ftv_reentry_blocked(
-            replay_state,
-            symbol=sym,
-            side=side,
-            strike=strike,
-            premium=float(
-                alert_row.get("premium") or getattr(event, "premium", 0) or 0
-            ),
-            velocity_3s=reentry_velocity,
-            alert=alert_row,
-        )
-        if exhausted:
-            return False, str(
-                ex_meta.get("reason") or "exhausted_ftv_requires_new_base_reacceleration"
-            )
 
     trap_block, trap_reason, trap_meta = detect_fake_explosion_trap(
         candidate, snap, state=replay_state, ict=ict,
@@ -1738,9 +1668,7 @@ def replay_local_base_day(
 
     total = round(sum(_f(t.get("pnlInr")) for t in taken), 0)
     wins = sum(1 for t in taken if _f(t.get("pnlInr")) > 0)
-    from app.engines.capital_allocator import effective_daily_loss_stop_inr
-
-    daily_stop = effective_daily_loss_stop_inr(s)
+    daily_stop = _f(getattr(s, "daily_loss_stop_inr", 20_000.0), 20_000.0)
 
     mode = "local_base_system_params"
     if win_start or win_end or side_filter_v:

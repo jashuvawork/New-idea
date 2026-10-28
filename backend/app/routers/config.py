@@ -1,27 +1,16 @@
 """Capital and risk profile API."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from app.engines.auto_trader import get_risk_engine, set_capital
-from app.engines.capital_allocator import effective_daily_loss_stop_inr
 from app.models.schemas import CapitalConfig, RiskProfile
 
 router = APIRouter(prefix="/api", tags=["config"])
 
-
 @router.post("/capital")
 async def set_capital_endpoint(config: CapitalConfig):
-    try:
-        snap = set_capital(config.allocatedInr)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {
-        "status": "ok",
-        "allocatedInr": snap.availableMarginInr,
-        "bookCapitalInr": snap.availableMarginInr,
-        "dailyLossStopInr": effective_daily_loss_stop_inr(),
-        "source": snap.source,
-    }
+    set_capital(config.allocatedInr)
+    return {"status": "ok", **config.model_dump()}
 
 
 @router.post("/risk/profile")

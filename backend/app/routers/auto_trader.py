@@ -4,7 +4,6 @@ from fastapi import APIRouter
 
 from fastapi import HTTPException
 
-from app.engines.capital_allocator import effective_daily_loss_stop_inr
 from app.engines.auto_trader import (
     entries_execution_active,
     get_performance_analysis,
@@ -108,17 +107,8 @@ async def purge_trade_logs():
 
 @router.post("/capital")
 async def set_trading_capital(config: CapitalConfig):
-    try:
-        snap = set_capital(config.allocatedInr)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {
-        "status": "ok",
-        "allocatedInr": snap.availableMarginInr,
-        "bookCapitalInr": snap.availableMarginInr,
-        "dailyLossStopInr": effective_daily_loss_stop_inr(),
-        "source": snap.source,
-    }
+    set_capital(config.allocatedInr)
+    return {"status": "ok", "allocatedInr": config.allocatedInr}
 
 
 @router.get("/history")

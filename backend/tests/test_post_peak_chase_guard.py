@@ -138,32 +138,6 @@ def test_session_post_peak_allows_entry_near_session_low():
     assert blocked is False
 
 
-def test_fresh_lift_printing_the_high_is_not_a_chase():
-    """A one-second lift that makes the high is the entry, not a finished top.
-
-    The local-base tape keeps the low for about a second, then the next sample
-    is the lifted price. That print is current == high after a 25%+ run, which
-    used to block as explosion_post_peak_chase.
-    """
-    base = [100.0] * 20
-    _seed("NIFTY", 24100.0, Side.CALL, base + [140.0], step_s=1.0)
-    _seed_session("NIFTY", 24100.0, Side.CALL, 100.0, 140.0)
-    ev = SimpleNamespace(symbol="NIFTY", side=Side.CALL, strike=24100.0, premium=140.0)
-    with patch("app.engines.explosion_entry_guards.get_settings", return_value=_settings()):
-        blocked, reason = post_peak_chase_blocked(ev)
-    assert blocked is False, reason
-
-
-def test_lift_still_allowed_one_second_after_the_new_high():
-    base = [100.0] * 20
-    _seed("NIFTY", 24100.0, Side.CALL, base + [140.0, 142.0], step_s=1.0)
-    _seed_session("NIFTY", 24100.0, Side.CALL, 100.0, 142.0)
-    ev = SimpleNamespace(symbol="NIFTY", side=Side.CALL, strike=24100.0, premium=142.0)
-    with patch("app.engines.explosion_entry_guards.get_settings", return_value=_settings()):
-        blocked, reason = post_peak_chase_blocked(ev)
-    assert blocked is False, reason
-
-
 def test_recent_premium_run_reads_history():
     prems = [40 + i * 3 for i in range(30)] + [130, 128, 126]
     _seed("NIFTY", 23950.0, Side.PUT, prems)

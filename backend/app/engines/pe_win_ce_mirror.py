@@ -175,10 +175,7 @@ def pe_win_ce_mirror_put_chase_blocked(
     Block opportunistic PUT explosions shortly after a trail-proved PUT win.
 
     Oct 1: NIFTY PUT win → SENSEX PUT chase while CE rally leg was the intended mirror.
-    A real slide breakout on the candidate index, including the other index, is
-    the continuation and passes. With no breakout the same index still passes
-    unless its CALL mirror is already armed. The other index without a breakout
-    stays blocked for the 15-minute window.
+    Allows PUT only when index slide breakout confirms continuation down on that symbol.
     """
     settings = settings or get_settings()
     meta: dict[str, Any] = {}
@@ -208,7 +205,6 @@ def pe_win_ce_mirror_put_chase_blocked(
 
     sym = str(getattr(candidate, "symbol", "") or "").upper()
     snap = snapshots.get(sym) or getattr(candidate, "snap", None)
-    win_sym = str(pe_meta.get("putWinSymbol") or "").upper()
     if snap is not None:
         from app.engines.index_tick_helpers import index_trend_breakout
 
@@ -216,6 +212,7 @@ def pe_win_ce_mirror_put_chase_blocked(
             meta["putSlideBreakout"] = True
             return False, "ok", meta
 
+    win_sym = str(pe_meta.get("putWinSymbol") or "").upper()
     if win_sym and sym != win_sym:
         return True, "pe_win_ce_mirror_block_cross_index_put", meta
 
@@ -231,7 +228,7 @@ def pe_win_ce_mirror_put_chase_blocked(
             meta.update(arm_meta)
             return True, "pe_win_ce_mirror_block_put_for_call_leg", meta
 
-    return False, "ok", meta
+    return True, "pe_win_ce_mirror_block_put_chase_window", meta
 
 
 def _soft_index_rally_ok(

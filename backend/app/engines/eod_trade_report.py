@@ -52,8 +52,7 @@ def _ignition_ok(
 
 def _not_post_peak_chase(
     series: list[tuple[datetime, float, float]], i: int, *,
-    lookback_s: float, min_run: float, near_top_frac: float,
-    min_peak_age_s: float = 45.0,
+    lookback_s: float, min_run: float, near_top_frac: float
 ) -> bool:
     """False (reject) when we'd be buying near the TOP of a run that already happened.
 
@@ -64,26 +63,17 @@ def _not_post_peak_chase(
     t_now, p_now, _ = series[i]
     lo = p_now
     hi = p_now
-    rows: list[tuple[datetime, float]] = []
     for j in range(i, -1, -1):
         if (t_now - series[j][0]).total_seconds() > lookback_s:
             break
         pj = series[j][1]
         lo = min(lo, pj)
         hi = max(hi, pj)
-        rows.append((series[j][0], float(pj)))
     if lo <= 0:
         return True
     run = (hi - lo) / lo
     if run >= min_run and p_now >= hi * (1.0 - near_top_frac):
-        from app.engines.explosion_detector import prior_near_level_age_on_rows
-
-        rows.sort(key=lambda row: row[0])
-        age = prior_near_level_age_on_rows(rows, hi, near_top_frac)
-        min_age = max(0.0, float(min_peak_age_s or 0))
-        if min_age <= 0 or age is None or age < min_age:
-            return True
-        return False  # top already traded — spent move
+        return False  # a big run already happened and we're near its top — spent move
     return True
 
 
@@ -129,9 +119,6 @@ def replay_contract_trades(
     pp_lookback = _f(getattr(s, "eod_replay_post_peak_lookback_s", 900.0), 900.0)
     pp_min_run = _f(getattr(s, "eod_replay_post_peak_min_run_pct", 0.25), 0.25)
     pp_near_top = _f(getattr(s, "eod_replay_post_peak_near_top_frac", 0.12), 0.12)
-    pp_min_peak_age = _f(
-        getattr(s, "explosion_post_peak_chase_min_peak_age_seconds", 45.0), 45.0,
-    )
     ign_on = bool(getattr(s, "eod_replay_ignition_enabled", False))
     ign_window = _f(getattr(s, "eod_replay_ignition_window_s", 45.0), 45.0)
     ign_min_rise = _f(getattr(s, "eod_replay_ignition_min_rise_pct", 0.012), 0.012)
@@ -159,7 +146,6 @@ def replay_contract_trades(
                 or _not_post_peak_chase(
                     series, i, lookback_s=pp_lookback,
                     min_run=pp_min_run, near_top_frac=pp_near_top,
-                    min_peak_age_s=pp_min_peak_age,
                 )
             )
             and (
@@ -411,9 +397,7 @@ def generate_eod_trade_report(date: str, *, top_n: int = 8) -> dict[str, Any]:
         t.pop("_exitDt", None)
     total = round(sum(_f(t.get("pnlInr")) for t in taken), 0)
     wins = sum(1 for t in taken if _f(t.get("pnlInr")) > 0)
-    from app.engines.capital_allocator import effective_daily_loss_stop_inr
-
-    daily_stop = effective_daily_loss_stop_inr(settings)
+    daily_stop = _f(getattr(settings, "daily_loss_stop_inr", 20_000.0), 20_000.0)
     return {
         "date": date,
         "status": "ok",
@@ -451,9 +435,7 @@ def apply_portfolio_limits(
     once the day's loss stop is hit. With 1 slot this is the old one-at-a-time behaviour.
     """
     s = settings or get_settings()
-    from app.engines.capital_allocator import effective_daily_loss_stop_inr
-
-    daily_stop = effective_daily_loss_stop_inr(s)
+    daily_stop = _f(getattr(s, "daily_loss_stop_inr", 20_000.0), 20_000.0)
     max_conc = max(1, int(_f(getattr(s, "eod_report_max_concurrent", 1), 1)))
     same_side_cap = max(1, int(_f(getattr(s, "eod_report_same_side_cap", 2), 2)))
     ordered = sorted(candidates, key=lambda t: t.get("_entryDt") or datetime.now(IST))

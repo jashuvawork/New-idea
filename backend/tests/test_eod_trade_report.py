@@ -181,17 +181,6 @@ def test_post_peak_guard_rejects_chase_after_completed_run():
     ) is False
 
 
-def test_post_peak_guard_allows_fresh_lift_printing_window_high():
-    """Flat base then one lift tick at the high — not a spent top (parity with live #830)."""
-    t0 = datetime(2026, 8, 20, 11, 40, 0, tzinfo=IST)
-    prems = [100.0] * 20 + [140.0]
-    series = [(t0 + timedelta(seconds=i), float(p), 24000.0) for i, p in enumerate(prems)]
-    last = len(series) - 1
-    assert _not_post_peak_chase(
-        series, last, lookback_s=900.0, min_run=0.25, near_top_frac=0.12,
-    ) is True
-
-
 def test_post_peak_guard_allows_entry_as_run_starts():
     t0 = datetime(2026, 8, 20, 11, 40, 0, tzinfo=IST)
     # A flat base then just the first ticks up — no completed run in the window yet.

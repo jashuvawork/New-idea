@@ -5,7 +5,7 @@ import logging
 import math
 import threading
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -112,12 +112,10 @@ from app.engines.session_timing import entries_allowed_now, entry_window_label, 
 from app.engines.snapshot_fast import resolve_trade_premium
 from app.services import trade_store
 from app.services.order_executor import (
-    broker_position_quantity,
     find_existing_exit_order,
     live_order_fill,
     live_order_fill_complete,
     live_order_fill_rejected,
-    lots_fitting_broker_margin,
     place_entry_order,
     place_exit_order,
 )
@@ -126,9 +124,6 @@ from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
-# A broker error on a live sell is often a network blip, and the sell may be a stop loss,
-# so wait less than the 20s used after a broker rejection.
-LIVE_EXIT_ERROR_RETRY_SECONDS = 5
 
 # Singleton state
 _auto_trader_state: Optional[AutoTraderState] = None
@@ -548,22 +543,27 @@ def _exit_plan_for_trade(
 
 
 def _execution_mode(settings) -> str:
-    from app.engines.execution_mode import execution_mode_label
-
-    return execution_mode_label(settings)
+    if settings.enable_live_trading and settings.auto_trading_enabled:
+        return "LIVE"
+    if settings.paper_live_parity_enabled:
+        return "PAPER_LIVE_PARITY"
+    return "PAPER"
 
 
 def _uses_paper_live_parity(settings) -> bool:
-    from app.engines.execution_mode import paper_live_parity_active
-
-    return paper_live_parity_active(settings)
+    is_live = settings.enable_live_trading and settings.auto_trading_enabled
+    return (
+        settings.paper_live_parity_enabled
+        and settings.paper_simulate_broker_orders
+        and not is_live
+    )
 
 
 def _record_deferred_candidate_fallback(
     candidate: EntryCandidate,
     reason: str,
 ) -> bool:
-    """Record only typed pre-submission failures (chart gate, expiry OTM strike)."""
+    """Record only typed failures emitted by the chart gate before order submission."""
     return suppress_after_preorder_rejection(candidate, reason)
 
 
@@ -653,33 +653,26 @@ async def _open_from_candidate(
             reason = _session_loss_meta.get("reason") or "session_same_side_loss_reentry_cooldown"
             return False, reason
 
-        reentry_velocity = float(
-            getattr(getattr(candidate, "explosion_event", None), "velocity_3s", 0) or 0
-        )
-        alert_d = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
-        ml_blocked, ml_meta = reentry_ml_win_prob_blocked(
+        ml_blocked, _ml_meta = reentry_ml_win_prob_blocked(
             state,
             symbol=symbol,
             side=candidate.side,
             strike=float(candidate.strike or 0),
             snap=snap,
             confidence=float(candidate.score or 0),
-            alert=alert_d,
-            velocity_3s=reentry_velocity,
         )
-        if ml_meta.get("freshEntry"):
-            candidate.pretrade_meta = {**(candidate.pretrade_meta or {}), **ml_meta}
         if ml_blocked:
             return False, "reentry_ml_win_prob_low"
 
+        reentry_velocity = float(
+            getattr(candidate.explosion_event, "velocity_3s", 0) or 0
+        )
         win_blocked, win_reason = win_reentry_velocity_blocked(
             state,
             symbol=symbol,
             side=candidate.side,
             strike=float(candidate.strike or 0),
             velocity_3s=reentry_velocity,
-            premium=float(candidate.premium or 0),
-            alert=alert_d,
         )
         if win_blocked:
             return False, win_reason or "win_reentry_velocity_required"
@@ -690,10 +683,11 @@ async def _open_from_candidate(
             strike=float(candidate.strike or 0),
             premium=float(candidate.premium or 0),
             velocity_3s=reentry_velocity,
-            alert=alert_d,
         )
         if reentry_blocked:
             return False, "exhausted_ftv_requires_new_base_reacceleration"
+
+        alert_d = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
         late_peak_blocked, late_peak_reason = session_peak_late_reentry_blocked(
             symbol=symbol,
             side=candidate.side,
@@ -877,7 +871,6 @@ async def _open_from_candidate(
             settings=settings,
         )
         if otm_blocked:
-            _record_deferred_candidate_fallback(candidate, otm_reason)
             return False, otm_reason
 
         if bool(getattr(settings, "best_trade_block_chop_deep_chase_enabled", True)):
@@ -2196,32 +2189,6 @@ async def _open_from_candidate(
         top_explosion_max = True
         elite_full_lot = True
         top_rank_full_budget_lots = True
-    if candidate.mode == "explosion":
-        from app.engines.session_mode_feedback import cap_post_win_continuation_leg_lots
-
-        alert_for_cap = (
-            candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
-        )
-        prev_lots = lots
-        lots, cont_cap_meta = cap_post_win_continuation_leg_lots(
-            lots,
-            state,
-            symbol=symbol,
-            side=candidate.side,
-            strike=float(candidate.strike or 0),
-            premium=float(fill_premium or candidate.premium or 0),
-            velocity_3s=entry_velocity_3s,
-            alert=alert_for_cap,
-        )
-        if cont_cap_meta.get("postWinContinuationLegCapApplied"):
-            post_win_cap_meta = {**post_win_cap_meta, **cont_cap_meta}
-            post_win_cap_meta["applied"] = True
-            top_explosion_max = False
-            elite_full_lot = False
-            if exit_plan is not None and lots != prev_lots:
-                exit_plan["lots"] = lots
-        if lots <= 0:
-            return False, "post_win_continuation_leg_lot_cap"
     if exit_plan and settings.edge_engine_enabled:
         plan_obj = AdaptiveExitPlan.from_dict(exit_plan)
         # Jul30: edge_tighten crushed calculated ~20pt SL to 7.99 on max-lot ELITE.
@@ -3037,22 +3004,6 @@ async def _open_from_candidate(
         ctx_extra["ftvAuthorizationReason"] = final_policy.reason
         ctx_extra["ftvMaxCapitalPct"] = final_policy.max_capital_pct
 
-    if (is_live or use_parity) and candidate.mode == "explosion":
-        from app.engines.live_best_trades import live_best_trade_entry_blocked
-
-        live_blocked, live_reason, live_meta = live_best_trade_entry_blocked(
-            candidate,
-            snap,
-            state,
-            snapshots=snapshots,
-            ranking=final_ranking or policy_ranking,
-            chart_meta=chart_meta if chart_meta else None,
-        )
-        if live_blocked:
-            return False, live_reason
-        ctx_extra["liveBestTradeGate"] = True
-        ctx_extra.update({k: v for k, v in live_meta.items() if k != "liveBestTradeGate"})
-
     from app.engines.chop_live_guards import (
         chop_live_entry_blocked,
         chop_live_guard_day_active,
@@ -3088,33 +3039,6 @@ async def _open_from_candidate(
             return False, "broker client required for live / paper-live-parity"
         try:
             if is_live:
-                fitted = lots
-                try:
-                    from app.engines.capital_allocator import _parse_upstox_funds
-
-                    funds = await client.get_funds(force=True)
-                    available, _, _ = _parse_upstox_funds(
-                        funds if isinstance(funds, dict) else {}
-                    )
-                    if available > 0:
-                        fitted = lots_fitting_broker_margin(
-                            lots, lot_mult, fill_premium, available,
-                        )
-                except Exception as exc:
-                    logger.warning("Broker margin read failed before entry: %s", exc)
-                    fitted = lots
-                if fitted < 1:
-                    return False, (
-                        f"entry skipped: broker margin cannot buy {symbol} "
-                        f"at ₹{fill_premium:.2f}"
-                    )
-                if fitted < lots:
-                    logger.info(
-                        "Shrunk live lots %s → %s so the order fits broker margin",
-                        lots,
-                        fitted,
-                    )
-                    lots = fitted
                 order = await place_entry_order(
                     client, snap, candidate.strike, candidate.side, lots,
                 )
@@ -3126,10 +3050,6 @@ async def _open_from_candidate(
                     "brokerSimulated": False,
                 })
                 entry_fill = await live_order_fill(client, str(order.get("order_id") or ""))
-                if live_order_fill_rejected(entry_fill):
-                    message = str(entry_fill.get("statusMessage") or "rejected")
-                    logger.error("Entry rejected for %s: %s", symbol, message)
-                    return False, f"entry rejected: {message}"
                 if live_order_fill_complete(entry_fill):
                     fill_premium = round(float(entry_fill["averagePrice"]), 2)
                     slip_meta = dict(slip_meta or {})
@@ -3309,6 +3229,9 @@ def get_state() -> AutoTraderState:
     if _auto_trader_state is None:
         settings = get_settings()
         _auto_trader_state = AutoTraderState(
+            paperTrading=settings.paper_trading,
+            liveTradingEnabled=settings.enable_live_trading,
+            autoTradingEnabled=settings.auto_trading_enabled,
             running=True,
             tradeMastermind=TradeMastermind(
                 simpleProfitMode=settings.paper_simple_profit_mode,
@@ -3322,9 +3245,6 @@ def get_state() -> AutoTraderState:
                 adaptiveTargets=settings.adaptive_target_enabled,
             ),
         )
-        from app.engines.execution_mode import sync_autotrader_execution_flags
-
-        sync_autotrader_execution_flags(_auto_trader_state, settings)
     _ensure_state_loaded()
     from app.engines.session_trade_integrity import prune_prior_session_closed_trades
 
@@ -3391,6 +3311,9 @@ def reset_session(*, preserve_open_trades: bool = True) -> None:
     reset_session_calibration()
     settings = get_settings()
     _auto_trader_state = AutoTraderState(
+        paperTrading=settings.paper_trading,
+        liveTradingEnabled=settings.enable_live_trading,
+        autoTradingEnabled=settings.auto_trading_enabled,
         running=True,
         tradeMastermind=TradeMastermind(
             simpleProfitMode=settings.paper_simple_profit_mode,
@@ -3405,81 +3328,18 @@ def reset_session(*, preserve_open_trades: bool = True) -> None:
         ),
         openPaperTrades=preserved,
     )
-    from app.engines.execution_mode import sync_autotrader_execution_flags
-
-    sync_autotrader_execution_flags(_auto_trader_state, settings)
     _state_loaded = True
 
 
-def set_capital(amount: float):
-    """Apply today's book and keep it across a restart."""
-    from app.engines.capital_allocator import save_day_capital
-
+def set_capital(amount: float) -> None:
     global _capital_inr
     snap = set_manual_capital_limit(amount)
-    save_day_capital(snap.availableMarginInr)
     _capital_inr = snap.availableMarginInr
-    return snap
 
 
 def get_risk_engine() -> RiskEngine:
     """Shared engine used by both HTTP controls and live entry checks."""
     return _risk_engine
-
-
-async def _broker_holds_position(
-    client: Any,
-    trade: PaperTrade,
-    broker_ctx: dict[str, Any],
-) -> bool:
-    """False only when the broker positions read shows zero for this contract."""
-    try:
-        rows = await client.get_positions()
-    except Exception as exc:
-        logger.warning("Position read failed for %s: %s", trade.id, exc)
-        return True
-    if not isinstance(rows, list):
-        return True
-    return broker_position_quantity(rows, str(broker_ctx.get("instrumentKey") or "")) != 0
-
-
-async def _close_unheld_live_trade(
-    state: AutoTraderState,
-    trade: PaperTrade,
-    broker_ctx: dict[str, Any],
-    skipped: list[dict[str, Any]],
-    *,
-    reason: str,
-    message: str,
-    pnl_points: float,
-    pnl_inr: float,
-) -> None:
-    """Close a live trade the broker does not hold, without sending a sell."""
-    now = datetime.now(IST)
-    trade.status = "CLOSED"
-    trade.exitReason = reason
-    trade.pnlPoints = pnl_points
-    trade.pnlInr = pnl_inr
-    trade.closedAt = now
-    trade.sessionDate = now.strftime("%Y-%m-%d")
-    trade.entryContext = broker_ctx
-    state.closedPaperTrades.append(trade)
-    state.lastExit = {
-        "tradeId": trade.id,
-        "symbol": trade.symbol,
-        "side": trade.side.value if hasattr(trade.side, "value") else str(trade.side),
-        "reason": reason,
-        "pnlInr": pnl_inr,
-        "at": now.isoformat(),
-    }
-    await asyncio.to_thread(trade_store.record_trade_closed, trade, broker_ctx)
-    logger.error("Closed live trade %s without a sell (%s): %s", trade.id, reason, message)
-    skipped.append({
-        "symbol": trade.symbol,
-        "reason": reason,
-        "message": message,
-        "tradeId": trade.id,
-    })
 
 
 async def _process_open_trades(
@@ -3513,19 +3373,7 @@ async def _process_open_trades(
             and not broker_ctx.get("brokerSimulated")
         ):
             entry_fill = await live_order_fill(client, str(broker_ctx["brokerOrderId"]))
-            if live_order_fill_rejected(entry_fill):
-                if not await _broker_holds_position(client, trade, broker_ctx):
-                    message = str(entry_fill.get("statusMessage") or "rejected")
-                    broker_ctx["brokerEntryRejected"] = message
-                    await _close_unheld_live_trade(
-                        state, trade, broker_ctx, skipped,
-                        reason="broker_entry_rejected",
-                        message=message,
-                        pnl_points=0.0,
-                        pnl_inr=0.0,
-                    )
-                    continue
-            elif live_order_fill_complete(entry_fill):
+            if live_order_fill_complete(entry_fill):
                 bought = round(float(entry_fill["averagePrice"]), 2)
                 trade.entryPremium = bought
                 broker_ctx["brokerEntryFillPremium"] = bought
@@ -3589,41 +3437,10 @@ async def _process_open_trades(
         if is_live_book and client is not None and broker_ctx.get("brokerExitOrderId"):
             pending_fill = await live_order_fill(client, str(broker_ctx["brokerExitOrderId"]))
             if live_order_fill_rejected(pending_fill):
-                message = str(pending_fill.get("statusMessage") or "rejected")
                 broker_ctx.pop("brokerExitOrderId", None)
                 broker_ctx.pop("brokerExitReason", None)
-                broker_ctx["brokerExitRejected"] = message
-                if not await _broker_holds_position(client, trade, broker_ctx):
-                    # Nothing to sell: another sell would only open a short and be rejected again.
-                    filled = bool(broker_ctx.get("brokerEntryFillPremium"))
-                    flat_pts = trade.pnlPoints if filled else 0.0
-                    flat_inr = trade.pnlInr if filled else 0.0
-                    broker_ctx["brokerPositionFlat"] = message
-                    await _close_unheld_live_trade(
-                        state, trade, broker_ctx, skipped,
-                        reason="broker_position_flat",
-                        message=message,
-                        pnl_points=flat_pts,
-                        pnl_inr=flat_inr,
-                    )
-                    continue
-                broker_ctx["brokerExitRetryAfter"] = (
-                    datetime.now(IST) + timedelta(seconds=20)
-                ).isoformat()
                 trade.entryContext = broker_ctx
                 trade.exitReason = None
-                logger.error(
-                    "Exit rejected for %s — next sell waits 20s: %s",
-                    trade.id,
-                    message,
-                )
-                skipped.append({
-                    "symbol": trade.symbol,
-                    "reason": "exit_rejected",
-                    "message": message,
-                    "tradeId": trade.id,
-                })
-                continue
             elif live_order_fill_complete(pending_fill):
                 eval_premium = round(float(pending_fill["averagePrice"]), 2)
                 _pts, pnl = mark_to_market(
@@ -3752,13 +3569,6 @@ async def _process_open_trades(
         needs_broker_exit = (is_live or use_parity) and broker_ctx.get("instrumentKey")
 
         if needs_broker_exit and not broker_ctx.get("brokerExitOrderId"):
-            retry_after = str(broker_ctx.get("brokerExitRetryAfter") or "")
-            if retry_after:
-                try:
-                    if datetime.fromisoformat(retry_after) > datetime.now(IST):
-                        continue
-                except ValueError:
-                    pass
             try:
                 trade.exitReason = exit_reason
                 if is_live:
@@ -3813,13 +3623,6 @@ async def _process_open_trades(
                     state.liveOrdersPlaced += 1
             except UpstoxError as e:
                 _release_exit_claim(trade.id, exit_claim)
-                if is_live:
-                    broker_ctx["brokerExitRejected"] = str(e)
-                    broker_ctx["brokerExitRetryAfter"] = (
-                        datetime.now(IST) + timedelta(seconds=LIVE_EXIT_ERROR_RETRY_SECONDS)
-                    ).isoformat()
-                    trade.entryContext = broker_ctx
-                    trade.exitReason = None
                 logger.error(
                     "Exit failed for %s (%s): %s — will retry",
                     trade.id, _execution_mode(settings), e,
@@ -3971,9 +3774,9 @@ async def process_exits_only(
     state = get_state()
     settings = get_settings()
     state.calibrationBlocks = _calibration.get_blocks()
-    from app.engines.execution_mode import sync_autotrader_execution_flags
-
-    sync_autotrader_execution_flags(state, settings)
+    state.autoTradingEnabled = settings.auto_trading_enabled
+    state.liveTradingEnabled = settings.enable_live_trading
+    state.paperTrading = settings.paper_trading
 
     exit_skipped = await _process_open_trades(state, snapshots, client)
     profit_gate = update_daily_profit_gate(state, snapshots)
@@ -4551,9 +4354,9 @@ async def process(
     cycle_id = uuid.uuid4().hex[:12]
 
     state.calibrationBlocks = _calibration.get_blocks()
-    from app.engines.execution_mode import sync_autotrader_execution_flags
-
-    sync_autotrader_execution_flags(state, settings)
+    state.autoTradingEnabled = settings.auto_trading_enabled
+    state.liveTradingEnabled = settings.enable_live_trading
+    state.paperTrading = settings.paper_trading
 
     skipped.extend(await _process_open_trades(state, snapshots, client))
 
@@ -4868,12 +4671,7 @@ async def process(
                 from app.engines.open_side_confirmation import open_side_confirmation
 
                 open_blocked, open_reason, open_meta = open_side_confirmation(
-                    best.symbol,
-                    best.side,
-                    snapshots.get(best.symbol),
-                    candidate=best,
-                    state=state,
-                    settings=settings,
+                    best.symbol, best.side, snapshots.get(best.symbol), settings=settings,
                 )
                 if open_blocked:
                     skipped.append(
@@ -5201,8 +4999,6 @@ def get_performance_analysis() -> dict[str, Any]:
 
 
 def get_readiness(symbol: str, snapshots: dict[str, SymbolSnapshot]) -> dict[str, Any]:
-    from app.engines.execution_mode import paper_execution_active
-
     settings = get_settings()
     snap = snapshots.get(symbol)
     checks = {
@@ -5210,7 +5006,7 @@ def get_readiness(symbol: str, snapshots: dict[str, SymbolSnapshot]) -> dict[str
         "marketLive": snap.marketPhase.value == "LIVE_MARKET" if snap else False,
         "tqsAboveThreshold": (snap.tradeQualityScore or 0) >= settings.enhanced_tqs_entry if snap else False,
         "liveTradingEnabled": settings.enable_live_trading,
-        "paperTradingActive": paper_execution_active(settings),
+        "paperTradingActive": settings.paper_trading,
         "riskEngineOk": not _risk_engine.safe_mode,
         "calibrationClear": not any(get_state().calibrationBlocks.values()),
     }

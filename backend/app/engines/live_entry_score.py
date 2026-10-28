@@ -36,58 +36,6 @@ def _radar_base_score(alert: Mapping[str, Any], candidate: Any = None) -> float:
     return float(alert.get("explosionScore") or alert.get("explosion_score") or 0)
 
 
-def _cfg_float(settings: Any, name: str, default: float) -> float:
-    raw = getattr(settings, name, default)
-    # float(MagicMock()) is 1.0 — an unset mock is not a configured age or band.
-    if raw is None or type(raw).__module__ == "unittest.mock":
-        return float(default)
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _session_high_is_fresh_lift(alert: Mapping[str, Any], settings: Any) -> bool:
-    """True when this premium is a high the contract tape has not traded yet.
-
-    Buying the print that just became the session high is the lift. The hot-v3
-    penalty stays for a high that has already been traded, and when there is
-    no tape to prove the print is new.
-    """
-    sym = str(alert.get("symbol") or "")
-    side = alert.get("side")
-    try:
-        strike = float(alert.get("strike") or 0)
-        prem = float(alert.get("premium") or alert.get("lastPremium") or 0)
-    except (TypeError, ValueError):
-        return False
-    if not sym or side is None or strike <= 0 or prem <= 0:
-        return False
-    min_age = _cfg_float(
-        settings, "explosion_post_peak_chase_min_peak_age_seconds", 45.0,
-    )
-    if min_age <= 0:
-        return False
-    lookback = _cfg_float(
-        settings, "explosion_post_peak_chase_lookback_seconds", 900.0,
-    )
-    near = _cfg_float(settings, "explosion_post_peak_chase_near_top_frac", 0.12)
-    try:
-        from app.engines.explosion_detector import prior_near_level_age_seconds
-
-        age = prior_near_level_age_seconds(
-            sym,
-            strike,
-            side,
-            prem,
-            lookback_seconds=lookback,
-            near_frac=near,
-        )
-    except Exception:
-        return False
-    return age is not None and age < min_age
-
-
 def compute_live_entry_score(
     alert: Mapping[str, Any],
     *,
@@ -162,11 +110,7 @@ def compute_live_entry_score(
         max_v3_chase = float(
             getattr(settings, "live_entry_score_chase_max_velocity_3s", 1.0) or 1.0
         )
-        if (
-            pos > max_pos
-            and v3 < max_v3_chase
-            and not _session_high_is_fresh_lift(alert, settings)
-        ):
+        if pos > max_pos and v3 < max_v3_chase:
             chase_pen = min(
                 55.0,
                 (pos - max_pos)
@@ -204,7 +148,6 @@ def compute_live_entry_score(
                 pos + 1e-6 >= min_pos
                 and v3 + 1e-6 >= max_v3_chase
                 and spike_run + 1e-6 >= min_spike
-                and not _session_high_is_fresh_lift(alert, settings)
             ):
                 scale = float(
                     getattr(

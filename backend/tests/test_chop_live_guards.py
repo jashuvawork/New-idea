@@ -193,43 +193,6 @@ def test_chop_live_blocks_immature_local_base(mock_bullish, mock_imm_settings, m
 
 
 @patch("app.engines.chop_live_guards.get_settings")
-@patch("app.engines.best_trade_policy.call_atm_itm_base_capture_eligible")
-def test_chop_live_waives_premium_5m_fade_at_call_base(mock_eligible, mock_settings):
-    mock_settings.return_value = _settings(chop_live_hard_block_worst_day=False)
-    mock_eligible.return_value = (True, {"moneyness": "ATM"})
-    chart_meta = {
-        "premiumMtf": {
-            "5m": SimpleNamespace(momentumPct=-0.5, direction="BEARISH"),
-        },
-    }
-    with patch(
-        "app.engines.worst_day_guard.identify_worst_day",
-        return_value=__import__(
-            "app.engines.worst_day_guard", fromlist=["WorstDayVerdict"]
-        ).WorstDayVerdict(True, 80.0, ["chop_regime"]),
-    ), patch(
-        "app.engines.explosion_entry_guards.detect_faded_vertical_rip",
-        return_value=(False, {}),
-    ), patch(
-        "app.engines.explosion_entry_guards.effective_local_base_move_pct",
-        return_value=20.0,
-    ), patch(
-        "app.engines.explosion_entry_guards.trustworthy_local_base_move",
-        return_value=20.0,
-    ):
-        cand = _candidate(side=Side.CALL, base_move=20.0, daily_move=35.0)
-        blocked, reason, meta = chop_live_entry_blocked(
-            cand,
-            _snap(),
-            _state(),
-            snapshots={"NIFTY": _snap()},
-            chart_meta=chart_meta,
-        )
-    assert blocked is False
-    assert meta.get("nearBaseFadeWaive") is True
-
-
-@patch("app.engines.chop_live_guards.get_settings")
 def test_broker_adopted_bad_row_blocks_profit_exit(mock_settings):
     mock_settings.return_value = _settings()
     trade = PaperTrade(

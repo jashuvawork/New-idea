@@ -56,7 +56,7 @@ def test_deep_itm_chop_trap_blocked_when_switch_forced_on():
     assert reason == "best_trade_block_chop_deep_itm_chase"
 
 
-def test_deep_itm_chop_chase_on_by_default():
+def test_deep_itm_chop_chase_off_by_default():
     s = settings_mock()
     cand = MagicMock(mode="explosion", premium=242.42, alert={}, tier="ELITE")
     assessment = {
@@ -72,8 +72,8 @@ def test_deep_itm_chop_chase_on_by_default():
         day_mode="EXPIRY WORST",
         settings=s,
     )
-    assert blocked is True
-    assert reason == "best_trade_block_chop_deep_itm_chase"
+    assert blocked is False
+    assert reason == ""
 
 
 def test_cheap_near_base_not_deep_chase_blocked():

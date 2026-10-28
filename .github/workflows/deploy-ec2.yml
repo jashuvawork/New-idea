@@ -18,12 +18,11 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-776-paper]') && !contains(github.event.head_commit.message, '[deploy-794-816-paper]'))
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -31,18 +30,15 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Install backend dependencies
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-776-paper]') && !contains(github.event.head_commit.message, '[deploy-794-816-paper]'))
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt pytest
 
       - name: Run pytest before deploy
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-776-paper]') && !contains(github.event.head_commit.message, '[deploy-794-816-paper]'))
         working-directory: backend
         run: python -m pytest tests/ -q --tb=no
 
       - name: Set up Node
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-776-paper]') && !contains(github.event.head_commit.message, '[deploy-794-816-paper]'))
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -50,7 +46,6 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend before deploy
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-776-paper]') && !contains(github.event.head_commit.message, '[deploy-794-816-paper]'))
         working-directory: frontend
         run: |
           npm ci
@@ -87,7 +82,6 @@ jobs:
 
       - name: Deploy NexusQuant on EC2 via SSM
         id: deploy
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[deploy-776-paper]') && !contains(github.event.head_commit.message, '[deploy-794-816-paper]'))
         run: |
           set -euo pipefail
           CMD_ID=$(aws ssm send-command \
@@ -109,15 +103,14 @@ jobs:
               "COMMIT=$(git rev-parse --short HEAD)",
               "echo Deploying commit $COMMIT",
               "touch $ENV",
-              "for k in LATENCY_MODE MAX_OPTION_PREMIUM_INR MIN_OPTION_PREMIUM_INR EXPLOSION_CHEAP_RIP_MIN_PREMIUM_INR EXPLOSION_CHEAP_RIP_MIN_PEAK_PCT EXPLOSION_EXTENDED_CHASE_BLOCK_ENABLED EXPLOSION_EXTENDED_CHASE_MIN_MOVE_PCT EXPLOSION_IMMATURE_BLOCK_ENABLED EXPLOSION_IMMATURE_MIN_SESSION_MOVE_PCT EXPLOSION_CHOP_MIN_SESSION_MOVE_PCT EXPLOSION_HARD_LOT_CAP EXPLOSION_REENTRY_COOLDOWN_SECONDS WIN_REENTRY_REQUIRES_VELOCITY_ENABLED LOSS_STREAK_PAUSE_COUNT SESSION_LARGE_LOSS_PAUSE_INR ICT_ALL_DAY_CAPTURE_ENABLED ICT_DEFENSIVE_BASE_RIP_ENABLED ICT_MAX_PROFIT_SKIP_HARD_TARGET ICT_MAX_PROFIT_TARGET_POINTS ICT_FORCE_MAX_LOTS_BLOCK_ON_CHOP QUICK_SIDEWAYS_ENABLED WORST_DAY_BLOCKS_LIVE CHOP_LIVE_HARD_BLOCK_WORST_DAY BEST_TRADE_BLOCK_CHOP_DEEP_CHASE_ENABLED LIVE_BEST_TRADES_ONLY_ENABLED LIVE_BEST_TRADES_MIN_GRADE LIVE_EARLY_FAIL_EXIT_ENABLED LIVE_DISABLE_SESSION_LIFT CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED CHOP_LIVE_DISABLE_SESSION_LIFT TOP_MOMENTS_MIN_GRADE FTV_ALLOCATION_MAX_POSITIONS FTV_ALLOCATION_MAX_SAME_SIDE EMERGENCY_STOP_ENABLED EMERGENCY_STOP_INR DAILY_PROFIT_TARGET_INR EXPIRY_EVENING_BLOCK_ENABLED POWER_HOUR_TOP_ONLY_ENABLED WORST_DAY_QUICK_ENABLED WORST_DAY_BLOCK_QUICK_TRADES WORST_DAY_ALLOW_SCALP_MOMENTUM WHIPSAW_ELITE_MOMENTUM_FLIP_BYPASS_ENABLED COMPOSER_HARD_GATE_ENABLED COMPOSER_BIAS_GATE_ENABLED SESSION_MODE_FEEDBACK_ENABLED SIZE_UNTIL_FIRST_GREEN_ENABLED SIZE_UNTIL_FIRST_GREEN_LOT_CAP FAKE_EXPLOSION_TRAP_ENABLED FULL_REST_REBUILD_TIMEOUT_SECONDS FULL_REST_MIN_SECONDS FULL_REST_BACKOFF_SLOW_MS FULL_REST_BACKOFF_SECONDS DAILY_PROFIT_STAGE_LOCKS_ENABLED DAILY_PROFIT_STAGE_PCTS UPSTOX_WS_ENABLED MARKET_POLL_SECONDS_WS TICK_SNAPSHOT_SECONDS MARKET_POLL_INTERVAL_MS MARKET_POLL_INTERVAL_WS_MS TICK_SNAPSHOT_INTERVAL_MS SNAPSHOT_CACHE_INTERVAL_MS WS_SNAPSHOT_CACHE_INTERVAL_MS TICK_WAKE_DEBOUNCE_MS ENTRY_SCAN_INTERVAL_MS EXPIRY_ENTRY_SCAN_INTERVAL_MS SSE_HEARTBEAT_SECONDS SSE_ENABLED PAPER_LIVE_PARITY_ENABLED PAPER_SIMULATE_BROKER_ORDERS DAILY_LOSS_STOP_INR DAILY_LOSS_STOP_FROM_CAPITAL DAILY_LOSS_STOP_PCT PER_TRADE_CAPITAL_PCT ORDINARY_ENTRY_MAX_CAPITAL_PCT FULL_SLEEVE_REQUIRES_ARMED_LAUNCH FULL_SLEEVE_REQUIRES_CVD FULL_SLEEVE_REQUIRES_CVD_ACCELERATION MAX_RISK_PER_TRADE_INR EXPLOSION_NEVER_GREEN_STOP_POINTS EXPLOSION_NEVER_GREEN_STOP_PCT EXPLOSION_NEVER_GREEN_MIN_HOLD_SECONDS UNIFIED_PROFIT_LADDER_ENABLED UNIFIED_PROFIT_LADDER_BREAKEVEN_ENABLED UNIFIED_PROFIT_LADDER_MIN_HOLD_SECONDS UNIFIED_PROFIT_LADDER_MIN_SECONDS_AFTER_PEAK EXPLOSION_STAGE_TRAIL_MIN_HOLD_SECONDS POWER_HOUR_END_HOUR POWER_HOUR_END_MINUTE EXPLOSION_ENTRY_EARLIEST_HOUR EXPLOSION_ENTRY_EARLIEST_MINUTE OPEN_SIDE_CONFIRMATION_ENABLED OPEN_SIDE_CONFIRMATION_START_HOUR OPEN_SIDE_CONFIRMATION_START_MINUTE OPEN_SIDE_CONFIRMATION_MIN_MINUTES INDEX_CANDLE_ROLLOVER_BLOCK_ENABLED INDEX_CANDLE_ROLLOVER_STEPS INDEX_CANDLE_ROLLOVER_MIN_GIVEBACK_PCT EXPLOSION_PER_TRADE_MAX_LOSS_INR EXPLOSION_EXCEPTIONAL_PER_TRADE_MAX_LOSS_INR EXPLOSION_FAILED_LAUNCH_EXIT_ENABLED EXPLOSION_FAILED_LAUNCH_MIN_HOLD_SECONDS EXPLOSION_FAILED_LAUNCH_MAX_HOLD_SECONDS EXPLOSION_FAILED_LAUNCH_MAX_BEST_POINTS EXPLOSION_FAILED_LAUNCH_MIN_LOSS_POINTS EXPLOSION_FAILED_LAUNCH_MAX_VELOCITY_3S EXPLOSION_EARLY_GREEN_LOCK_ENABLED EXPLOSION_EARLY_GREEN_LOCK_MIN_BEST_POINTS EXPLOSION_EARLY_GREEN_LOCK_BUFFER_POINTS EXPLOSION_EARLY_GREEN_LOCK_MAX_VELOCITY_3S ENTRY_TIMING_STRUCTURED_COLD_BASE_ALLOW ENTRY_TIMING_STRUCTURED_COLD_MIN_VELOCITY_3S ENTRY_TIMING_STRUCTURED_COLD_LOT_CAP ENTRY_TIMING_STRUCTURED_COLD_MAX_LOTS FTV_ELITE_TOP_ONLY_ENABLED TOP_FTV_A_ENABLED TOP_FTV_A_MIN_EXPLOSION_SCORE TOP_FTV_A_MIN_QUALITY TOP_FTV_A_MIN_TQS TOP_FTV_A_MIN_VELOCITY_3S TOP_FTV_A_MIN_VELOCITY_9S TOP_FTV_A_NORMAL_MAX_MOVE_PCT TOP_FTV_A_MAX_CAPITAL_PCT TOP_FTV_A_EXCEPTIONAL_MIN_EXPLOSION_SCORE TOP_FTV_A_EXCEPTIONAL_MIN_QUALITY TOP_FTV_A_EXCEPTIONAL_MIN_TQS TOP_FTV_A_EXCEPTIONAL_MIN_VELOCITY_3S TOP_FTV_A_EXCEPTIONAL_MIN_VELOCITY_9S TOP_FTV_A_EXCEPTIONAL_MAX_MOVE_PCT ICT_ARMED_BASE_LAUNCH_MIN_MOVE_PCT ICT_ARMED_BASE_LAUNCH_MAX_MOVE_PCT ICT_ARMED_BASE_LAUNCH_MIN_VELOCITY_3S ICT_ARMED_BASE_LAUNCH_MIN_VELOCITY_9S ICT_ARMED_BASE_LAUNCH_MIN_ABSOLUTE_VOLUME ICT_ARMED_BASE_LAUNCH_MIN_QUALITY ICT_ARMED_BASE_LAUNCH_MIN_SCORE ICT_ARMED_BASE_LAUNCH_MIN_TQS ICT_ELITE_BASE_READY_ENABLED ICT_ELITE_BASE_READY_MIN_MOVE_PCT ICT_ELITE_BASE_READY_MAX_MOVE_PCT ICT_ELITE_BASE_READY_MIN_VELOCITY_3S ICT_ELITE_BASE_READY_MIN_VELOCITY_9S ICT_ARMED_SUSTAINED_LIFT_MIN_MOVE_PCT ICT_ARMED_SUSTAINED_LIFT_MAX_MOVE_PCT ICT_ARMED_SUSTAINED_LIFT_LOOKBACK_SECONDS ICT_ARMED_SUSTAINED_LIFT_MIN_SAMPLES ICT_ARMED_SUSTAINED_LIFT_MIN_SPAN_SECONDS ICT_ARMED_SUSTAINED_LIFT_MIN_PROGRESS_PCT ICT_ARMED_SUSTAINED_LIFT_MAX_FADE_PCT; do",
+              "for k in ENABLE_LIVE_TRADING PAPER_TRADING FALLBACK_CAPITAL_INR MAX_SIZING_CAPITAL_INR LATENCY_MODE MAX_OPTION_PREMIUM_INR MIN_OPTION_PREMIUM_INR EXPLOSION_CHEAP_RIP_MIN_PREMIUM_INR EXPLOSION_CHEAP_RIP_MIN_PEAK_PCT EXPLOSION_EXTENDED_CHASE_BLOCK_ENABLED EXPLOSION_EXTENDED_CHASE_MIN_MOVE_PCT EXPLOSION_IMMATURE_BLOCK_ENABLED EXPLOSION_IMMATURE_MIN_SESSION_MOVE_PCT EXPLOSION_CHOP_MIN_SESSION_MOVE_PCT EXPLOSION_HARD_LOT_CAP EXPLOSION_REENTRY_COOLDOWN_SECONDS LOSS_STREAK_PAUSE_COUNT SESSION_LARGE_LOSS_PAUSE_INR ICT_ALL_DAY_CAPTURE_ENABLED ICT_DEFENSIVE_BASE_RIP_ENABLED ICT_MAX_PROFIT_SKIP_HARD_TARGET ICT_MAX_PROFIT_TARGET_POINTS ICT_FORCE_MAX_LOTS_BLOCK_ON_CHOP QUICK_SIDEWAYS_ENABLED WORST_DAY_BLOCKS_LIVE CHOP_LIVE_HARD_BLOCK_WORST_DAY BEST_TRADE_BLOCK_CHOP_DEEP_CHASE_ENABLED LIVE_BEST_TRADES_ONLY_ENABLED LIVE_EARLY_FAIL_EXIT_ENABLED LIVE_DISABLE_SESSION_LIFT CHOP_LIVE_EARLY_FAIL_EXIT_ENABLED CHOP_LIVE_DISABLE_SESSION_LIFT TOP_MOMENTS_MIN_GRADE FTV_ALLOCATION_MAX_POSITIONS FTV_ALLOCATION_MAX_SAME_SIDE EMERGENCY_STOP_ENABLED EMERGENCY_STOP_INR DAILY_PROFIT_TARGET_INR EXPIRY_EVENING_BLOCK_ENABLED POWER_HOUR_TOP_ONLY_ENABLED WORST_DAY_QUICK_ENABLED WORST_DAY_BLOCK_QUICK_TRADES WORST_DAY_ALLOW_SCALP_MOMENTUM WHIPSAW_ELITE_MOMENTUM_FLIP_BYPASS_ENABLED COMPOSER_HARD_GATE_ENABLED COMPOSER_BIAS_GATE_ENABLED SESSION_MODE_FEEDBACK_ENABLED SIZE_UNTIL_FIRST_GREEN_ENABLED SIZE_UNTIL_FIRST_GREEN_LOT_CAP FAKE_EXPLOSION_TRAP_ENABLED FULL_REST_REBUILD_TIMEOUT_SECONDS FULL_REST_MIN_SECONDS FULL_REST_BACKOFF_SLOW_MS FULL_REST_BACKOFF_SECONDS DAILY_PROFIT_STAGE_LOCKS_ENABLED DAILY_PROFIT_STAGE_PCTS UPSTOX_WS_ENABLED MARKET_POLL_SECONDS_WS TICK_SNAPSHOT_SECONDS MARKET_POLL_INTERVAL_MS MARKET_POLL_INTERVAL_WS_MS TICK_SNAPSHOT_INTERVAL_MS SNAPSHOT_CACHE_INTERVAL_MS WS_SNAPSHOT_CACHE_INTERVAL_MS TICK_WAKE_DEBOUNCE_MS ENTRY_SCAN_INTERVAL_MS EXPIRY_ENTRY_SCAN_INTERVAL_MS SSE_HEARTBEAT_SECONDS SSE_ENABLED PAPER_LIVE_PARITY_ENABLED PAPER_SIMULATE_BROKER_ORDERS DAILY_LOSS_STOP_INR PER_TRADE_CAPITAL_PCT ORDINARY_ENTRY_MAX_CAPITAL_PCT FULL_SLEEVE_REQUIRES_ARMED_LAUNCH FULL_SLEEVE_REQUIRES_CVD FULL_SLEEVE_REQUIRES_CVD_ACCELERATION MAX_RISK_PER_TRADE_INR EXPLOSION_NEVER_GREEN_STOP_POINTS EXPLOSION_NEVER_GREEN_STOP_PCT EXPLOSION_NEVER_GREEN_MIN_HOLD_SECONDS UNIFIED_PROFIT_LADDER_ENABLED UNIFIED_PROFIT_LADDER_BREAKEVEN_ENABLED UNIFIED_PROFIT_LADDER_MIN_HOLD_SECONDS UNIFIED_PROFIT_LADDER_MIN_SECONDS_AFTER_PEAK EXPLOSION_STAGE_TRAIL_MIN_HOLD_SECONDS POWER_HOUR_END_HOUR POWER_HOUR_END_MINUTE EXPLOSION_ENTRY_EARLIEST_HOUR EXPLOSION_ENTRY_EARLIEST_MINUTE OPEN_SIDE_CONFIRMATION_ENABLED OPEN_SIDE_CONFIRMATION_MIN_MINUTES EXPLOSION_PER_TRADE_MAX_LOSS_INR EXPLOSION_EXCEPTIONAL_PER_TRADE_MAX_LOSS_INR EXPLOSION_FAILED_LAUNCH_EXIT_ENABLED EXPLOSION_FAILED_LAUNCH_MIN_HOLD_SECONDS EXPLOSION_FAILED_LAUNCH_MAX_HOLD_SECONDS EXPLOSION_FAILED_LAUNCH_MAX_BEST_POINTS EXPLOSION_FAILED_LAUNCH_MIN_LOSS_POINTS EXPLOSION_FAILED_LAUNCH_MAX_VELOCITY_3S EXPLOSION_EARLY_GREEN_LOCK_ENABLED EXPLOSION_EARLY_GREEN_LOCK_MIN_BEST_POINTS EXPLOSION_EARLY_GREEN_LOCK_BUFFER_POINTS EXPLOSION_EARLY_GREEN_LOCK_MAX_VELOCITY_3S ENTRY_TIMING_STRUCTURED_COLD_BASE_ALLOW ENTRY_TIMING_STRUCTURED_COLD_MIN_VELOCITY_3S ENTRY_TIMING_STRUCTURED_COLD_LOT_CAP ENTRY_TIMING_STRUCTURED_COLD_MAX_LOTS FTV_ELITE_TOP_ONLY_ENABLED TOP_FTV_A_ENABLED TOP_FTV_A_MIN_EXPLOSION_SCORE TOP_FTV_A_MIN_QUALITY TOP_FTV_A_MIN_TQS TOP_FTV_A_MIN_VELOCITY_3S TOP_FTV_A_MIN_VELOCITY_9S TOP_FTV_A_NORMAL_MAX_MOVE_PCT TOP_FTV_A_MAX_CAPITAL_PCT TOP_FTV_A_EXCEPTIONAL_MIN_EXPLOSION_SCORE TOP_FTV_A_EXCEPTIONAL_MIN_QUALITY TOP_FTV_A_EXCEPTIONAL_MIN_TQS TOP_FTV_A_EXCEPTIONAL_MIN_VELOCITY_3S TOP_FTV_A_EXCEPTIONAL_MIN_VELOCITY_9S TOP_FTV_A_EXCEPTIONAL_MAX_MOVE_PCT ICT_ARMED_BASE_LAUNCH_MIN_MOVE_PCT ICT_ARMED_BASE_LAUNCH_MAX_MOVE_PCT ICT_ARMED_BASE_LAUNCH_MIN_VELOCITY_3S ICT_ARMED_BASE_LAUNCH_MIN_VELOCITY_9S ICT_ARMED_BASE_LAUNCH_MIN_ABSOLUTE_VOLUME ICT_ARMED_BASE_LAUNCH_MIN_QUALITY ICT_ARMED_BASE_LAUNCH_MIN_SCORE ICT_ARMED_BASE_LAUNCH_MIN_TQS ICT_ELITE_BASE_READY_ENABLED ICT_ELITE_BASE_READY_MIN_MOVE_PCT ICT_ELITE_BASE_READY_MAX_MOVE_PCT ICT_ELITE_BASE_READY_MIN_VELOCITY_3S ICT_ELITE_BASE_READY_MIN_VELOCITY_9S ICT_ARMED_SUSTAINED_LIFT_MIN_MOVE_PCT ICT_ARMED_SUSTAINED_LIFT_MAX_MOVE_PCT ICT_ARMED_SUSTAINED_LIFT_LOOKBACK_SECONDS ICT_ARMED_SUSTAINED_LIFT_MIN_SAMPLES ICT_ARMED_SUSTAINED_LIFT_MIN_SPAN_SECONDS ICT_ARMED_SUSTAINED_LIFT_MIN_PROGRESS_PCT ICT_ARMED_SUSTAINED_LIFT_MAX_FADE_PCT; do",
               "  line=$(grep -E \"^${k}=\" deploy/env.production.template | tail -1 || true)",
               "  [ -z \"$line\" ] && continue",
               "  val=${line#*=}",
               "  if grep -q \"^${k}=\" $ENV; then sed -i \"s|^${k}=.*|${k}=${val}|\" $ENV; else echo \"${k}=${val}\" >> $ENV; fi",
               "  echo synced $k=$val",
               "done",
-              "bash deploy/ec2-update.sh",
-              "if git log -1 --pretty=%B | grep -Fq '[paper-676-redeploy]'; then sudo bash deploy/redeploy-paper-676-full.sh --skip-update; fi"
+              "bash deploy/ec2-update.sh"
             ]' \
             --query Command.CommandId \
             --output text)
@@ -125,7 +118,6 @@ jobs:
           echo "SSM command: $CMD_ID"
 
       - name: Wait for SSM command
-        if: steps.deploy.outputs.command_id != ''
         run: |
           set -euo pipefail
           CMD_ID="${{ steps.deploy.outputs.command_id }}"
@@ -211,66 +203,7 @@ jobs:
           done
           exit 1
 
-      - name: Deploy PR 676 commit in paper mode
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[deploy-776-paper]') && !contains(github.event.head_commit.message, '[deploy-794-816-paper]')
-        id: deploy676
-        run: |
-          set -euo pipefail
-          CMD_ID=$(aws ssm send-command \
-            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --timeout-seconds 1800 \
-            --comment "Paper #676 full redeploy $(git rev-parse --short HEAD)" \
-            --parameters 'commands=[
-              "set -euo pipefail",
-              "export HOME=/root",
-              "export GIT_CONFIG_GLOBAL=/root/.gitconfig",
-              "git config --global --add safe.directory /opt/nexusquant/New-idea",
-              "cd /opt/nexusquant/New-idea",
-              "git fetch origin main",
-              "git checkout main",
-              "git pull --ff-only origin main || git reset --hard origin/main",
-              "sudo bash deploy/redeploy-paper-676-full.sh"
-            ]' \
-            --query Command.CommandId \
-            --output text)
-          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
-          echo "SSM PR676 command: $CMD_ID"
-
-      - name: Wait for PR 676 deploy
-        if: steps.deploy676.outputs.command_id != ''
-        run: |
-          set -euo pipefail
-          CMD_ID="${{ steps.deploy676.outputs.command_id }}"
-          for i in $(seq 1 60); do
-            STATUS=$(aws ssm get-command-invocation \
-              --command-id "$CMD_ID" \
-              --instance-id "${{ env.EC2_INSTANCE_ID }}" \
-              --query Status \
-              --output text 2>/dev/null || echo Pending)
-            echo "Attempt $i: $STATUS"
-            if [ "$STATUS" = "Success" ]; then
-              aws ssm get-command-invocation \
-                --command-id "$CMD_ID" \
-                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
-                --query StandardOutputContent \
-                --output text | tail -80
-              exit 0
-            fi
-            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
-              aws ssm get-command-invocation \
-                --command-id "$CMD_ID" \
-                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
-                --output json
-              exit 1
-            fi
-            sleep 15
-          done
-          echo "PR 676 SSM wait timed out"
-          exit 1
-
       - name: Verify public deployment status
-        if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[deploy-776-paper]') && !contains(github.event.head_commit.message, '[deploy-794-816-paper]'))
         run: |
           set -euo pipefail
           EXPECTED=$(git rev-parse --short HEAD)
@@ -294,221 +227,6 @@ jobs:
           done
           curl -sf --connect-timeout 5 --max-time 20 "$API/health" | python3 -m json.tool
           curl -sf --connect-timeout 5 --max-time 20 "$API/api/deployment/status" | python3 -m json.tool
-
-      - name: Verify PR 676 paper
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-676-paper]') && !contains(github.event.head_commit.message, '[deploy-776-paper]') && !contains(github.event.head_commit.message, '[deploy-794-816-paper]')
-        run: |
-          set -euo pipefail
-          EXPECTED=$(git rev-parse --short HEAD)
-          API="${{ env.PUBLIC_API_URL }}"
-          for i in 1 2 3 4 5 6 7 8; do
-            if curl -sf --connect-timeout 5 --max-time 20 \
-              "$API/api/deployment/status" | python3 -c "
-          import json, sys
-          d = json.load(sys.stdin)
-          f = d.get('flags') or {}
-          commit = str(d.get('commit') or '')
-          print(json.dumps({
-              'commit': commit,
-              'paperTrading': f.get('paperTrading'),
-              'paper676EntryChoke': f.get('paper676EntryChoke'),
-              'entryEarliestIst': f.get('entryEarliestIst'),
-              'liveBestTradesOnlyEnabled': f.get('liveBestTradesOnlyEnabled'),
-          }, indent=2))
-          if d.get('status') != 'ok':
-              raise SystemExit('status not ok')
-          if commit != '$EXPECTED':
-              raise SystemExit(f'commit mismatch: {commit!r} != $EXPECTED!r')
-          if f.get('paperTrading') is not True or f.get('enableLiveTrading') is not False:
-              raise SystemExit('paper mode is not on')
-          if f.get('paper676EntryChoke') is not True:
-              raise SystemExit('paper676EntryChoke must be true')
-          if f.get('entryEarliestIst') != '09:20':
-              raise SystemExit('entryEarliestIst must be 09:20')
-          if f.get('openSideConfirmationStartIst') != '09:25':
-              raise SystemExit('openSideConfirmationStartIst must be 09:25')
-          if f.get('liveBestTradesOnlyEnabled') is not False:
-              raise SystemExit('liveBestTradesOnlyEnabled must be false on --paper')
-          "; then
-              exit 0
-            fi
-            echo "verify attempt $i failed — waiting"
-            sleep 10
-          done
-          curl -sf --max-time 20 "$API/api/deployment/status" | python3 -m json.tool
-          exit 1
-
-      - name: Deploy PR 776 commit in paper mode
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-776-paper]') && !contains(github.event.head_commit.message, '[arm-live]')
-        id: deploy776
-        run: |
-          set -euo pipefail
-          B64=$(base64 -w0 deploy/checkout-776-paper.sh)
-          CMD_ID=$(aws ssm send-command \
-            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --timeout-seconds 1800 \
-            --comment "Detach EC2 at PR 776 merge with paper on" \
-            --parameters "{\"commands\":[\"echo $B64 | base64 -d > /tmp/checkout-776-paper.sh\",\"bash /tmp/checkout-776-paper.sh\"]}" \
-            --query Command.CommandId \
-            --output text)
-          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
-          echo "SSM 776 command: $CMD_ID"
-
-      - name: Wait for PR 776 deploy
-        if: steps.deploy776.outputs.command_id != ''
-        run: |
-          set -euo pipefail
-          CMD_ID="${{ steps.deploy776.outputs.command_id }}"
-          for i in $(seq 1 120); do
-            STATUS=$(aws ssm get-command-invocation \
-              --command-id "$CMD_ID" \
-              --instance-id "${{ env.EC2_INSTANCE_ID }}" \
-              --query Status \
-              --output text 2>/dev/null || echo Pending)
-            echo "Attempt $i: $STATUS"
-            if [ "$STATUS" = "Success" ]; then
-              aws ssm get-command-invocation \
-                --command-id "$CMD_ID" \
-                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
-                --query StandardOutputContent \
-                --output text | tail -80
-              exit 0
-            fi
-            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
-              aws ssm get-command-invocation \
-                --command-id "$CMD_ID" \
-                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
-                --output json
-              exit 1
-            fi
-            sleep 15
-          done
-          echo "PR 776 SSM wait timed out"
-          exit 1
-
-      - name: Verify PR 776 paper
-        if: steps.deploy776.outputs.command_id != ''
-        run: |
-          set -euo pipefail
-          API="${{ env.PUBLIC_API_URL }}"
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -sf --connect-timeout 5 --max-time 20 \
-              "$API/api/deployment/status" | python3 -c "
-          import json, sys
-          d = json.load(sys.stdin)
-          f = d.get('flags') or {}
-          commit = str(d.get('commit') or '')
-          print(json.dumps({
-              'commit': commit,
-              'paperTrading': f.get('paperTrading'),
-              'enableLiveTrading': f.get('enableLiveTrading'),
-              'fallbackCapitalInr': f.get('fallbackCapitalInr'),
-              'maxSizingCapitalInr': f.get('maxSizingCapitalInr'),
-          }, indent=2))
-          if d.get('status') != 'ok':
-              raise SystemExit('status not ok')
-          if not commit.startswith('96f262a'):
-              raise SystemExit('commit mismatch: ' + commit)
-          if f.get('paperTrading') is not True or f.get('enableLiveTrading') is not False:
-              raise SystemExit('paper mode is not on')
-          if float(f.get('fallbackCapitalInr') or 0) != 100000 or float(f.get('maxSizingCapitalInr') or 0) != 100000:
-              raise SystemExit('PR 776 capital book is not 100000')
-          "; then
-              exit 0
-            fi
-            echo "verify attempt $i failed — waiting"
-            sleep 10
-          done
-          curl -sf --max-time 20 "$API/api/deployment/status" | python3 -m json.tool || true
-          exit 1
-
-      - name: Deploy PR 794 with 816 exits in paper mode
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy-794-816-paper]') && !contains(github.event.head_commit.message, '[arm-live]')
-        id: deploy794
-        run: |
-          set -euo pipefail
-          B64=$(base64 -w0 deploy/checkout-794-816-paper.sh)
-          CMD_ID=$(aws ssm send-command \
-            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --timeout-seconds 1800 \
-            --comment "Detach EC2 at #794 plus #816 exits with paper on" \
-            --parameters "{\"commands\":[\"echo $B64 | base64 -d > /tmp/checkout-794-816-paper.sh\",\"bash /tmp/checkout-794-816-paper.sh\"]}" \
-            --query Command.CommandId \
-            --output text)
-          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
-          echo "SSM 794 command: $CMD_ID"
-
-      - name: Wait for PR 794 deploy
-        if: steps.deploy794.outputs.command_id != ''
-        run: |
-          set -euo pipefail
-          CMD_ID="${{ steps.deploy794.outputs.command_id }}"
-          for i in $(seq 1 120); do
-            STATUS=$(aws ssm get-command-invocation \
-              --command-id "$CMD_ID" \
-              --instance-id "${{ env.EC2_INSTANCE_ID }}" \
-              --query Status \
-              --output text 2>/dev/null || echo Pending)
-            echo "Attempt $i: $STATUS"
-            if [ "$STATUS" = "Success" ]; then
-              aws ssm get-command-invocation \
-                --command-id "$CMD_ID" \
-                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
-                --query StandardOutputContent \
-                --output text | tail -80
-              exit 0
-            fi
-            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
-              aws ssm get-command-invocation \
-                --command-id "$CMD_ID" \
-                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
-                --output json
-              exit 1
-            fi
-            sleep 15
-          done
-          echo "PR 794 SSM wait timed out"
-          exit 1
-
-      - name: Verify PR 794 paper
-        if: steps.deploy794.outputs.command_id != ''
-        run: |
-          set -euo pipefail
-          API="${{ env.PUBLIC_API_URL }}"
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -sf --connect-timeout 5 --max-time 20 \
-              "$API/api/deployment/status" | python3 -c "
-          import json, sys
-          d = json.load(sys.stdin)
-          f = d.get('flags') or {}
-          commit = str(d.get('commit') or '')
-          print(json.dumps({
-              'commit': commit,
-              'paperTrading': f.get('paperTrading'),
-              'enableLiveTrading': f.get('enableLiveTrading'),
-              'fallbackCapitalInr': f.get('fallbackCapitalInr'),
-              'maxSizingCapitalInr': f.get('maxSizingCapitalInr'),
-          }, indent=2))
-          if d.get('status') != 'ok':
-              raise SystemExit('status not ok')
-          if not commit.startswith('43208db0'):
-              raise SystemExit('commit mismatch: ' + commit)
-          if f.get('paperTrading') is not True or f.get('enableLiveTrading') is not False:
-              raise SystemExit('paper mode is not on')
-          if float(f.get('fallbackCapitalInr') or 0) != 200000 or float(f.get('maxSizingCapitalInr') or 0) != 200000:
-              raise SystemExit('PR 794 capital book is not 200000')
-          if f.get('entryEarliestIst') != '09:20':
-              raise SystemExit('entryEarliestIst must be 09:20')
-          "; then
-              exit 0
-            fi
-            echo "verify attempt $i failed — waiting"
-            sleep 10
-          done
-          curl -sf --max-time 20 "$API/api/deployment/status" | python3 -m json.tool || true
-          exit 1
 
       - name: Verify live armed
         if: github.event_name == 'push' && contains(github.event.head_commit.message, '[arm-live]')

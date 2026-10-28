@@ -1,9 +1,7 @@
 """Live entry score — tick stamp and pre-entry gate."""
 
-from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-from zoneinfo import ZoneInfo
 
 from app.engines.live_entry_score import (
     compute_live_entry_score,
@@ -11,8 +9,6 @@ from app.engines.live_entry_score import (
     stamp_alert_live_entry_scores,
 )
 from app.models.schemas import Side
-
-IST = ZoneInfo("Asia/Kolkata")
 
 
 @patch("app.engines.live_entry_score.get_settings")
@@ -201,146 +197,6 @@ def test_compute_live_penalizes_hot_v3_near_peak_extended_spike(mock_settings):
     )
     assert meta.get("hotV3ExtendedSpikeChasePenalty", 0) > 0
     assert live < 100.0
-
-
-def _seed_score_tape(prems, *, step_s=1.0):
-    import app.engines.explosion_detector as ed
-    from app.engines.explosion_detector import _open_key
-    from collections import deque
-
-    key = _open_key("NIFTY", 24500.0, Side.CALL)
-    t0 = datetime(2026, 10, 24, 10, 0, tzinfo=IST)
-    ed._local_base_hist[key] = deque(
-        (t0 + timedelta(seconds=step_s * i), float(p)) for i, p in enumerate(prems)
-    )
-
-
-def _hot_spike_alert(**extra):
-    row = {
-        "symbol": "NIFTY",
-        "side": "CALL",
-        "strike": 24500,
-        "explosionScore": 100.0,
-        "premium": 84.15,
-        "sessionPeakPremium": 86.2,
-        "sessionLowPremium": 71.6,
-        "velocity3s": 2.0,
-        "spikeRunPct": 20.39,
-    }
-    row.update(extra)
-    return row
-
-
-@patch("app.engines.live_entry_score.get_settings")
-def test_fresh_lift_skips_chase_range_penalty(mock_settings):
-    """Cold v3 at session high is normal on the lift tick — not a range chase."""
-    import app.engines.explosion_detector as ed
-
-    s = MagicMock()
-    s.live_execution_trade_score_enabled = True
-    s.live_execution_trade_score_dump_penalty = 45.0
-    s.live_execution_trade_score_mom_factor = 8.0
-    s.live_entry_score_negative_v3_penalty_per_point = 3.0
-    s.live_entry_score_negative_v3_deadband = 0.55
-    s.live_entry_score_dump_cap = 42.0
-    s.live_entry_score_chase_max_range_position = 0.45
-    s.live_entry_score_chase_max_velocity_3s = 1.0
-    s.live_entry_score_chase_range_penalty_scale = 90.0
-    s.live_entry_score_chase_hot_v3_extended_spike_enabled = False
-    s.explosion_post_peak_chase_min_peak_age_seconds = 45.0
-    s.explosion_post_peak_chase_lookback_seconds = 900.0
-    s.explosion_post_peak_chase_near_top_frac = 0.12
-    s.premium_post_spike_dump_min_drawdown_pct = 12.0
-    s.premium_post_spike_dump_min_spike_run_pct = 35.0
-    s.premium_post_spike_dump_near_low_frac = 0.18
-    s.premium_post_spike_dump_min_velocity_3s = -0.15
-    s.premium_post_spike_dump_min_velocity_9s = -0.25
-    mock_settings.return_value = s
-    ed._local_base_hist.clear()
-    try:
-        _seed_score_tape([100.0] * 20 + [140.0], step_s=1.0)
-        alert = {
-            "symbol": "NIFTY",
-            "side": "CALL",
-            "strike": 24500,
-            "explosionScore": 95.0,
-            "premium": 140.0,
-            "sessionPeakPremium": 140.0,
-            "sessionLowPremium": 100.0,
-            "velocity3s": 0.3,
-        }
-        live, meta = compute_live_entry_score(alert, radar_score=95.0, settings=s)
-    finally:
-        ed._local_base_hist.clear()
-    assert meta.get("chaseRangePenalty", 0) == 0
-    assert live > 80.0
-
-
-@patch("app.engines.live_entry_score.get_settings")
-def test_fresh_session_high_skips_hot_v3_chase_penalty(mock_settings):
-    """The print that just became the high is the lift, not an extended chase."""
-    import app.engines.explosion_detector as ed
-
-    s = MagicMock()
-    s.live_execution_trade_score_enabled = True
-    s.live_execution_trade_score_dump_penalty = 45.0
-    s.live_execution_trade_score_mom_factor = 8.0
-    s.live_entry_score_negative_v3_penalty_per_point = 3.0
-    s.live_entry_score_negative_v3_deadband = 0.55
-    s.live_entry_score_dump_cap = 42.0
-    s.live_entry_score_chase_max_range_position = 0.45
-    s.live_entry_score_chase_max_velocity_3s = 1.0
-    s.live_entry_score_chase_range_penalty_scale = 90.0
-    s.live_entry_score_chase_hot_v3_extended_spike_enabled = True
-    s.live_entry_score_chase_hot_v3_min_spike_run_pct = 18.0
-    s.live_entry_score_chase_hot_v3_min_range_position = 0.72
-    s.live_entry_score_chase_hot_v3_penalty_scale = 120.0
-    s.premium_post_spike_dump_min_drawdown_pct = 12.0
-    s.premium_post_spike_dump_min_spike_run_pct = 35.0
-    s.premium_post_spike_dump_near_low_frac = 0.18
-    s.premium_post_spike_dump_min_velocity_3s = -0.15
-    s.premium_post_spike_dump_min_velocity_9s = -0.25
-    mock_settings.return_value = s
-    ed._local_base_hist.clear()
-    try:
-        _seed_score_tape([60.0] * 15 + [84.15])
-        _, meta = compute_live_entry_score(_hot_spike_alert(), radar_score=100.0, settings=s)
-    finally:
-        ed._local_base_hist.clear()
-    assert meta.get("hotV3ExtendedSpikeChasePenalty", 0) == 0
-
-
-@patch("app.engines.live_entry_score.get_settings")
-def test_aged_session_high_still_takes_hot_v3_chase_penalty(mock_settings):
-    import app.engines.explosion_detector as ed
-
-    s = MagicMock()
-    s.live_execution_trade_score_enabled = True
-    s.live_execution_trade_score_dump_penalty = 45.0
-    s.live_execution_trade_score_mom_factor = 8.0
-    s.live_entry_score_negative_v3_penalty_per_point = 3.0
-    s.live_entry_score_negative_v3_deadband = 0.55
-    s.live_entry_score_dump_cap = 42.0
-    s.live_entry_score_chase_max_range_position = 0.45
-    s.live_entry_score_chase_max_velocity_3s = 1.0
-    s.live_entry_score_chase_range_penalty_scale = 90.0
-    s.live_entry_score_chase_hot_v3_extended_spike_enabled = True
-    s.live_entry_score_chase_hot_v3_min_spike_run_pct = 18.0
-    s.live_entry_score_chase_hot_v3_min_range_position = 0.72
-    s.live_entry_score_chase_hot_v3_penalty_scale = 120.0
-    s.premium_post_spike_dump_min_drawdown_pct = 12.0
-    s.premium_post_spike_dump_min_spike_run_pct = 35.0
-    s.premium_post_spike_dump_near_low_frac = 0.18
-    s.premium_post_spike_dump_min_velocity_3s = -0.15
-    s.premium_post_spike_dump_min_velocity_9s = -0.25
-    mock_settings.return_value = s
-    ed._local_base_hist.clear()
-    try:
-        _seed_score_tape([60.0] * 8 + [84.15] * 5, step_s=20.0)
-        _, meta = compute_live_entry_score(_hot_spike_alert(), radar_score=100.0, settings=s)
-    finally:
-        ed._local_base_hist.clear()
-    assert meta.get("hotV3ExtendedSpikeChasePenalty", 0) > 0
 
 
 def test_live_entry_moment_active():

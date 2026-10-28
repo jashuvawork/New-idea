@@ -15,15 +15,6 @@ PREORDER_PREMIUM_FADING_REASONS = frozenset({
     "exec_premium_fading_at_execution",
     "exec_premium_chart_fading",
     "exec_premium_fading_high_score",
-    "exec_mtf_premium_1m_fading",
-    "exec_mtf_premium_5m_fading",
-})
-
-# Strike-structural blocks: the same leg stays blocked until spot crosses a strike,
-# so re-selecting it every cycle starves the ATM/ITM leg of the single slot.
-PREORDER_STRUCTURAL_REASONS = frozenset({
-    "best_trade_block_expiry_otm_itm_atm_only",
-    "best_trade_block_expiry_cheap_otm",
 })
 
 _suppressed_until: dict[tuple[str, str, str, float, str, str], datetime] = {}
@@ -61,19 +52,15 @@ def suppress_after_preorder_rejection(
     *,
     now: datetime | None = None,
 ) -> bool:
-    """Suppress only typed pre-submission failures (premium fade, expiry OTM strike)."""
-    settings = get_settings()
-    if reason in PREORDER_PREMIUM_FADING_REASONS:
-        key = "preorder_rejection_suppression_seconds"
-        default = 30
-    elif reason in PREORDER_STRUCTURAL_REASONS:
-        key = "preorder_structural_rejection_suppression_seconds"
-        default = 120
-    else:
+    """Suppress only typed premium-fade failures known to happen before submission."""
+    if reason not in PREORDER_PREMIUM_FADING_REASONS:
         return False
     current = now or datetime.now(IST)
     _roll_session(current)
-    seconds = max(0, int(getattr(settings, key, default) or 0))
+    seconds = max(
+        0,
+        int(getattr(get_settings(), "preorder_rejection_suppression_seconds", 30) or 0),
+    )
     if seconds <= 0:
         return False
     _suppressed_until[_candidate_key(candidate)] = current + timedelta(seconds=seconds)

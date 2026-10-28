@@ -34,6 +34,13 @@ def _pct_change(closes: list[float], bars: int) -> float:
 def _ema(closes: list[float], period: int) -> float:
     if not closes:
         return 0.0
+    window = closes[-period:] if len(closes) >= period else closes
+    return sum(window) / len(window)
+
+
+def _ema(closes: list[float], period: int) -> float:
+    if not closes:
+        return 0.0
     series = _ema_series(closes, period)
     return series[-1] if series else 0.0
 
@@ -56,20 +63,23 @@ def _indicator_closes(candles_5m: list, candles_1m: list | None) -> list[float]:
     required 35 resampled-5m bars before using them, which kept the "5m" chart on 1m data
     until ~12:10 IST every day — diverging from the true 5m read all morning.
     """
-    from app.engines.indicator_readiness import MACD_MIN_CLOSES, RSI_MIN_CLOSES
-    from app.engines.indicator_series import extended_5m_candles
-
-    best_5m = _candle_rows(extended_5m_candles(candles_1m, candles_5m))[3]
     settings = get_settings()
-    min_panel = int(getattr(settings, "spot_chart_min_5m_indicator_bars", 20) or 20)
-    if len(best_5m) >= min_panel:
+    native_5m = _candle_rows(candles_5m)[3]
+    ext_5m: list[float] = []
+    if candles_1m:
+        from app.engines.mtf_chart_analysis import resample_candles
+
+        ext_5m = _candle_rows(
+            resample_candles(candles_1m, settings.spot_chart_timeframe_minutes)
+        )[3]
+    best_5m = ext_5m if len(ext_5m) >= len(native_5m) else native_5m
+    min_bars = int(getattr(settings, "spot_chart_min_5m_indicator_bars", 20) or 20)
+    if len(best_5m) >= min_bars:
         return best_5m
-    # Prior-session 1m seed when 5m is still session-thin (open).
+    # Session still too thin for a meaningful 5m RSI — 1m as a last resort.
     if candles_1m:
         closes_1m = _candle_rows(candles_1m)[3]
-        if len(closes_1m) >= MACD_MIN_CLOSES:
-            return closes_1m
-        if len(closes_1m) >= RSI_MIN_CLOSES + 1:
+        if len(closes_1m) >= 15:
             return closes_1m
     return best_5m
 
@@ -80,17 +90,13 @@ def build_spot_chart(
     profile: MarketProfile,
     *,
     indicator_candles_1m: list | None = None,
-    indicator_closes: list[float] | None = None,
 ) -> SpotChart:
     """
     Index chart read from 5m candles: direction, EMA9/21, RSI, MACD.
     RSI/MACD use extended 5m series resampled from 1m when available (MACD warmup).
     """
     opens, _, _, closes = _candle_rows(candles_5m)
-    if indicator_closes:
-        ind_closes = list(indicator_closes)
-    else:
-        ind_closes = _indicator_closes(candles_5m, indicator_candles_1m)
+    ind_closes = _indicator_closes(candles_5m, indicator_candles_1m)
     closes = _patch_live_close(closes, spot)
     ind_closes = _patch_live_close(ind_closes, spot)
 
@@ -103,20 +109,13 @@ def build_spot_chart(
     mom15 = _pct_change(closes, 3) if len(closes) > 3 else mom10
     mom30 = _pct_change(closes, 6) if len(closes) > 6 else mom15
 
-    from app.engines.indicator_readiness import readiness_from_closes
-
-    readiness = readiness_from_closes(ind_closes)
-    ema9 = _ema(ind_closes, 9) if len(ind_closes) >= 1 else _ema(closes, min(9, len(closes)))
-    if readiness.ema21_ready:
-        ema21 = _ema(ind_closes, 21)
-        if ema9 > ema21 * 1.00015:
-            ema_bias = "BULLISH"
-        elif ema9 < ema21 * 0.99985:
-            ema_bias = "BEARISH"
-        else:
-            ema_bias = "NEUTRAL"
+    ema9 = _ema(closes, min(9, len(closes)))
+    ema21 = _ema(closes, min(21, len(closes)))
+    if ema9 > ema21 * 1.00015:
+        ema_bias = "BULLISH"
+    elif ema9 < ema21 * 0.99985:
+        ema_bias = "BEARISH"
     else:
-        ema21 = ema9
         ema_bias = "NEUTRAL"
 
     green = red = 0
@@ -184,11 +183,10 @@ def build_spot_chart(
         bullish += 1
     elif rsi_read.value < 45:
         bearish += 1
-    if readiness.macd_ready:
-        if macd_read.bias == "BULLISH":
-            bullish += 2
-        elif macd_read.bias == "BEARISH":
-            bearish += 2
+    if macd_read.bias == "BULLISH":
+        bullish += 2
+    elif macd_read.bias == "BEARISH":
+        bearish += 2
 
     if bullish >= bearish + 3:
         direction = "BULLISH"
@@ -203,16 +201,14 @@ def build_spot_chart(
     elif mom5 < -0.02 and mom15 < -0.05 and mom30 < 0:
         direction = "BEARISH"
     elif (
-        readiness.macd_ready
-        and mom5 > 0.01
+        mom5 > 0.01
         and mom15 >= 0
         and rsi_read.value >= 50
         and macd_read.bias == "BULLISH"
     ):
         direction = "BULLISH"
     elif (
-        readiness.macd_ready
-        and mom5 < -0.01
+        mom5 < -0.01
         and mom15 <= 0
         and rsi_read.value <= 50
         and macd_read.bias == "BEARISH"
@@ -222,34 +218,22 @@ def build_spot_chart(
         direction = "BEARISH"
     elif mom15 > 0 and mom30 > 0:
         direction = "BULLISH"
-    elif (
-        mom5 > 0.015
-        and rsi_read.value >= 58
-        and (not readiness.macd_ready or macd_read.bias != "BEARISH")
-    ):
+    elif mom5 > 0.015 and rsi_read.value >= 58 and macd_read.bias != "BEARISH":
         direction = "BULLISH"
     else:
         direction = "NEUTRAL"
 
-    macd_hist_contrib = abs(macd_read.histogram) * 2 if readiness.macd_ready else 0.0
     trend_strength = min(
         100.0,
         abs(mom15) * 15 + abs(mom5) * 25 + abs(bullish - bearish) * 8
-        + abs(rsi_read.value - 50) * 0.15 + macd_hist_contrib,
+        + abs(rsi_read.value - 50) * 0.15 + abs(macd_read.histogram) * 2,
     )
-
-    macd_out = macd_read if readiness.macd_ready else type(macd_read)()
 
     return SpotChart(
         direction=direction,
         spot=round(spot, 2),
         timeframe="5m",
         barCount=len(closes),
-        indicatorBarCount=readiness.indicator_bar_count,
-        rsiReady=readiness.rsi_ready,
-        macdReady=readiness.macd_ready,
-        ema21Ready=readiness.ema21_ready,
-        indicatorsWarm=readiness.indicators_warm,
         momentum5Pct=round(mom5, 3),
         momentum10Pct=round(mom10, 3),
         momentum15Pct=round(mom15, 3),
@@ -265,10 +249,10 @@ def build_spot_chart(
         poc=round(poc, 2),
         rsi=rsi_read.value,
         rsiBias=rsi_read.bias,
-        macd=macd_out.line,
-        macdSignal=macd_out.signal,
-        macdHistogram=macd_out.histogram,
-        macdBias=macd_out.bias,
+        macd=macd_read.line,
+        macdSignal=macd_read.signal,
+        macdHistogram=macd_read.histogram,
+        macdBias=macd_read.bias,
     )
 
 
@@ -303,13 +287,7 @@ def refresh_spot_chart_live(
         if not recent and isinstance(chart_analysis, dict):
             recent = list(chart_analysis.get("recentCloses") or [])
 
-    warm_closes: list[float] = []
-    if chart_analysis is not None:
-        warm_closes = list(getattr(chart_analysis, "indicatorWarmCloses", None) or [])
-        if not warm_closes and isinstance(chart_analysis, dict):
-            warm_closes = list(chart_analysis.get("indicatorWarmCloses") or [])
-
-    if len(recent) < 5 and len(warm_closes) < 5:
+    if len(recent) < 5:
         updated = spot_chart.model_copy(update={"spot": round(live_spot, 2)})
         if chart_analysis:
             return reconcile_spot_chart_with_mtf(
@@ -317,17 +295,8 @@ def refresh_spot_chart_live(
             )
         return updated
 
-    from app.engines.indicator_readiness import MACD_MIN_CLOSES
-
-    session_closes = recent if len(recent) >= 5 else warm_closes[-30:]
-    candles_5m = _closes_to_synthetic_candles(session_closes)
-    ind_seed = warm_closes if len(warm_closes) >= MACD_MIN_CLOSES else None
-    refreshed = build_spot_chart(
-        candles_5m,
-        live_spot,
-        profile,
-        indicator_closes=ind_seed,
-    )
+    candles_5m = _closes_to_synthetic_candles(recent)
+    refreshed = build_spot_chart(candles_5m, live_spot, profile)
     if chart_analysis:
         return reconcile_spot_chart_with_mtf(
             refreshed, chart_analysis, breadth_bias=breadth_bias, from_open_pct=from_open_pct,
@@ -962,16 +931,11 @@ def analyze_premium_chart(candles: list, ltp: float) -> "PremiumChart":
     if post_dump:
         live_mom = min(live_mom, -1.0)
 
-    from app.engines.winner_entry_guards import FADE_OFF_LOW_BARS, premium_off_low_pct
-
-    off_low = premium_off_low_pct(lows, ltp, bars=FADE_OFF_LOW_BARS["1m"])
-
     return PremiumChart(
         direction=direction,
         lastPremium=round(ltp, 2),
         momentum3Pct=round(mom3, 3),
         momentum5Pct=round(mom5, 3),
-        offLowPct=round(off_low, 2),
         volumeSurge=round(vol_surge, 2),
         vwap=round(vwap, 2),
         aboveVwap=ltp > vwap * 1.001,
@@ -1016,7 +980,6 @@ def premium_blocks_entry(
         premium_momentum_3s=float(premium.momentum3Pct or 0),
         premium_momentum_5s=float(premium.momentum5Pct or 0),
         premium_direction=str(premium.direction or ""),
-        premium_off_low_pct=float(getattr(premium, "offLowPct", 0) or 0),
         explosion_event=explosion_event,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
         pad_lane_bypass=pad_lane_bypass,
@@ -1026,44 +989,13 @@ def premium_blocks_entry(
     )
 
 
-def _quote_float(raw: Any) -> float:
-    try:
-        return float(raw or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _index_prev_close(quote: dict[str, Any], spot: float, ohlc: dict[str, Any]) -> float:
-    """Yesterday's close. Upstox index quotes often omit it or set ohlc.close = ltp."""
-    for key in ("prev_close", "prevClose"):
-        prev = _quote_float(quote.get(key))
-        if prev > 0:
-            return prev
-    net = quote.get("net_change")
-    if net is None:
-        net = quote.get("change")
-    if net is not None and spot > 0:
-        implied = spot - _quote_float(net)
-        if implied > 0:
-            return implied
-    for candidate in (ohlc.get("close"), quote.get("close")):
-        prev = _quote_float(candidate)
-        if prev > 0 and (spot <= 0 or abs(prev - spot) > 1e-6):
-            return prev
-    return 0.0
-
-
 def pro_index_quote_context(quote: dict[str, Any], spot: float) -> dict[str, Any]:
     """Day structure from Upstox index quote."""
+    prev = float(quote.get("close") or quote.get("prev_close") or spot)
     ohlc = quote.get("ohlc") or {}
-    if not isinstance(ohlc, dict):
-        ohlc = {}
-    # Missing OHLC must stay missing. Substituting the live spot made a restart
-    # tick, or a quote with no open, look like the cash-session open.
-    day_open = _quote_float(ohlc.get("open") or quote.get("open"))
-    day_high = _quote_float(ohlc.get("high") or quote.get("high"))
-    day_low = _quote_float(ohlc.get("low") or quote.get("low"))
-    prev = _index_prev_close(quote, float(spot or 0), ohlc)
+    day_open = float(ohlc.get("open") or quote.get("open") or spot)
+    day_high = float(ohlc.get("high") or quote.get("high") or spot)
+    day_low = float(ohlc.get("low") or quote.get("low") or spot)
     gap_pct = ((spot - prev) / prev * 100) if prev else 0.0
     from_open_pct = ((spot - day_open) / day_open * 100) if day_open else 0.0
     range_pct = ((day_high - day_low) / day_low * 100) if day_low else 0.0
