@@ -468,6 +468,18 @@ def test_near_base_call_waives_structure_near_miss():
         readiness_reason="first_lift_structure_not_confirmed",
         settings=s,
     )
+    assert explosion_near_miss_waive(
+        alert,
+        snap=snap,
+        readiness_reason="first_lift_live_velocity9s_negative",
+        settings=s,
+    )
+    assert explosion_near_miss_waive(
+        {**alert, "localBaseMovePct": 28.0, "ictBaseRelativeMovePct": 28.0},
+        snap=snap,
+        readiness_reason="first_lift_base_move_outside_2_5",
+        settings=s,
+    ) is False
 
 
 def test_cold_armed_base_call_clears_first_lift_velocity_and_tqs():
@@ -483,5 +495,77 @@ def test_cold_armed_base_call_clears_first_lift_velocity_and_tqs():
         snap=put_snap,
         alert=_oct23_base_alert(side="PUT", strike=22450.0),
     )
-    assert put_ready is False
-    assert put_reason == "first_lift_live_velocity_negative"
+    assert put_ready is True, put_reason
+    assert put_reason != "first_lift_live_velocity_negative"
+    assert put_reason != "first_lift_live_velocity9s_negative"
+
+
+def test_elite_2_5_window_does_not_reject_676_pad():
+    """11% off the base is still #676. The elite 2–5% cap must not close it."""
+    snap = _nifty_snap()
+    alert = _oct23_base_alert(
+        ictEliteBaseReady=True,
+        eliteBaseReady=True,
+        ictFirstLift=True,
+        firstLift=True,
+        ictBaseRelativeMovePct=11.0,
+        localBaseMovePct=11.0,
+        velocity3s=-0.2,
+        velocity9s=-0.3,
+    )
+    ready, reason = first_lift_entry_readiness(snap=snap, alert=alert)
+    assert ready is True, reason
+    assert not str(reason).startswith("first_lift_base_move_outside")
+    assert reason != "first_lift_live_velocity9s_negative"
+
+
+def test_put_mirror_on_the_pad_waives_chop_deep_chase():
+    s = settings_mock()
+    snap = _nifty_snap()
+    alert = _oct23_base_alert(side="PUT", strike=22450.0, localBaseMovePct=8.0)
+    cand = SimpleNamespace(
+        mode="explosion",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=22450.0,
+        premium=240.0,
+        tier="EXPLODING",
+        alert=alert,
+        pretrade_meta={},
+        snap=snap,
+    )
+    blocked, reason = best_trade_chop_deep_chase_blocked(
+        cand,
+        {"fakeExplosionTrap": True},
+        {"dayMode": "CHOP DAY", "localBasePct": 8.0, "setup": "EXPLOSIVE"},
+        day_mode="CHOP DAY",
+        settings=s,
+    )
+    assert blocked is False
+    assert reason == ""
+
+    extended = SimpleNamespace(
+        mode="explosion",
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=22450.0,
+        premium=240.0,
+        tier="EXPLODING",
+        alert=_oct23_base_alert(
+            side="PUT",
+            strike=22450.0,
+            localBaseMovePct=28.0,
+            ictBaseRelativeMovePct=28.0,
+        ),
+        pretrade_meta={},
+        snap=snap,
+    )
+    blocked, reason = best_trade_chop_deep_chase_blocked(
+        extended,
+        {"fakeExplosionTrap": True},
+        {"dayMode": "CHOP DAY", "localBasePct": 28.0, "setup": "EXPLOSIVE"},
+        day_mode="CHOP DAY",
+        settings=s,
+    )
+    assert blocked is True
+    assert reason == "best_trade_block_chop_deep_itm_chase"
