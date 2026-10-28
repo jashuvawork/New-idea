@@ -33,7 +33,7 @@ All times are IST.
 
 ## What is aligned
 
-`main` at `df294b91` is this book.
+`main` at `34c97b4` (#874) is this book.
 
 - The tree is the same tree as the #872 branch.
 - `best_trade_policy.py` has no diff against `ef333c95`.
@@ -44,10 +44,8 @@ These pull requests were closed because they are not part of the book: #806 (₹
 
 ## What is not on the server
 
-The server is still on `2b7e415`, from the deploy that finished at 09:06 Madrid (13:36 IST).
+The server may lag `main` until the next **Deploy to EC2** run (push to `main` runs `ec2-update.sh` then `set-execution-mode.sh --paper`).
 
-That commit has the #794 tree, the untouched #676 pad, the #816 exits, today's index open, the cash-candle hold, the 09:25 macro, the fresh-base reentry, and paper. It does not have #872.
+On EC2 manually: `sudo bash deploy/redeploy-paper-794-816-session.sh`, then `bash deploy/verify-paper-794-816-session.sh`.
 
-#872 was merged to `main` at 09:50 Madrid (14:20 IST). The EC2 deploy for `df294b91` was cancelled (`40659705012`), so the restart memory and the single trader pass never reached the machine. The public status endpoint still reports `2b7e415`.
-
-Until that commit is deployed, a restart still drops `pnlPoints`, `bestPnlPoints`, and `maxLtp` on today's closed trades, and a chain rebuild can still run a second trader pass beside the live scan.
+After deploy, `/api/deployment/status` should show the short `main` SHA, `paperTrading: true`, `enableLiveTrading: false`, and `entryEarliestIst: 09:20`.
