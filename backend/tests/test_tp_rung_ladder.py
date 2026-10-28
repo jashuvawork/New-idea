@@ -34,6 +34,45 @@ def test_build_tp_rungs_includes_micro_and_stages():
     assert 80.0 in rungs
 
 
+def test_near_best_hold_defers_between_fade_on_small_pullback():
+    """While LTP hugs the peak, do not bank on a 2pt dip with mild negative v3."""
+    s = Settings()
+    trade = PaperTrade(
+        id="near-best",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24000.0,
+        entryPremium=100.0,
+        currentPremium=138.0,
+        lots=1,
+        openedAt=datetime.now(IST) - timedelta(minutes=5),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=40.0,
+        maxLtp=140.0,
+        maxLtpAt=datetime.now(IST) - timedelta(seconds=30),
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "eliteRunnerExitBundle": True,
+            "projectedMaxTp": 500.0,
+            "stageSize": 36.0,
+            "tpRungLadder": True,
+            "tpRungsPts": [28.0, 36.0, 72.0, 120.0],
+            "exitPlan": {"targetPoints": 28.0, "stageSize": 36.0, "projectedMaxTp": 500.0},
+        },
+    )
+    sync_tp_rung_state(trade, 40.0, settings=s)
+    reason = tp_rung_exit_reason(
+        trade,
+        best=40.0,
+        pnl_pts=38.0,
+        hold_seconds=120.0,
+        live_velocity_3s=-0.5,
+        settings=s,
+    )
+    assert reason is None
+
+
 def test_user_example_100_entry_28_36_fade_at_33():
     """Entry 100: rungs +28/+36, best +33 fading → exit between rungs."""
     s = Settings()

@@ -316,6 +316,13 @@ def tp_rung_exit_reason(
     if v3 >= hot_defer:
         return None
 
+    from app.engines.explosion_profit import exit_near_best_hold_active
+
+    if exit_near_best_hold_active(
+        trade, best=best, pnl_pts=pnl_pts, live_velocity_3s=v3, settings=s,
+    ):
+        return None
+
     falling = v3 < 0
     falling_under = v3 < 0 and pnl_pts <= floor + 1e-6
     mega_red = pnl_pts <= 0 and falling
@@ -341,12 +348,15 @@ def tp_rung_exit_reason(
         >= _cfg_float(s, "tp_rung_ladder_mega_disable_between_fade_min_best_points", 55.0)
     )
 
+    gb_frac = _cfg_float(s, "tp_rung_ladder_fade_min_giveback_frac_of_best", 0.10)
+    effective_giveback = max(min_giveback, best * gb_frac)
+
     # Between rungs: tried the next TP, fading — bank at last confirmed rung (100→28,36,33).
     if (
         not skip_between_fade
         and falling
         and _attempted_next_rung(best, confirmed, rungs, s, trade=trade)
-        and (best - pnl_pts) + 1e-6 >= min_giveback
+        and (best - pnl_pts) + 1e-6 >= effective_giveback
     ):
         return "explosion_tp_rung_between_fade"
 

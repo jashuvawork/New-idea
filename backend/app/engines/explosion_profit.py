@@ -22,6 +22,42 @@ def premium_velocity_pct_to_points(velocity_pct: float, entry_premium: float) ->
     return v / 100.0 * entry
 
 
+def exit_near_best_hold_active(
+    trade: PaperTrade,
+    *,
+    best: float,
+    pnl_pts: float,
+    live_velocity_3s: float = 0.0,
+    settings: Any = None,
+) -> bool:
+    """Defer fade/floor exits while price still hugs the observed peak (LTP still 'high')."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "exit_near_best_hold_enabled", True)):
+        return False
+    best = float(best or 0)
+    pnl = float(pnl_pts or 0)
+    if best <= 0 or pnl <= 0:
+        return False
+    frac = _cfg_float(settings, "exit_near_best_hold_min_frac_of_best", 0.90)
+    if pnl + 1e-6 < best * frac:
+        return False
+    max_gb = _cfg_float(settings, "exit_near_best_hold_max_giveback_points", 5.0)
+    if (best - pnl) > max_gb + 1e-6:
+        return False
+    v3 = float(live_velocity_3s or 0)
+    ctx = trade.entryContext or {}
+    runner = bool(
+        ctx.get("eliteRunnerExitBundle")
+        or (ctx.get("maxProfitCapture") and ctx.get("vBaseFtvRunner"))
+    )
+    min_v = _cfg_float(
+        settings,
+        "exit_near_best_hold_runner_min_velocity_3s" if runner else "exit_near_best_hold_min_velocity_3s",
+        -2.5 if runner else -1.0,
+    )
+    return v3 + 1e-6 >= min_v
+
+
 def _cfg_float(settings, name: str, default: float) -> float:
     """Float setting with MagicMock-safe fallback (tests often stub settings)."""
     v = getattr(settings, name, default)
@@ -2128,6 +2164,11 @@ def peak_velocity_reversal_keep_reason(
     if _peak_fade_bullish_continuation(trade, pnl_pts=pnl_pts, settings=settings):
         return None
 
+    if exit_near_best_hold_active(
+        trade, best=best, pnl_pts=pnl_pts, live_velocity_3s=live_velocity_3s, settings=settings,
+    ):
+        return None
+
     min_best = _cfg_float(settings, "peak_velocity_reversal_min_best_points", 8.0)
     best = float(best or 0)
     pnl_pts = float(pnl_pts or 0)
@@ -2257,6 +2298,14 @@ def unified_profit_ladder_exit_reason(
     if pnl_pts <= 0 and not (falling_under and float(best or 0) + 1e-6 >= mega_best):
         return None
     if live_v3 >= _cfg_float(settings, "unified_profit_ladder_hot_defer_velocity_3s", 2.0):
+        return None
+    if exit_near_best_hold_active(
+        trade,
+        best=float(best or 0),
+        pnl_pts=pnl_pts,
+        live_velocity_3s=live_velocity_3s,
+        settings=settings,
+    ):
         return None
 
     if layer == "multiple":
