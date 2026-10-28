@@ -223,6 +223,12 @@ def _process_patches(state, candidate, events, opener):
 
 
 def test_four_concurrent_cycles_have_one_claim_and_four_terminal_results_on_cancellation():
+    """Four bodies inside one pass still share one claim.
+
+    This calls ``_process_locked`` rather than ``process``. ``process`` now
+    returns immediately when a pass is already running, so the three losers
+    would never log a claim conflict and the winner would wait forever.
+    """
     state = AutoTraderState(running=True)
     candidate = _archived_24200_pe_candidate()
     snapshots = {"NIFTY": candidate.snap}
@@ -252,13 +258,22 @@ def test_four_concurrent_cycles_have_one_claim_and_four_terminal_results_on_canc
 
     async def replay():
         tasks = [
-            asyncio.create_task(auto_trader.process(snapshots, client=MagicMock()))
+            asyncio.create_task(
+                auto_trader._process_locked(snapshots, client=MagicMock())
+            )
             for _ in range(4)
         ]
-        return await asyncio.gather(*tasks, return_exceptions=True)
+        return await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True),
+            timeout=2,
+        )
 
-    with _process_patches(state, candidate, events, preorder_open):
-        results = asyncio.run(replay())
+    auto_trader._entry_claims.clear()
+    try:
+        with _process_patches(state, candidate, events, preorder_open):
+            results = asyncio.run(replay())
+    finally:
+        auto_trader._entry_claims.clear()
 
     assert sum(isinstance(result, asyncio.CancelledError) for result in results) == 1
     assert monitor_count == 1
@@ -273,6 +288,64 @@ def test_four_concurrent_cycles_have_one_claim_and_four_terminal_results_on_canc
     ) == 3
     assert [row["reason"] for row in terminal].count("entry_cancelled") == 1
     assert auto_trader._entry_claims == {}
+
+
+def test_overlapping_process_passes_return_without_waiting():
+    """A second ``process`` call must not sit behind the pass already running."""
+    state = AutoTraderState(running=True)
+    candidate = _archived_24200_pe_candidate()
+    snapshots = {"NIFTY": candidate.snap}
+    release_monitor = asyncio.Event()
+    entered = asyncio.Event()
+    events = []
+    monitor_count = 0
+
+    async def cancelled_monitor(*_args, **_kwargs):
+        nonlocal monitor_count
+        monitor_count += 1
+        entered.set()
+        await release_monitor.wait()
+        raise asyncio.CancelledError("execution chart task cancelled")
+
+    async def preorder_open(*_args, **_kwargs):
+        return await cancelled_monitor()
+
+    async def replay():
+        tasks = [
+            asyncio.create_task(auto_trader.process(snapshots, client=MagicMock()))
+            for _ in range(4)
+        ]
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        for _ in range(5):
+            if sum(task.done() for task in tasks) >= 3:
+                break
+            await asyncio.sleep(0)
+        assert sum(task.done() for task in tasks) == 3
+        release_monitor.set()
+        return await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True),
+            timeout=2,
+        )
+
+    auto_trader._entry_claims.clear()
+    auto_trader._process_running = False
+    try:
+        with _process_patches(state, candidate, events, preorder_open):
+            results = asyncio.run(replay())
+    finally:
+        auto_trader._process_running = False
+        auto_trader._entry_claims.clear()
+
+    assert monitor_count == 1
+    assert sum(result is state for result in results) == 3
+    assert sum(isinstance(result, asyncio.CancelledError) for result in results) == 1
+    assert [row["event"] for row in events].count("SELECTED") == 1
+    assert [row.get("reason") for row in events].count(
+        "entry_preorder_claim_conflict"
+    ) == 0
+    assert [row.get("reason") for row in events].count("entry_cancelled") == 1
+    assert auto_trader._entry_claims == {}
+    assert auto_trader._process_running is False
 
 
 def test_non_cancellation_baseexception_records_terminal_abort_and_releases_claim():
