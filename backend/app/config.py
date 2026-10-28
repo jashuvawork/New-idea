@@ -1657,6 +1657,13 @@ class Settings(BaseSettings):
     # Above this best, skip between-rung fade; use 75% ladder / rung floor / mega hole.
     tp_rung_ladder_mega_disable_between_fade_min_best_points: float = 55.0
     tp_rung_ladder_mega_ladder_first_min_best_points: float = 55.0
+    # Hold near peak: skip between-rung / 75% fade while P&L hugs best and momentum is not cold.
+    exit_near_best_hold_enabled: bool = True
+    exit_near_best_hold_min_frac_of_best: float = 0.90
+    exit_near_best_hold_max_giveback_points: float = 5.0
+    exit_near_best_hold_min_velocity_3s: float = -1.0
+    exit_near_best_hold_runner_min_velocity_3s: float = -2.5
+    tp_rung_ladder_fade_min_giveback_frac_of_best: float = 0.10
     # FTV runner %-of-peak-gain trailing floor. V/FTV moments run in big % from the local
     # base (e.g. Rs68 -> Rs140 = +106%). The absolute stage ladder is tuned for mega point
     # moves and under-protects modest-but-real % moves (a +40% peak can give back to +4%).
