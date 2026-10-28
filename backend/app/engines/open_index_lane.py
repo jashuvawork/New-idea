@@ -1,7 +1,8 @@
 """09:20–09:45 IST index-specific open lanes (then normal book after open caution ends).
 
-Open window defaults: SENSEX CALL + NIFTY PUT lanes (first lift, elite/local caps).
-Does not waive cash-candle hold, open macro, or premium band.
+Research-backed defaults on main: SENSEX CALL + first lift ON; NIFTY PUT opt-in via
+``open_nifty_put_lane_enabled``. Does not waive cash-candle hold, open macro, or premium band.
+Replay uses ``resolve_lane_when`` (snap timestamp, not wall clock).
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ def _lane_active_for_index(index: str, settings: Any) -> tuple[bool, str | None]
     """Return (active, required_side) for NIFTY/SENSEX."""
     if index == "SENSEX" and bool(getattr(settings, "open_sensex_call_lane_enabled", True)):
         return True, "CALL"
-    if index == "NIFTY" and bool(getattr(settings, "open_nifty_put_lane_enabled", True)):
+    if index == "NIFTY" and bool(getattr(settings, "open_nifty_put_lane_enabled", False)):
         return True, "PUT"
     return False, None
 
@@ -71,7 +72,7 @@ def open_index_lane_summary(settings: Any = None) -> dict[str, Any]:
     return {
         "enabled": bool(getattr(settings, "open_index_lane_enabled", True)),
         "sensexCallLane": bool(getattr(settings, "open_sensex_call_lane_enabled", True)),
-        "niftyPutLane": bool(getattr(settings, "open_nifty_put_lane_enabled", True)),
+        "niftyPutLane": bool(getattr(settings, "open_nifty_put_lane_enabled", False)),
         "requireFirstLift": bool(getattr(settings, "open_index_lane_require_first_lift", True)),
         "minEliteScore": float(getattr(settings, "open_index_lane_min_elite_score", 90.0) or 90.0),
         "maxLocalBasePct": float(
