@@ -24,6 +24,7 @@ def _reset_market_cache():
     market_router._cache_json = None
     market_router._build_in_progress = False
     market_router._last_ws_overlay_mono = 0.0
+    market_router._last_ws_cache_serialize_mono = 0.0
     market_router._last_exit_eval_mono = 0.0
     market_router._last_full_rest_mono = 0.0
     market_router._full_rest_task = None
@@ -206,7 +207,7 @@ def test_tick_fast_skips_serialize_when_throttled():
             autoTrader=AutoTraderState(),
         ),
     )
-    market_router._last_ws_overlay_mono = time.monotonic()
+    market_router._last_ws_cache_serialize_mono = time.monotonic()
 
     async def _run():
         with patch("app.routers.market.is_ws_active", return_value=True), patch(
@@ -224,6 +225,55 @@ def test_tick_fast_skips_serialize_when_throttled():
 
     store = asyncio.run(_run())
     store.assert_not_called()
+
+
+def test_building_ltp_touches_ws_overlay_health_without_overlay_cycle():
+    """building_ltp must refresh ws_overlay lastSeenAt even when it owns cache serialize."""
+    import time
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from unittest.mock import patch
+
+    from app.models.schemas import AutoTraderState, MarketPhase, MultiSnapshot, SymbolSnapshot
+    from app.services.radar_health import health_status, reset_health_for_tests
+
+    IST = ZoneInfo("Asia/Kolkata")
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        tradeQualityScore=50.0,
+    )
+    reset_health_for_tests()
+    market_router._store_cache(
+        MultiSnapshot(
+            timestamp=datetime.now(IST),
+            dataReady=True,
+            snapshots={"NIFTY": snap},
+            autoTrader=AutoTraderState(),
+        ),
+    )
+    market_router._last_ws_overlay_mono = time.monotonic()
+    market_router._last_ws_cache_serialize_mono = time.monotonic()
+
+    async def _run():
+        with (
+            patch("app.routers.market.is_ws_active", return_value=True),
+            patch("app.routers.market.overlay_snapshot_live", return_value={"NIFTY": snap}),
+            patch(
+                "app.engines.building_ltp_monitor.building_ltp_monitor_due",
+                return_value=False,
+            ),
+            patch.object(market_router, "_record_radar_pipeline_async", new_callable=AsyncMock),
+            patch.object(market_router, "_refresh_explosion_alerts_async", new_callable=AsyncMock),
+        ):
+            await market_router.run_building_ltp_entry_cycle(run_trader=False)
+
+    asyncio.run(_run())
+    ws = health_status()["sources"].get("ws_overlay") or {}
+    assert ws.get("lastSeenAt")
+    assert market_router.ws_overlay_due() is False
 
 
 def test_serve_stale_cache_omits_refresh_reason_when_ready():
