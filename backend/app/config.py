@@ -2880,7 +2880,7 @@ class Settings(BaseSettings):
     pad_lane_selector_rank_bonus: float = 18.0
     # Pad-lane base retest may fill through shallow premium fade at execution.
     pad_lane_premium_fade_fill_enabled: bool = True
-    pad_lane_premium_fade_fill_max_drawdown_pct: float = -1.2
+    pad_lane_premium_fade_fill_max_drawdown_pct: float = -2.0
     # Pad-lane local-base FTV on EXPIRY WORST may waive quality/score floors when
     # stamped readiness proves the lift (Aug25 24250 CE afternoon block).
     pad_lane_expiry_worst_waive_enabled: bool = True
@@ -3080,11 +3080,15 @@ class Settings(BaseSettings):
     open_index_lane_min_elite_score: float = 90.0
     open_index_lane_max_local_base_pct: float = 15.0
     open_index_lane_allowed_setups_csv: str = "FTV,V"
-    # 09:20–09:45: cold 1m premium momentum often reads as “fade” on base lifts — allow shallow retest.
+    # All sessions: exec 1m premium often reads “fade” on local-base lifts — allow shallow retest.
+    local_base_first_lift_premium_fade_fill_enabled: bool = True
+    local_base_first_lift_premium_fade_max_drawdown_pct: float = -2.8
+    local_base_first_lift_premium_fade_max_local_base_pct: float = 28.0
+    # Legacy env aliases (same semantics as local_base_first_lift_* above).
     open_caution_premium_fade_fill_enabled: bool = True
     open_caution_premium_fade_max_drawdown_pct: float = -2.8
     open_caution_premium_fade_max_local_base_pct: float = 28.0
-    # Expiry SENSEX/BANKNIFTY OTM block — waive for stamped open first-lift at the pad.
+    # Expiry SENSEX/BANKNIFTY OTM block — waive for stamped first-lift at the pad (all sessions).
     best_trade_expiry_otm_open_first_lift_waive_enabled: bool = True
     primary_window_start_hour: int = 10
     primary_window_start_minute: int = 0

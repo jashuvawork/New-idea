@@ -245,6 +245,7 @@ def validate_execution_charts(
     index_trough_bypass: bool = False,
     symmetric_near_base_bypass: bool = False,
     building_rip_bypass: bool = False,
+    local_base_first_lift_bypass: bool = False,
     open_caution_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
@@ -294,6 +295,7 @@ def validate_execution_charts(
         pe_win_mirror_bypass=pe_win_mirror_bypass,
         symmetric_near_base_bypass=symmetric_near_base_bypass,
         building_rip_bypass=building_rip_bypass,
+        local_base_first_lift_bypass=local_base_first_lift_bypass,
         open_caution_bypass=open_caution_bypass,
     )
     if blocked:
@@ -420,12 +422,12 @@ async def monitor_trade_chart_before_execution(
     # (Sep01 NIFTY PUT 23950). Applied here, not in the chart strict_bypass, so it can't skip
     # the chart-direction gate on a counter-trend setup.
     from app.engines.pad_lane_capture import (
+        local_base_first_lift_premium_fade_bypass,
         local_base_premium_fade_bypass,
-        open_caution_premium_fade_bypass,
     )
 
     _snap_when = getattr(snap, "timestamp", None) if snap is not None else None
-    open_caution_fade_bypass = open_caution_premium_fade_bypass(
+    local_base_lift_fade_bypass = local_base_first_lift_premium_fade_bypass(
         alert if isinstance(alert, dict) else None,
         explosion_event,
         when=_snap_when,
@@ -454,7 +456,7 @@ async def monitor_trade_chart_before_execution(
         or atm_armed_fade_bypass
         or symmetric_fade_bypass
         or building_rip_fade_bypass
-        or open_caution_fade_bypass
+        or local_base_lift_fade_bypass
     )
     confirmed_ftv_bypass = bool(
         (strict_first_lift_bypass or atm_armed_fade_bypass)
@@ -578,7 +580,7 @@ async def monitor_trade_chart_before_execution(
         premium_fade_pad_lane = False
         pe_win_mirror_bypass = False
         symmetric_fade_bypass = False
-        open_caution_fade_bypass = False
+        local_base_lift_fade_bypass = False
         building_rip_fade_bypass = False
     index_mtf_reads = meta.pop("_indexMtfReads", None)
     premium_mtf_reads = meta.pop("_premiumMtfReads", None)
@@ -603,7 +605,7 @@ async def monitor_trade_chart_before_execution(
         index_trough_bypass=index_trough_bypass,
         symmetric_near_base_bypass=symmetric_fade_bypass,
         building_rip_bypass=building_rip_fade_bypass,
-        open_caution_bypass=open_caution_fade_bypass,
+        local_base_first_lift_bypass=local_base_lift_fade_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
@@ -614,7 +616,8 @@ async def monitor_trade_chart_before_execution(
     meta["premiumFadePadLaneBypass"] = premium_fade_pad_lane
     meta["buildingRipFadeBypass"] = building_rip_fade_bypass
     meta["symmetricNearBaseFadeBypass"] = symmetric_fade_bypass
-    meta["openCautionFadeBypass"] = open_caution_fade_bypass
+    meta["localBaseFirstLiftFadeBypass"] = local_base_lift_fade_bypass
+    meta["openCautionFadeBypass"] = local_base_lift_fade_bypass
     meta["peWinCeMirrorFadeBypass"] = pe_win_mirror_bypass
     meta["indexTroughBypass"] = index_trough_bypass
 

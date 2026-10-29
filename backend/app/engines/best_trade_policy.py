@@ -1268,18 +1268,14 @@ def expiry_cheap_otm_entry_blocked(
         if bool(
             getattr(settings, "best_trade_expiry_otm_open_first_lift_waive_enabled", True)
         ):
-            from app.engines.open_index_lane import in_open_caution_window_at
-            from app.engines.pad_lane_capture import open_caution_premium_fade_bypass
+            from app.engines.pad_lane_capture import local_base_first_lift_premium_fade_stamp_ok
 
             alert_map = alert if isinstance(alert, Mapping) else _alert_for_candidate(candidate)
-            ts = getattr(snap, "timestamp", None) if snap is not None else None
-            if ts is not None and in_open_caution_window_at(ts):
-                if open_caution_premium_fade_bypass(
-                    dict(alert_map),
-                    getattr(candidate, "explosion_event", None),
-                    when=ts,
-                ):
-                    return False, ""
+            if local_base_first_lift_premium_fade_stamp_ok(
+                dict(alert_map),
+                getattr(candidate, "explosion_event", None),
+            ):
+                return False, ""
         return True, "best_trade_block_expiry_otm_itm_atm_only"
 
     alert = alert if isinstance(alert, Mapping) else _alert_for_candidate(candidate)

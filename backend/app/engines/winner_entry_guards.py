@@ -22,6 +22,7 @@ def premium_fading_blocks_entry(
     pe_win_mirror_bypass: bool = False,
     symmetric_near_base_bypass: bool = False,
     building_rip_bypass: bool = False,
+    local_base_first_lift_bypass: bool = False,
     open_caution_bypass: bool = False,
 ) -> tuple[bool, str]:
     """
@@ -37,6 +38,17 @@ def premium_fading_blocks_entry(
     settings = get_settings()
     if not settings.execution_chart_premium_check_enabled:
         return False, "ok"
+
+    base_lift_bypass = local_base_first_lift_bypass or open_caution_bypass
+    base_lift_enabled = bool(
+        getattr(settings, "local_base_first_lift_premium_fade_fill_enabled", True)
+        or getattr(settings, "open_caution_premium_fade_fill_enabled", True)
+    )
+    base_lift_floor = float(
+        getattr(settings, "local_base_first_lift_premium_fade_max_drawdown_pct", None)
+        or getattr(settings, "open_caution_premium_fade_max_drawdown_pct", -2.8)
+        or -2.8
+    )
 
     daily_move = 0.0
     tier = ""
@@ -115,28 +127,25 @@ def premium_fading_blocks_entry(
             return False, "building_rip_shallow_fade_ok"
 
     if (
-        open_caution_bypass
-        and bool(getattr(settings, "open_caution_premium_fade_fill_enabled", True))
+        base_lift_bypass
+        and base_lift_enabled
         and tier in ("ELITE", "EXPLODING", "BUILDING", "WATCH")
     ):
-        shallow_floor = float(
-            getattr(settings, "open_caution_premium_fade_max_drawdown_pct", -2.8) or -2.8
-        )
-        if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
-            return False, "open_caution_shallow_fade_ok"
+        if premium_momentum_5s >= base_lift_floor and premium_momentum_3s >= base_lift_floor:
+            return False, "local_base_first_lift_shallow_fade_ok"
 
     min_mom = settings.execution_chart_min_premium_momentum_pct
     if premium_momentum_5s < min_mom and premium_momentum_3s < 0:
-        if open_caution_bypass and premium_momentum_3s >= -0.08 and premium_momentum_5s >= min_mom - 0.35:
-            return False, "open_caution_flat_momentum_ok"
+        if base_lift_bypass and premium_momentum_3s >= -0.08 and premium_momentum_5s >= min_mom - 0.35:
+            return False, "local_base_first_lift_flat_momentum_ok"
         return True, "premium_fading_at_execution"
     if premium_direction.upper() == "BEARISH" and premium_momentum_5s < -0.12:
-        if open_caution_bypass and premium_momentum_5s >= -0.35:
-            return False, "open_caution_chart_fade_ok"
+        if base_lift_bypass and premium_momentum_5s >= -0.35:
+            return False, "local_base_first_lift_chart_fade_ok"
         return True, "premium_chart_fading"
     if trade_score >= 90 and premium_momentum_3s < -0.25:
-        if open_caution_bypass and premium_momentum_3s >= -0.55:
-            return False, "open_caution_high_score_fade_ok"
+        if base_lift_bypass and premium_momentum_3s >= -0.55:
+            return False, "local_base_first_lift_high_score_fade_ok"
         return True, "premium_fading_high_score"
     return False, "ok"
 

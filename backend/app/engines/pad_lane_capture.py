@@ -1472,27 +1472,25 @@ def atm_armed_local_base_premium_fade_bypass(
     return True
 
 
-def open_caution_premium_fade_bypass(
+def _local_base_first_lift_premium_fade_enabled(settings: Any) -> bool:
+    if bool(getattr(settings, "local_base_first_lift_premium_fade_fill_enabled", True)):
+        return True
+    return bool(getattr(settings, "open_caution_premium_fade_fill_enabled", True))
+
+
+def _local_base_first_lift_premium_fade_max_local_base_pct(settings: Any) -> float:
+    return float(
+        getattr(settings, "local_base_first_lift_premium_fade_max_local_base_pct", None)
+        or getattr(settings, "open_caution_premium_fade_max_local_base_pct", 28.0)
+        or 28.0
+    )
+
+
+def local_base_first_lift_premium_fade_stamp_ok(
     alert: Optional[dict[str, Any]],
     explosion_event: Any = None,
-    *,
-    when: Optional[datetime] = None,
 ) -> bool:
-    """09:20–09:45 local-base first lift — exec 1m premium dip is often noise, not a real fade."""
-    settings = get_settings()
-    if not bool(getattr(settings, "open_caution_premium_fade_fill_enabled", True)):
-        return False
-    from app.engines.open_index_lane import in_open_caution_window_at
-
-    ts = when
-    if ts is None:
-        ts = datetime.now(IST)
-    elif ts.tzinfo is None:
-        ts = ts.replace(tzinfo=IST)
-    else:
-        ts = ts.astimezone(IST)
-    if not in_open_caution_window_at(ts):
-        return False
+    """Structural local-base / pad-lane lift proof — not limited to the open window."""
     if not isinstance(alert, dict):
         return False
     tier = str(
@@ -1501,6 +1499,11 @@ def open_caution_premium_fade_bypass(
     if tier not in ("ELITE", "EXPLODING", "BUILDING", "WATCH"):
         return False
     moment = str(alert.get("momentType") or "").lower()
+    readiness = str(
+        alert.get("ictBaseReadinessReason")
+        or alert.get("firstLiftReadinessReason")
+        or ""
+    )
     first_lift = bool(
         alert.get("ictFirstLift")
         or alert.get("firstLift")
@@ -1508,6 +1511,10 @@ def open_caution_premium_fade_bypass(
         or alert.get("ictArmedBaseLaunch")
         or alert.get("armedBaseLaunch")
         or alert.get("ictFlatThenVertical")
+        or alert.get("ictBaseArmed")
+        or alert.get("shallowOtmLocalBaseTradeable")
+        or alert.get("indexConfirmedLocalBase")
+        or readiness in _STRICT_PAD_CHART_BYPASS_REASONS
         or moment
         in (
             "first_lift_local_base",
@@ -1518,10 +1525,9 @@ def open_caution_premium_fade_bypass(
     )
     if not first_lift:
         return False
+    settings = get_settings()
     min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
-    max_lb = float(
-        getattr(settings, "open_caution_premium_fade_max_local_base_pct", 28.0) or 28.0
-    )
+    max_lb = _local_base_first_lift_premium_fade_max_local_base_pct(settings)
     lb = float(
         alert.get("localBaseMovePct")
         or alert.get("ictBaseRelativeMovePct")
@@ -1529,6 +1535,32 @@ def open_caution_premium_fade_bypass(
         or 0
     )
     return min_lb <= lb <= max_lb
+
+
+def local_base_first_lift_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+    *,
+    when: Optional[datetime] = None,
+) -> bool:
+    """All sessions — exec 1m premium dip at the pad is often noise, not a real fade."""
+    del when  # replay/live clock kept for call-site compatibility
+    settings = get_settings()
+    if not _local_base_first_lift_premium_fade_enabled(settings):
+        return False
+    return local_base_first_lift_premium_fade_stamp_ok(alert, explosion_event)
+
+
+def open_caution_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+    *,
+    when: Optional[datetime] = None,
+) -> bool:
+    """Backward-compatible alias — same as all-session local-base first-lift bypass."""
+    return local_base_first_lift_premium_fade_bypass(
+        alert, explosion_event, when=when,
+    )
 
 
 def local_base_premium_fade_bypass(
@@ -1548,7 +1580,7 @@ def local_base_premium_fade_bypass(
         ts = raw if isinstance(raw, datetime) else None
 
     return (
-        open_caution_premium_fade_bypass(alert, explosion_event, when=ts)
+        local_base_first_lift_premium_fade_bypass(alert, explosion_event, when=ts)
         or symmetric_near_base_premium_fade_bypass(alert, explosion_event)
         or shallow_otm_local_base_premium_fade_bypass(alert, explosion_event)
         or atm_armed_local_base_premium_fade_bypass(alert, explosion_event)
