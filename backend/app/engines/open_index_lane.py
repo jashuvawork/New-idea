@@ -58,13 +58,33 @@ def in_open_caution_window_at(when: datetime) -> bool:
     return earliest <= current < end
 
 
+def allowed_open_lane_sides(index: str, settings: Any) -> set[str] | None:
+    """Sides allowed in open caution for this index, or None when lane idle."""
+    if index == "SENSEX":
+        sides: set[str] = set()
+        if bool(getattr(settings, "open_sensex_call_lane_enabled", True)):
+            sides.add("CALL")
+        if bool(getattr(settings, "open_sensex_put_lane_enabled", True)):
+            sides.add("PUT")
+        return sides or None
+    if index == "NIFTY":
+        sides = set()
+        if bool(getattr(settings, "open_nifty_put_lane_enabled", False)):
+            sides.add("PUT")
+        if bool(getattr(settings, "open_nifty_call_lane_enabled", False)):
+            sides.add("CALL")
+        return sides or None
+    return None
+
+
 def _lane_active_for_index(index: str, settings: Any) -> tuple[bool, str | None]:
-    """Return (active, required_side) for NIFTY/SENSEX."""
-    if index == "SENSEX" and bool(getattr(settings, "open_sensex_call_lane_enabled", True)):
-        return True, "CALL"
-    if index == "NIFTY" and bool(getattr(settings, "open_nifty_put_lane_enabled", False)):
-        return True, "PUT"
-    return False, None
+    """Legacy: first allowed side when exactly one lane side is active."""
+    sides = allowed_open_lane_sides(index, settings)
+    if not sides:
+        return False, None
+    if len(sides) == 1:
+        return True, next(iter(sides))
+    return True, None
 
 
 def open_index_lane_summary(settings: Any = None) -> dict[str, Any]:
@@ -72,6 +92,7 @@ def open_index_lane_summary(settings: Any = None) -> dict[str, Any]:
     return {
         "enabled": bool(getattr(settings, "open_index_lane_enabled", True)),
         "sensexCallLane": bool(getattr(settings, "open_sensex_call_lane_enabled", True)),
+        "sensexPutLane": bool(getattr(settings, "open_sensex_put_lane_enabled", True)),
         "niftyPutLane": bool(getattr(settings, "open_nifty_put_lane_enabled", False)),
         "requireFirstLift": bool(getattr(settings, "open_index_lane_require_first_lift", True)),
         "minEliteScore": float(getattr(settings, "open_index_lane_min_elite_score", 90.0) or 90.0),
@@ -200,22 +221,26 @@ def validate_open_index_lane(
     if not index:
         return True, "ok", {}
 
-    active, required_side = _lane_active_for_index(index, settings)
-    if not active or not required_side:
+    allowed_sides = allowed_open_lane_sides(index, settings)
+    if not allowed_sides:
         return True, "ok", {}
 
     side = _side_value(getattr(candidate, "side", ""))
     meta: dict[str, Any] = {
         "openIndexLane": True,
         "openIndexLaneIndex": index,
-        "openIndexLaneRequiredSide": required_side,
+        "openIndexLaneAllowedSides": sorted(allowed_sides),
     }
-    if side != required_side:
-        return False, f"open_index_lane_{index.lower()}_{required_side.lower()}_only", meta
+    if side not in allowed_sides:
+        if len(allowed_sides) == 1:
+            only = next(iter(allowed_sides))
+            meta["openIndexLaneRequiredSide"] = only
+            return False, f"open_index_lane_{index.lower()}_{only.lower()}_only", meta
+        return False, "open_index_lane_side_not_allowed", meta
 
     ok, reason, qmeta = _lane_quality_ok(candidate, settings)
     meta.update(qmeta)
     if not ok:
         return False, reason, meta
-    meta["openIndexLaneLane"] = f"{index}_{required_side}"
+    meta["openIndexLaneLane"] = f"{index}_{side}"
     return True, "ok", meta

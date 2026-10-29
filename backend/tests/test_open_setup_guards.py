@@ -2,11 +2,13 @@
 
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from app.config import Settings
 from app.engines.open_setup_guards import (
     open_caution_itm_depth_ok,
+    open_caution_side_align_ok,
     validate_open_setup_entry,
 )
 from app.models.schemas import Side
@@ -15,10 +17,11 @@ IST = ZoneInfo("Asia/Kolkata")
 OPEN = datetime(2026, 10, 29, 9, 35, tzinfo=IST)
 
 
-def _cand(symbol: str, side: Side, strike: float, *, alert: dict | None = None):
+def _cand(symbol: str, side: Side, strike: float, *, spot: float | None = None, alert: dict | None = None):
+    spot_v = spot if spot is not None else (73500.0 if symbol == "SENSEX" else 22800.0)
     snap = SimpleNamespace(
         symbol=symbol,
-        spot=73500.0 if symbol == "SENSEX" else 22800.0,
+        spot=spot_v,
         dataAvailable=True,
         timestamp=OPEN,
     )
@@ -31,19 +34,37 @@ def _cand(symbol: str, side: Side, strike: float, *, alert: dict | None = None):
     )
 
 
-def test_open_blocks_nifty_put_when_only_sensex_lane():
+@patch("app.engines.index_tick_helpers.resolve_index_session")
+def test_put_blocked_on_bullish_open(mock_session):
+    mock_session.return_value = {"open": 73000.0, "last": 73500.0, "hi": 73500.0, "lo": 73000.0}
+    s = Settings(open_caution_side_align_index_enabled=True)
+    snap = SimpleNamespace(spot=73500.0)
+    ok, reason, _ = open_caution_side_align_ok("SENSEX", "PUT", snap, settings=s)
+    assert not ok
+    assert reason == "open_caution_put_on_bullish_open"
+
+
+@patch("app.engines.index_tick_helpers.resolve_index_session")
+def test_call_blocked_on_bearish_open(mock_session):
+    mock_session.return_value = {"open": 73500.0, "last": 73000.0, "hi": 73500.0, "lo": 73000.0}
+    s = Settings(open_caution_side_align_index_enabled=True)
+    snap = SimpleNamespace(spot=73000.0)
+    ok, reason, _ = open_caution_side_align_ok("SENSEX", "CALL", snap, settings=s)
+    assert not ok
+    assert reason == "open_caution_call_on_bearish_open"
+
+
+@patch("app.engines.index_tick_helpers.resolve_index_session")
+def test_sensex_put_allowed_on_bearish_open(mock_session):
+    mock_session.return_value = {"open": 73500.0, "last": 73000.0, "hi": 73500.0, "lo": 73000.0}
     s = Settings(
         open_setup_guards_enabled=True,
-        open_index_lane_enabled=True,
-        open_sensex_call_lane_enabled=True,
-        open_nifty_put_lane_enabled=False,
-        open_caution_block_puts_enabled=True,
-        open_caution_non_lane_index_blocked=True,
+        open_index_lane_enabled=False,
+        open_caution_side_align_index_enabled=True,
     )
-    cand = _cand("NIFTY", Side.PUT, 22700.0)
+    cand = _cand("SENSEX", Side.PUT, 73800.0, spot=73000.0)
     ok, reason, _ = validate_open_setup_entry(cand, settings=s, when=OPEN)
-    assert not ok
-    assert reason == "open_caution_puts_blocked"
+    assert ok, reason
 
 
 def test_open_blocks_otm_sensex_call():
@@ -51,6 +72,7 @@ def test_open_blocks_otm_sensex_call():
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_itm_band_enabled=True,
+        open_caution_side_align_index_enabled=False,
     )
     cand_otm = _cand("SENSEX", Side.CALL, 73700.0)
     cand_otm.snap.spot = 73500.0
@@ -76,6 +98,7 @@ def test_sensex_call_itm_passes_lane_side():
         open_caution_non_lane_index_blocked=True,
         open_sensex_call_lane_enabled=True,
         open_caution_itm_band_enabled=True,
+        open_caution_side_align_index_enabled=False,
     )
     cand = _cand("SENSEX", Side.CALL, 73000.0)
     cand.snap.spot = 73500.0

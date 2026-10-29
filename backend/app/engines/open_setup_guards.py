@@ -1,4 +1,4 @@
-"""09:20–09:45 open book: lane + index scope + ITM depth + PUT block (CE/PE symmetric when PUT lane on)."""
+"""09:20–09:45 open book: index lanes + cash-open side align + ITM depth (CE/PE symmetric)."""
 
 from __future__ import annotations
 
@@ -20,11 +20,15 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 def _active_open_lanes(settings: Any) -> list[tuple[str, str]]:
+    from app.engines.open_index_lane import allowed_open_lane_sides
+
     lanes: list[tuple[str, str]] = []
-    if bool(getattr(settings, "open_sensex_call_lane_enabled", True)):
-        lanes.append(("SENSEX", "CALL"))
-    if bool(getattr(settings, "open_nifty_put_lane_enabled", False)):
-        lanes.append(("NIFTY", "PUT"))
+    for index in ("SENSEX", "NIFTY"):
+        sides = allowed_open_lane_sides(index, settings)
+        if not sides:
+            continue
+        for side in sorted(sides):
+            lanes.append((index, side))
     return lanes
 
 
@@ -39,6 +43,8 @@ def _max_itm_points(index: str | None, side: str, settings: Any) -> float:
         return float(getattr(settings, "open_caution_nifty_put_max_itm_points", 400.0) or 400.0)
     if index == "SENSEX" and side == "CALL":
         return float(getattr(settings, "open_caution_sensex_call_max_itm_points", 800.0) or 800.0)
+    if index == "SENSEX" and side == "PUT":
+        return float(getattr(settings, "open_caution_sensex_put_max_itm_points", 800.0) or 800.0)
     return float(getattr(settings, "open_caution_default_max_itm_points", 800.0) or 800.0)
 
 
@@ -102,16 +108,57 @@ def _resolve_spot(candidate: Any, snapshots: Optional[dict[str, SymbolSnapshot]]
     return 0.0
 
 
+def open_caution_side_align_ok(
+    symbol: str,
+    side: str,
+    snap: Any,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Block PUT on bullish open / CALL on bearish open; allow either when tape is flat."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {"openSideAlign": True}
+    if not bool(getattr(settings, "open_caution_side_align_index_enabled", True)):
+        return True, "ok", {}
+    if bool(getattr(settings, "open_caution_block_puts_enabled", False)) and _side_value(side) == "PUT":
+        nifty_put_lane = bool(getattr(settings, "open_nifty_put_lane_enabled", False))
+        if not (nifty_put_lane and _index_bucket(symbol) == "NIFTY"):
+            return False, "open_caution_puts_blocked", meta
+    from app.engines.index_tick_helpers import resolve_index_session
+
+    ext = resolve_index_session(symbol, snap)
+    session_open = float(ext.get("open") or 0)
+    spot = float(ext.get("last") or 0) or float(getattr(snap, "spot", 0) or 0)
+    if session_open <= 0 or spot <= 0:
+        meta["openSideAlignTape"] = "missing"
+        return True, "ok", meta
+    min_move = float(getattr(settings, "open_side_confirmation_min_index_move_pct", 0.10) or 0.10)
+    move_pct = (spot - session_open) / session_open * 100.0
+    meta["sessionOpen"] = round(session_open, 2)
+    meta["spot"] = round(spot, 2)
+    meta["movePct"] = round(move_pct, 3)
+    side_u = _side_value(side)
+    if move_pct >= min_move and side_u == "PUT":
+        return False, "open_caution_put_on_bullish_open", meta
+    if move_pct <= -min_move and side_u == "CALL":
+        return False, "open_caution_call_on_bearish_open", meta
+    return True, "ok", meta
+
+
 def open_setup_guard_summary(settings: Any = None) -> dict[str, Any]:
     settings = settings or get_settings()
     return {
-        "blockPutsInOpen": bool(getattr(settings, "open_caution_block_puts_enabled", True)),
+        "sideAlignIndex": bool(getattr(settings, "open_caution_side_align_index_enabled", True)),
+        "legacyBlockAllPuts": bool(getattr(settings, "open_caution_block_puts_enabled", False)),
         "nonLaneIndexBlocked": bool(
             getattr(settings, "open_caution_non_lane_index_blocked", True)
         ),
         "itmBandEnabled": bool(getattr(settings, "open_caution_itm_band_enabled", True)),
         "sensexCallMaxItmPoints": float(
             getattr(settings, "open_caution_sensex_call_max_itm_points", 800.0) or 800.0
+        ),
+        "sensexPutMaxItmPoints": float(
+            getattr(settings, "open_caution_sensex_put_max_itm_points", 800.0) or 800.0
         ),
         "niftyPutMaxItmPoints": float(
             getattr(settings, "open_caution_nifty_put_max_itm_points", 400.0) or 400.0
@@ -146,12 +193,16 @@ def validate_open_setup_entry(
     meta["openIndex"] = index
     meta["openSide"] = side
 
-    if bool(getattr(settings, "open_caution_block_puts_enabled", True)) and side == "PUT":
-        if not (
-            index == "NIFTY"
-            and bool(getattr(settings, "open_nifty_put_lane_enabled", False))
-        ):
-            return False, "open_caution_puts_blocked", meta
+    sym = str(getattr(candidate, "symbol", "") or "")
+    snap = getattr(candidate, "snap", None)
+    if snap is None and snapshots:
+        snap = snapshots.get(sym.upper())
+    align_ok, align_reason, align_meta = open_caution_side_align_ok(
+        sym, side, snap, settings=settings,
+    )
+    meta.update(align_meta)
+    if not align_ok:
+        return False, align_reason, meta
 
     lanes = _active_open_lanes(settings)
     if bool(getattr(settings, "open_caution_non_lane_index_blocked", True)) and lanes:
