@@ -14,6 +14,63 @@ from app.services.upstox import UpstoxClient
 
 logger = logging.getLogger(__name__)
 
+
+def _mtf_premium_fade_shallow_floor(
+    settings: Any,
+    *,
+    local_base_first_lift_bypass: bool = False,
+    pad_lane_bypass: bool = False,
+    first_lift_bypass: bool = False,
+) -> float:
+    if local_base_first_lift_bypass and bool(
+        getattr(settings, "local_base_first_lift_waives_mtf_premium_fade_enabled", True)
+    ):
+        return float(
+            getattr(settings, "local_base_first_lift_premium_fade_max_drawdown_pct", None)
+            or getattr(settings, "open_caution_premium_fade_max_drawdown_pct", -2.8)
+            or -2.8
+        )
+    if pad_lane_bypass or first_lift_bypass:
+        return float(
+            getattr(settings, "pad_lane_premium_fade_fill_max_drawdown_pct", -2.0) or -2.0
+        )
+    return float(settings.execution_chart_min_premium_momentum_pct)
+
+
+def _mtf_premium_fading_blocked(
+    premium_mtf: dict[str, TimeframeChartRead],
+    settings: Any,
+    *,
+    local_base_first_lift_bypass: bool = False,
+    pad_lane_bypass: bool = False,
+    first_lift_bypass: bool = False,
+) -> tuple[bool, str]:
+    """Return (blocked, exec_mtf_premium_{tf}_fading)."""
+    if not settings.execution_chart_premium_check_enabled:
+        return False, ""
+    shallow = _mtf_premium_fade_shallow_floor(
+        settings,
+        local_base_first_lift_bypass=local_base_first_lift_bypass,
+        pad_lane_bypass=pad_lane_bypass,
+        first_lift_bypass=first_lift_bypass,
+    )
+    min_mom = float(settings.execution_chart_min_premium_momentum_pct)
+    relaxed = bool(
+        local_base_first_lift_bypass
+        or pad_lane_bypass
+        or first_lift_bypass
+    )
+    for req in ("1m", "5m"):
+        pt = premium_mtf.get(req)
+        if not pt or pt.direction != "BEARISH":
+            continue
+        mom = float(pt.momentumPct or 0)
+        if not relaxed and mom < min_mom:
+            return True, f"exec_mtf_premium_{req}_fading"
+        if relaxed and mom < min_mom and mom < shallow:
+            return True, f"exec_mtf_premium_{req}_fading"
+    return False, ""
+
 # Scalp timeframes — V3 intraday unit/interval (Upstox direct)
 SCALP_TIMEFRAMES: list[dict[str, Any]] = [
     {"label": "1m", "unit": "minutes", "interval": 1, "resample": 1},
@@ -263,6 +320,7 @@ def validate_mtf_scalp(
     vertical_rip_bypass: bool = False,
     first_lift_bypass: bool = False,
     pad_lane_bypass: bool = False,
+    local_base_first_lift_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
@@ -276,7 +334,13 @@ def validate_mtf_scalp(
     if not settings.execution_mtf_enabled or not index_mtf:
         return True, "ok", {}
 
-    if premium_led_bypass or vertical_rip_bypass or first_lift_bypass or pad_lane_bypass:
+    if (
+        premium_led_bypass
+        or vertical_rip_bypass
+        or first_lift_bypass
+        or pad_lane_bypass
+        or local_base_first_lift_bypass
+    ):
         meta = {
             "index": mtf_summary(index_mtf, side),
             "passed": True,
@@ -284,39 +348,22 @@ def validate_mtf_scalp(
             "verticalRipBypass": vertical_rip_bypass,
             "firstLiftBypass": first_lift_bypass,
             "padLaneBypass": pad_lane_bypass,
+            "localBaseFirstLiftBypass": local_base_first_lift_bypass,
             # open-gap ELITE also arrives via premium_led_bypass from execution monitor
             "openGapEliteBypass": bool(premium_led_bypass or vertical_rip_bypass),
         }
         if premium_mtf:
             meta["premium"] = mtf_summary(premium_mtf, side)
-        if (
-            premium_mtf
-            and settings.execution_chart_premium_check_enabled
-            and not pad_lane_bypass
-            and not first_lift_bypass
-        ):
-            for req in ("1m", "5m"):
-                pt = premium_mtf.get(req)
-                if pt and pt.direction == "BEARISH" and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct:
-                    meta["passed"] = False
-                    return False, f"exec_mtf_premium_{req}_fading", meta
-        if premium_mtf and settings.execution_chart_premium_check_enabled and (
-            pad_lane_bypass or first_lift_bypass
-        ):
-            shallow_floor = float(
-                getattr(settings, "pad_lane_premium_fade_fill_max_drawdown_pct", -1.2)
-                or -1.2
+            blocked, reason = _mtf_premium_fading_blocked(
+                premium_mtf,
+                settings,
+                local_base_first_lift_bypass=local_base_first_lift_bypass,
+                pad_lane_bypass=pad_lane_bypass,
+                first_lift_bypass=first_lift_bypass,
             )
-            for req in ("1m", "5m"):
-                pt = premium_mtf.get(req)
-                if (
-                    pt
-                    and pt.direction == "BEARISH"
-                    and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct
-                    and pt.momentumPct < shallow_floor
-                ):
-                    meta["passed"] = False
-                    return False, f"exec_mtf_premium_{req}_fading", meta
+            if blocked:
+                meta["passed"] = False
+                return False, reason, meta
         return True, "ok", meta
 
     side_val = side.value
@@ -373,12 +420,17 @@ def validate_mtf_scalp(
         meta["passed"] = False
         return False, "exec_mtf_higher_tf_conflict", meta
 
-    if premium_mtf and settings.execution_chart_premium_check_enabled:
-        for req in ("1m", "5m"):
-            pt = premium_mtf.get(req)
-            if pt and pt.direction == "BEARISH" and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct:
-                meta["passed"] = False
-                return False, f"exec_mtf_premium_{req}_fading", meta
+    if premium_mtf:
+        blocked, reason = _mtf_premium_fading_blocked(
+            premium_mtf,
+            settings,
+            local_base_first_lift_bypass=local_base_first_lift_bypass,
+            pad_lane_bypass=pad_lane_bypass,
+            first_lift_bypass=first_lift_bypass,
+        )
+        if blocked:
+            meta["passed"] = False
+            return False, reason, meta
 
     meta["passed"] = True
     return True, "ok", meta

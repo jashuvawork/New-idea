@@ -3084,6 +3084,8 @@ class Settings(BaseSettings):
     local_base_first_lift_premium_fade_fill_enabled: bool = True
     local_base_first_lift_premium_fade_max_drawdown_pct: float = -2.8
     local_base_first_lift_premium_fade_max_local_base_pct: float = 28.0
+    local_base_first_lift_waives_elite_chase_gates_enabled: bool = True
+    local_base_first_lift_waives_mtf_premium_fade_enabled: bool = True
     # Legacy env aliases (same semantics as local_base_first_lift_* above).
     open_caution_premium_fade_fill_enabled: bool = True
     open_caution_premium_fade_max_drawdown_pct: float = -2.8

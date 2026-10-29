@@ -1537,6 +1537,57 @@ def local_base_first_lift_premium_fade_stamp_ok(
     return min_lb <= lb <= max_lb
 
 
+def local_base_structural_lift_stamp_ok(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+) -> bool:
+    """Structural pad proof for elite waivers — not generic firstLift alone."""
+    if not isinstance(alert, dict):
+        return False
+    if not local_base_first_lift_premium_fade_stamp_ok(alert, explosion_event):
+        return False
+    moment = str(alert.get("momentType") or "").lower()
+    readiness = str(
+        alert.get("ictBaseReadinessReason")
+        or alert.get("firstLiftReadinessReason")
+        or ""
+    )
+    return bool(
+        alert.get("ictFirstLift")
+        or alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or alert.get("ictFlatThenVertical")
+        or alert.get("ictBaseArmed")
+        or alert.get("shallowOtmLocalBaseTradeable")
+        or alert.get("indexConfirmedLocalBase")
+        or readiness in _STRICT_PAD_CHART_BYPASS_REASONS
+        or moment
+        in (
+            "first_lift_local_base",
+            "armed_base_launch",
+            "ict_base_armed",
+            "v_rip_session_low",
+        )
+    )
+
+
+def local_base_first_lift_elite_chase_waive(
+    evidence: Optional[Mapping[str, Any]] = None,
+    *,
+    alert: Optional[dict[str, Any]] = None,
+) -> bool:
+    """Waive elite chase / FVQ / perfect-score gates for stamped pad first-lifts."""
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "local_base_first_lift_waives_elite_chase_gates_enabled", True)
+    ):
+        return False
+    row = alert if isinstance(alert, dict) else None
+    if row is None and isinstance(evidence, Mapping):
+        row = dict(evidence)
+    return local_base_structural_lift_stamp_ok(row, None)
+
+
 def local_base_first_lift_premium_fade_bypass(
     alert: Optional[dict[str, Any]],
     explosion_event: Any = None,

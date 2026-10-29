@@ -981,6 +981,12 @@ async def _open_from_candidate(
             if isinstance(getattr(candidate, "alert", None), dict)
             else {}
         )
+        from app.engines.pad_lane_capture import local_base_first_lift_premium_fade_stamp_ok
+
+        local_base_timing_waive = local_base_first_lift_premium_fade_stamp_ok(
+            alert_row,
+            candidate.explosion_event,
+        )
         if (
             timing_blocked
             and not (
@@ -993,6 +999,7 @@ async def _open_from_candidate(
                     )
                 )
             )
+            and not local_base_timing_waive
         ):
             from app.engines.elite_never_block import elite_must_take_bypass_allowed
 
