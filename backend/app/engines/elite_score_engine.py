@@ -1654,6 +1654,7 @@ def elite_entry_allowed(
     from app.engines.best_trade_policy import elite_base_setup_allowed
 
     fresh_base_reentry = False
+    adjacent_continuation = False
     if state is not None and bool(
         getattr(settings, "same_strike_post_win_fresh_base_reentry_enabled", True)
     ):
@@ -1685,13 +1686,50 @@ def elite_entry_allowed(
         )
         if fresh_base_reentry:
             assessment = {**assessment, "sameStrikePostWinFreshBase": True}
+    if state is not None and not fresh_base_reentry and bool(
+        getattr(settings, "adjacent_strike_post_peak_keep_continuation_enabled", True)
+    ):
+        from app.engines.session_mode_feedback import (
+            adjacent_strike_post_peak_keep_continuation,
+        )
+
+        try:
+            strike_v = float(evidence.get("strike") or 0)
+        except (TypeError, ValueError):
+            strike_v = 0.0
+        try:
+            prem_v = float(evidence.get("premium") or 0)
+        except (TypeError, ValueError):
+            prem_v = 0.0
+        try:
+            v3 = float(evidence.get("velocity3s") or evidence.get("velocity_3s") or 0)
+        except (TypeError, ValueError):
+            v3 = 0.0
+        alert_d = dict(evidence) if isinstance(evidence, Mapping) else None
+        adjacent_continuation, _adj_meta = adjacent_strike_post_peak_keep_continuation(
+            state,
+            symbol=str(evidence.get("symbol") or ""),
+            side=resolved_side,
+            strike=strike_v,
+            premium=prem_v,
+            velocity_3s=v3,
+            alert=alert_d,
+        )
+        if adjacent_continuation:
+            assessment = {
+                **assessment,
+                "adjacentStrikePeakKeepContinuation": True,
+                **_adj_meta,
+            }
+
+    continuation_waive = fresh_base_reentry or adjacent_continuation
 
     if not elite_base_setup_allowed(
         setup,
         mega_ok=mega_ok or building_rip_helper_ok,
         settings=settings,
     ):
-        if fresh_base_reentry:
+        if continuation_waive:
             pass
         elif bool(getattr(settings, "elite_trade_v_rip_only_enabled", False)):
             assessment = {**assessment, "side": resolved_side}
@@ -1717,7 +1755,18 @@ def elite_entry_allowed(
         )
         score = max(score, live * blend)
     if score < min_score - 1e-6:
-        return False, f"elite_score_below_{min_score:g}", assessment
+        if adjacent_continuation:
+            floor = float(
+                getattr(settings, "adjacent_strike_post_peak_keep_elite_score_floor", 45.0)
+                or 45.0
+            )
+            expl = _number(evidence.get("explosionScore"))
+            if expl + 1e-9 >= floor:
+                score = max(score, min_score)
+            else:
+                return False, f"elite_score_below_{min_score:g}", assessment
+        else:
+            return False, f"elite_score_below_{min_score:g}", assessment
 
     must_take = elite_must_take(evidence, ranking, assessment, settings=settings)
 
@@ -1730,7 +1779,7 @@ def elite_entry_allowed(
         side=resolved_side,
         ranking=ranking,
     )
-    if fvq_blocked and not fresh_base_reentry:
+    if fvq_blocked and not continuation_waive:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, fvq_reason, assessment
 
@@ -1776,7 +1825,7 @@ def elite_entry_allowed(
     ):
         v_rip_shallow_blocked = False
         v_rip_shallow_reason = ""
-    if v_rip_shallow_blocked:
+    if v_rip_shallow_blocked and not adjacent_continuation:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, v_rip_shallow_reason, assessment
 
@@ -1786,7 +1835,7 @@ def elite_entry_allowed(
         settings=settings,
         call_capture_waive=call_capture_waive,
     )
-    if perfect_blocked and not fresh_base_reentry:
+    if perfect_blocked and not continuation_waive:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, perfect_reason, assessment
 
@@ -1796,12 +1845,12 @@ def elite_entry_allowed(
     shallow_blocked, shallow_reason = elite_shallow_lift_blocked(
         evidence, assessment, settings=settings,
     )
-    if shallow_blocked:
+    if shallow_blocked and not adjacent_continuation:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, shallow_reason, assessment
 
     local = _number(assessment.get("localBasePct"))
-    if local > max_local + 1e-6 and not fresh_base_reentry:
+    if local > max_local + 1e-6 and not continuation_waive:
         from app.engines.best_trade_policy import symmetric_best_trade_capture_active
 
         assessment = {**assessment, "side": resolved_side, "localBaseCapPct": round(max_local, 2)}

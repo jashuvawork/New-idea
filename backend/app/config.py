@@ -1958,6 +1958,16 @@ class Settings(BaseSettings):
     # A fading print, the opposite side, a second leg, or a lift already past the
     # pad stays blocked. Oct 21 SENSEX 74200 PUT sold near 315 and ran to 1029.
     same_strike_post_win_fresh_base_reentry_enabled: bool = True
+    # One adjacent ITM leg after a profitable peak-keep exit on the parent strike (Oct 29:
+    # 22700 CE ladder exit → 22650 CE continuation toward 330+). CE: parent = strike + step;
+    # PE: parent = strike - step. Clears elite chase/score blocks when tape is still running.
+    adjacent_strike_post_peak_keep_continuation_enabled: bool = True
+    adjacent_strike_post_peak_keep_lookback_seconds: float = 7200.0
+    adjacent_strike_post_peak_keep_min_win_pnl_inr: float = 5000.0
+    adjacent_strike_post_peak_keep_min_velocity_3s: float = 0.5
+    adjacent_strike_post_peak_keep_elite_score_floor: float = 45.0
+    adjacent_strike_post_peak_keep_min_explosion_score: float = 42.0
+    adjacent_strike_post_peak_keep_tiers_csv: str = "BUILDING,EXPLODING,ELITE"
     # Session mode feedback — promote/demote modes from today's PF (closes learning loop).
     session_mode_feedback_enabled: bool = True
     session_mode_feedback_min_trades: int = 2
