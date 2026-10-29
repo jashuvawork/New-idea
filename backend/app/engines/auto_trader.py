@@ -3002,6 +3002,13 @@ async def _open_from_candidate(
                     )
                     if isinstance(pre_fb, dict):
                         ctx_extra["sameStrikePostWinFreshBaseMeta"] = pre_fb
+                if assessment.get("adjacentStrikePeakKeepContinuation"):
+                    ctx_extra["adjacentStrikePeakKeepContinuation"] = True
+                    pre_adj = (candidate.pretrade_meta or {}).get(
+                        "adjacentStrikePeakKeepContinuationMeta"
+                    )
+                    if isinstance(pre_adj, dict):
+                        ctx_extra["adjacentStrikePeakKeepContinuationMeta"] = pre_adj
                 alert_fb = (
                     candidate.alert
                     if isinstance(getattr(candidate, "alert", None), dict)
@@ -3012,6 +3019,13 @@ async def _open_from_candidate(
                     meta_fb = alert_fb.get("sameStrikePostWinFreshBaseMeta")
                     if isinstance(meta_fb, dict):
                         ctx_extra.setdefault("sameStrikePostWinFreshBaseMeta", meta_fb)
+                if alert_fb and alert_fb.get("adjacentStrikePeakKeepContinuation"):
+                    ctx_extra.setdefault("adjacentStrikePeakKeepContinuation", True)
+                    meta_adj = alert_fb.get("adjacentStrikePeakKeepContinuationMeta")
+                    if isinstance(meta_adj, dict):
+                        ctx_extra.setdefault(
+                            "adjacentStrikePeakKeepContinuationMeta", meta_adj,
+                        )
                 if candidate.mode == "explosion" and candidate.explosion_event:
                     from app.engines.elite_runner_exit_bundle import (
                         apply_elite_runner_exit_bundle,

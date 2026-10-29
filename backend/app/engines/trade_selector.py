@@ -307,6 +307,7 @@ def _explosion_candidates(
 ) -> list[EntryCandidate]:
     from app.engines.explosion_detector import ExplosionEvent, effective_explosion_min_score
     from app.engines.session_mode_feedback import (
+        adjacent_continuation_pretrade_meta_from_alert as _adjacent_pretrade_from_alert,
         fresh_base_pretrade_meta_from_alert as _fresh_base_pretrade_from_alert,
     )
 
@@ -392,6 +393,36 @@ def _explosion_candidates(
                 pad_lane_waive = True
                 alert["sameStrikePostWinFreshBase"] = True
                 alert["sameStrikePostWinFreshBaseMeta"] = dict(_fresh_meta)
+        if not pad_lane_waive and side_u in ("CALL", "PUT"):
+            from app.engines.session_mode_feedback import (
+                adjacent_strike_post_peak_keep_continuation,
+            )
+
+            try:
+                adj_strike = float(alert.get("strike") or 0)
+            except (TypeError, ValueError):
+                adj_strike = 0.0
+            try:
+                adj_prem = float(alert.get("premium") or 0)
+            except (TypeError, ValueError):
+                adj_prem = 0.0
+            try:
+                adj_v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
+            except (TypeError, ValueError):
+                adj_v3 = 0.0
+            adj_ok, _adj_meta = adjacent_strike_post_peak_keep_continuation(
+                state,
+                symbol=symbol,
+                side=side_u,
+                strike=adj_strike,
+                premium=adj_prem,
+                velocity_3s=adj_v3,
+                alert=alert if isinstance(alert, dict) else None,
+            )
+            if adj_ok:
+                pad_lane_waive = True
+                alert["adjacentStrikePeakKeepContinuation"] = True
+                alert["adjacentStrikePeakKeepContinuationMeta"] = dict(_adj_meta)
         lift_ready = first_lift_ready or early_pad or coil_pad or pad_lane_waive
         slow_grind_trough = bool(
             alert.get("slowGrindArmedTrough")
@@ -1266,6 +1297,7 @@ def _explosion_candidates(
                 ),
                 "ictBaseArmedAt": alert.get("ictBaseArmedAt"),
                 **_fresh_base_pretrade_from_alert(alert),
+                **_adjacent_pretrade_from_alert(alert),
             },
         ))
     return out
@@ -2110,7 +2142,12 @@ def find_best_entry(
         ranking = meta.get("causalRanking") or {}
         if ranking.get("grade") == "REJECT":
             reasons = ranking.get("reasons") or ["selector_rejected"]
-            _record_selector_gate_rejection(c, str(reasons[0]))
+            reject_reason = str(reasons[0])
+            for penalty in ranking.get("penalties") or []:
+                if isinstance(penalty, dict) and penalty.get("code") == "exhausted_post_peak_reentry":
+                    reject_reason = "exhausted_post_peak_reentry"
+                    break
+            _record_selector_gate_rejection(c, reject_reason)
             continue
         if bool(getattr(settings, "ftv_elite_top_only_enabled", True)):
             policy = meta.get("ftvEliteTopPolicy") or {}

@@ -653,6 +653,178 @@ def fresh_base_pretrade_meta_from_alert(alert: Any) -> dict[str, Any]:
     }
 
 
+def _peak_keep_profit_exit_reason(reason: Any) -> bool:
+    r = str(reason or "").lower()
+    return (
+        "profit_ladder_peak_keep" in r
+        or "peak_keep_trail" in r
+        or ("peak_keep" in r and "explosion" in r)
+    )
+
+
+def _parent_strike_for_adjacent_continuation(side: Any, candidate_strike: float, step: float) -> float:
+    """Parent strike that precedes an adjacent ITM continuation leg."""
+    if _side_key(side) == "CALL":
+        return float(candidate_strike) + float(step)
+    return float(candidate_strike) - float(step)
+
+
+def adjacent_strike_post_peak_keep_continuation(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    premium: float,
+    velocity_3s: float,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, dict[str, Any]]:
+    """
+    Allow one adjacent ITM explosion leg after a profitable peak-keep exit on the parent.
+
+    Example: NIFTY 22700 CE peak-keep win → 22650 CE continuation while the rip extends.
+    """
+    settings = get_settings()
+    meta: dict[str, Any] = {"adjacentStrikePeakKeepContinuation": False}
+    if not bool(
+        getattr(settings, "adjacent_strike_post_peak_keep_continuation_enabled", True)
+    ):
+        meta["reason"] = "disabled"
+        return False, meta
+    if state is None:
+        meta["reason"] = "no_state"
+        return False, meta
+
+    from app.engines.moneyness import strike_step
+
+    sym = str(symbol or "").upper()
+    side_u = _side_key(side)
+    candidate_strike = float(strike or 0)
+    step = float(strike_step(sym) or 50.0)
+    parent_strike = _parent_strike_for_adjacent_continuation(
+        side_u, candidate_strike, step,
+    )
+
+    lookback = float(
+        getattr(settings, "adjacent_strike_post_peak_keep_lookback_seconds", 7200.0)
+        or 7200.0
+    )
+    prior, age = _latest_same_strike_win_close(
+        state,
+        symbol=sym,
+        side=side_u,
+        strike=parent_strike,
+        max_age_seconds=lookback,
+    )
+    if prior is None:
+        meta["reason"] = "no_parent_win"
+        meta["parentStrike"] = parent_strike
+        return False, meta
+    exit_reason = str(getattr(prior, "exitReason", "") or "")
+    if not _peak_keep_profit_exit_reason(exit_reason):
+        meta["reason"] = "parent_not_peak_keep_exit"
+        meta["parentExitReason"] = exit_reason
+        return False, meta
+    min_win = float(
+        getattr(settings, "adjacent_strike_post_peak_keep_min_win_pnl_inr", 5000.0)
+        or 5000.0
+    )
+    win_pnl = float(getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0)
+    if win_pnl < min_win:
+        meta["reason"] = "parent_win_too_small"
+        return False, meta
+
+    closed_at = prior.closedAt
+    if closed_at is None:
+        meta["reason"] = "parent_missing_close"
+        return False, meta
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    legs = _same_strike_legs_after_close(
+        state,
+        symbol=sym,
+        side=side_u,
+        strike=candidate_strike,
+        closed_at=closed_at,
+    )
+    meta["adjacentLegsAfterParentClose"] = legs
+    if legs >= 1:
+        meta["reason"] = "adjacent_continuation_already_taken"
+        return False, meta
+
+    tier = str((alert or {}).get("tier") or "").upper()
+    allowed_tiers = {
+        t.strip().upper()
+        for t in str(
+            getattr(settings, "adjacent_strike_post_peak_keep_tiers_csv", "BUILDING,EXPLODING,ELITE")
+            or "BUILDING,EXPLODING,ELITE"
+        ).split(",")
+        if t.strip()
+    }
+    if tier and tier not in allowed_tiers:
+        meta["reason"] = "tier_not_allowed"
+        meta["tier"] = tier
+        return False, meta
+
+    min_v3 = float(
+        getattr(settings, "adjacent_strike_post_peak_keep_min_velocity_3s", 0.5) or 0.5
+    )
+    try:
+        v3 = float(velocity_3s or 0)
+    except (TypeError, ValueError):
+        v3 = 0.0
+    if v3 + 1e-9 < min_v3:
+        meta["reason"] = f"adjacent_continuation_velocity_{v3:.2f}<{min_v3:.2f}"
+        return False, meta
+    if _alert_premium_already_fading(alert, v3):
+        meta["reason"] = "premium_fading"
+        return False, meta
+
+    try:
+        expl_score = float(
+            (alert or {}).get("radarExplosionScore")
+            or (alert or {}).get("explosionScore")
+            or (alert or {}).get("score")
+            or 0
+        )
+    except (TypeError, ValueError):
+        expl_score = 0.0
+    min_expl = float(
+        getattr(settings, "adjacent_strike_post_peak_keep_min_explosion_score", 42.0)
+        or 42.0
+    )
+    if expl_score + 1e-9 < min_expl:
+        meta["reason"] = "explosion_score_below_floor"
+        meta["explosionScore"] = expl_score
+        return False, meta
+
+    meta.update(
+        {
+            "adjacentStrikePeakKeepContinuation": True,
+            "reason": "adjacent_peak_keep_continuation",
+            "priorWinTradeId": getattr(prior, "id", None),
+            "priorWinPnlInr": round(win_pnl, 2),
+            "parentStrike": parent_strike,
+            "parentExitReason": exit_reason,
+            "secondsSinceParentClose": round(age, 1),
+            "candidateStrike": candidate_strike,
+        }
+    )
+    return True, meta
+
+
+def adjacent_continuation_pretrade_meta_from_alert(alert: Any) -> dict[str, Any]:
+    if not isinstance(alert, dict) or not alert.get("adjacentStrikePeakKeepContinuation"):
+        return {}
+    stamp = alert.get("adjacentStrikePeakKeepContinuationMeta")
+    return {
+        "adjacentStrikePeakKeepContinuation": True,
+        "adjacentStrikePeakKeepContinuationMeta": (
+            dict(stamp) if isinstance(stamp, dict) else {}
+        ),
+    }
+
+
 def fresh_base_funnel_fields(
     *,
     pretrade_meta: Optional[dict[str, Any]] = None,
