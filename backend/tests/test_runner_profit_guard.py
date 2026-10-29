@@ -189,3 +189,41 @@ def test_flat_print_sells_without_entry_velocity_fallback(side):
 def test_disabled_flag_is_inert(side):
     s = Settings(runner_profit_guard_enabled=False)
     assert _guard(_runner(side, pnl=-5.0), s, v3=-1.0) is None
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_oct29_nifty_vbase_micro_pullback_defers_guard_through_retest(side):
+    """Oct 29 NIFTY 22800 CE: +10pt peak, flat v3 retest — guard scratched a stage runner."""
+    s = Settings()
+    entry, best = 191.2, 10.15
+    ctx = {
+        "maxProfitCapture": True,
+        "momentStageLadder": True,
+        "vBaseFtvRunner": True,
+        "microPullbackRetest": True,
+        "momentType": "micro_pullback_retest",
+        "projectedMaxTp": 773.2,
+        "stageSize": 75.0,
+        "exitPlan": {"projectedMaxTp": 773.2, "stageSize": 75.0, "stopPoints": 34.0},
+    }
+    trade = PaperTrade(
+        id=f"oct29-{side.value}",
+        symbol="NIFTY",
+        side=side,
+        strike=22800.0,
+        entryPremium=entry,
+        currentPremium=entry + 0.5,
+        lots=14,
+        openedAt=datetime.now(IST) - timedelta(minutes=20),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=best,
+        maxLtp=entry + best,
+        entryContext={
+            **ctx,
+            "runnerGuardBelowSince": (
+                datetime.now(IST) - timedelta(seconds=s.runner_profit_guard_confirm_seconds + 5)
+            ).isoformat(),
+        },
+    )
+    assert _guard(trade, s, v3=0.0) is None
+    assert "runnerGuardBelowSince" not in trade.entryContext
