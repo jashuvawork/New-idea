@@ -221,6 +221,14 @@ def health_status(*, now: datetime | None = None) -> dict[str, Any]:
 
     rest = sources.get("rest_snapshot") or {}
     ws = sources.get("ws_entry_scan") or {}
+    live_ws_fresh = any(
+        bool(row) and not row.get("stale")
+        for row in (
+            ws,
+            sources.get("ws_overlay") or {},
+            sources.get("building_ltp") or {},
+        )
+    )
     rest_keys = set(rest.get("topRadarKeys") or [])
     ws_keys = set(ws.get("topRadarKeys") or [])
     both_fresh = bool(rest and ws and not rest.get("stale") and not ws.get("stale"))
@@ -263,10 +271,16 @@ def health_status(*, now: datetime | None = None) -> dict[str, Any]:
         # scan. A lagging REST backup while the primary WS feed is fresh is a degraded-
         # backup notice (info), NOT a radar-unhealthy condition — otherwise normal REST
         # rebuild-cadence jitter flips the whole system unhealthy for no trading impact.
-        ws_fresh = bool(ws and not ws.get("stale"))
+        entry_scan_skippable = bool(cadence.get("entryScanSkippable"))
         for source in stale_sources:
             severity = "warning"
-            if source == "rest_snapshot" and ws_fresh:
+            if source == "rest_snapshot" and live_ws_fresh:
+                severity = "info"
+            elif (
+                source == "ws_entry_scan"
+                and entry_scan_skippable
+                and live_ws_fresh
+            ):
                 severity = "info"
             alerts.append({
                 "severity": severity,

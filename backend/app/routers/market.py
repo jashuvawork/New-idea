@@ -629,6 +629,19 @@ async def _touch_ws_overlay_health_async(snapshots: dict) -> None:
         logger.debug("ws_overlay health touch failed: %s", exc)
 
 
+async def _touch_ws_entry_scan_health_async(snapshots: dict) -> None:
+    """Keep ws_entry_scan fresh on tick-fast / building paths when full entry scan is skipped."""
+    settings = get_settings()
+    if not bool(getattr(settings, "radar_record_on_ws_overlay_enabled", True)):
+        return
+    try:
+        from app.services.radar_health import record_source
+
+        await asyncio.to_thread(record_source, "ws_entry_scan", snapshots)
+    except Exception as exc:
+        logger.debug("ws_entry_scan health touch failed: %s", exc)
+
+
 async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
     """WS overlay only — refresh cache + SSE without trader REST work."""
     global _last_fast_cycle_ms, _last_ws_overlay_mono
@@ -649,6 +662,7 @@ async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnap
     await _refresh_explosion_alerts_async(overlays, today=today)
     overlays = _stamp_snapshot_symbols_now(overlays)
     await _record_radar_pipeline_async(overlays, source="ws_overlay")
+    await _touch_ws_entry_scan_health_async(overlays)
     snapshot = _shallow_cache_copy(snapshots=overlays, auto_trader=get_state())
     await _store_cache_async(snapshot)
     _last_ws_overlay_mono = time.monotonic()
@@ -697,6 +711,7 @@ async def run_building_ltp_entry_cycle(
     probe = _stamp_snapshot_symbols_now(probe)
     await _record_radar_pipeline_async(probe, source="building_ltp")
     await _touch_ws_overlay_health_async(probe)
+    await _touch_ws_entry_scan_health_async(probe)
     if not building_ltp_monitor_due(probe):
         snapshot = _shallow_cache_copy(snapshots=probe, auto_trader=get_state())
         if ws_cache_serialize_due():
@@ -900,6 +915,7 @@ async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnaps
     _update_cache_memory(snapshot)
     _last_exit_eval_mono = time.monotonic()
     await _touch_ws_overlay_health_async(overlays)
+    await _touch_ws_entry_scan_health_async(overlays)
 
     if ws_cache_serialize_due():
         await _store_cache_async(snapshot)
