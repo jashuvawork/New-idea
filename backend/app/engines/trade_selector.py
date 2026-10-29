@@ -1829,6 +1829,12 @@ def find_best_entry(
     # generation, before every promotion/risk-quality filter and final ranking.
     # Unlike the established loss cooldown, ELITE/high-mover paths cannot bypass it.
     candidates = _exclude_preorder_rejected_candidates(candidates)
+    try:
+        from app.engines.open_setup_guards import filter_open_setup_candidates
+
+        candidates = filter_open_setup_candidates(candidates, snapshots, settings=settings)
+    except Exception:
+        pass
     if excluded_keys:
         candidates = [
             candidate
@@ -1903,6 +1909,9 @@ def find_best_entry(
         from app.engines.side_regime import side_regime_rank_delta
 
         c.score += side_regime_rank_delta(c.symbol, c.side)
+        from app.engines.open_setup_guards import open_caution_deep_itm_rank_bonus
+
+        c.score += open_caution_deep_itm_rank_bonus(c, snapshots, settings=settings)
         # Flat-base coil predictor: surface a ripe coil (predicted side) before it fires.
         from app.engines.coil_breakout_predictor import coil_prediction_rank_delta
 

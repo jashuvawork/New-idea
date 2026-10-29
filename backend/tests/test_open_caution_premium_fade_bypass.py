@@ -22,6 +22,12 @@ def _settings(**overrides):
     s.open_caution_premium_fade_max_drawdown_pct = -2.8
     s.open_caution_premium_fade_max_local_base_pct = 28.0
     s.shallow_otm_local_base_min_move_pct = 2.0
+    s.open_caution_premium_fade_min_rank_score = 90.0
+    s.open_caution_premium_fade_allow_grade_s = True
+    s.open_caution_itm_band_enabled = True
+    s.open_caution_sensex_call_max_itm_points = 800.0
+    s.open_caution_nifty_put_max_itm_points = 400.0
+    s.open_caution_default_max_itm_points = 800.0
     for key, val in overrides.items():
         setattr(s, key, val)
     return s
@@ -31,12 +37,14 @@ def _oct29_sensex_call_alert() -> dict:
     return {
         "symbol": "SENSEX",
         "side": "CALL",
+        "strike": 73000.0,
         "tier": "ELITE",
         "ictFirstLift": True,
         "ictArmedBaseLaunch": True,
         "momentType": "ict_base_armed",
         "localBaseMovePct": 12.0,
         "ictBaseRelativeMovePct": 12.0,
+        "causalRankScore": 92.0,
     }
 
 
@@ -44,8 +52,9 @@ def _oct29_sensex_call_alert() -> dict:
 def test_open_caution_bypass_stamp_in_morning_window(mock_settings):
     mock_settings.return_value = _settings()
     event = SimpleNamespace(tier="ELITE", daily_move_pct=12.0)
+    snap = SimpleNamespace(symbol="SENSEX", spot=73500.0, timestamp=OPEN_TS)
     assert open_caution_premium_fade_bypass(
-        _oct29_sensex_call_alert(), event, when=OPEN_TS,
+        _oct29_sensex_call_alert(), event, when=OPEN_TS, snap=snap,
     )
 
 

@@ -114,6 +114,29 @@ def _itm_call(c: dict[str, Any], spot: float) -> bool:
     return spot >= c["strike"]
 
 
+def _itm_depth_ok(c: dict[str, Any], spot: float, max_points: float = 800.0) -> bool:
+    if c["side"] == "CALL":
+        if spot < c["strike"]:
+            return False
+        return (spot - c["strike"]) <= max_points + 1e-6
+    if spot > c["strike"]:
+        return False
+    return (c["strike"] - spot) <= min(max_points, 400.0) + 1e-6
+
+
+def _combined_prod_pred(c: dict[str, Any], spot: float, op: float) -> bool:
+    """Mirrors open_setup_guards production defaults."""
+    if c["side"] == "PUT" and not (c["symbol"] == "NIFTY"):
+        return False
+    if not _lane_side_ok(c):
+        return False
+    if not _side_confirm(c, spot, op):
+        return False
+    if not _itm_depth_ok(c, spot, 800.0):
+        return False
+    return True
+
+
 def _side_confirm(c: dict[str, Any], spot: float, cash_open: float) -> bool:
     if cash_open <= 0:
         return True
@@ -122,10 +145,19 @@ def _side_confirm(c: dict[str, Any], spot: float, cash_open: float) -> bool:
     return spot <= cash_open * 0.9998
 
 
-def _would_fill(c: dict[str, Any], *, fade_bypass: bool) -> bool:
+def _would_fill(
+    c: dict[str, Any],
+    *,
+    fade_bypass: bool,
+    fade_bypass_rank90: bool = False,
+) -> bool:
     if not c["fadeBlocked"]:
         return True
-    return fade_bypass
+    if not fade_bypass:
+        return False
+    if fade_bypass_rank90:
+        return c["rank"] >= 90.0 or c["grade"] == "S"
+    return True
 
 
 def _pick_first(
@@ -235,6 +267,19 @@ def _register():
             and str(c.get("tier") or "").upper() == "ELITE",
             {"fade_bypass": True, "prefer_rank": True, "open_only": True},
         ),
+        (
+            Policy(
+                "P13_combined_production",
+                "Lane + side + ITM depth + rank90 fade bypass (production bundle)",
+            ),
+            _combined_prod_pred,
+            {
+                "fade_bypass": True,
+                "fade_bypass_rank90": True,
+                "prefer_rank": True,
+                "open_only": True,
+            },
+        ),
     ]
 
 
@@ -320,7 +365,11 @@ def simulate_day(
                 rec.update({"status": "no_trade", "pnlInr": 0, "fills": 0})
                 results.append(rec)
                 continue
-            if not _would_fill(pick, fade_bypass=bool(opts.get("fade_bypass"))):
+            if not _would_fill(
+                pick,
+                fade_bypass=bool(opts.get("fade_bypass")),
+                fade_bypass_rank90=bool(opts.get("fade_bypass_rank90")),
+            ):
                 rec.update({
                     "status": "fade_blocked",
                     "key": pick["key"],

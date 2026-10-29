@@ -623,16 +623,16 @@ def validate_candidate(
     ):
         return False, "power_hour_top_only", policy_meta
 
-    from app.engines.open_index_lane import resolve_lane_when, validate_open_index_lane
+    from app.engines.open_setup_guards import validate_open_setup_entry
 
-    lane_ok, lane_reason, lane_meta = validate_open_index_lane(
+    setup_ok, setup_reason, setup_meta = validate_open_setup_entry(
         candidate,
         settings=settings,
-        when=resolve_lane_when(candidate),
+        snapshots=snapshots,
     )
-    policy_meta.update(lane_meta)
-    if not lane_ok:
-        return False, lane_reason, policy_meta
+    policy_meta.update(setup_meta)
+    if not setup_ok:
+        return False, setup_reason, policy_meta
 
     from app.engines.bad_day_routing import (
         candidate_is_expiry_deep_itm_trade,

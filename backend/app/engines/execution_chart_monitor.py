@@ -429,6 +429,7 @@ async def monitor_trade_chart_before_execution(
         alert if isinstance(alert, dict) else None,
         explosion_event,
         when=_snap_when,
+        snap=snap,
     )
     atm_armed_fade_bypass = local_base_premium_fade_bypass(
         alert if isinstance(alert, dict) else None,

@@ -4770,6 +4770,27 @@ async def _process_locked(
                         }
                     )
                     break
+                from app.engines.open_setup_guards import validate_open_setup_entry
+
+                setup_ok, setup_reason, setup_meta = validate_open_setup_entry(
+                    best,
+                    settings=settings,
+                    snapshots=snapshots,
+                )
+                if not setup_ok:
+                    skipped.append(
+                        {
+                            "symbol": best.symbol,
+                            "side": best.side.value,
+                            "strike": best.strike,
+                            "reason": setup_reason,
+                            "mode": best.mode,
+                            "score": best.score,
+                            "tier": getattr(best, "tier", None),
+                            "openSetupGuard": setup_meta,
+                        }
+                    )
+                    continue
                 from app.engines.open_side_confirmation import open_side_confirmation
 
                 open_blocked, open_reason, open_meta = open_side_confirmation(
