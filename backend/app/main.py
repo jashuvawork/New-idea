@@ -101,9 +101,15 @@ async def _background_monitor():
 
                 if entry_scan_due():
                     if entry_scan_skippable():
+                        # Still refresh explosions + radar health; tick-fast owns exits.
+                        if is_ws_active():
+                            await run_entry_scan_on_cache(
+                                broadcast=True,
+                                run_trader=False,
+                            )
+                            if full_rest_rebuild_due() and not full_rest_rebuild_running():
+                                schedule_chain_refresh(broadcast=True)
                         mark_full_scan_done()
-                        if is_ws_active() and ws_overlay_due():
-                            await run_ws_overlay_cycle(broadcast=True)
                     else:
                         ws = is_ws_active()
                         if tick_driven and not ws:

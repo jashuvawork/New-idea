@@ -271,8 +271,11 @@ def test_building_ltp_touches_ws_overlay_health_without_overlay_cycle():
             await market_router.run_building_ltp_entry_cycle(run_trader=False)
 
     asyncio.run(_run())
-    ws = health_status()["sources"].get("ws_overlay") or {}
+    health = health_status()
+    ws = health["sources"].get("ws_overlay") or {}
+    entry = health["sources"].get("ws_entry_scan") or {}
     assert ws.get("lastSeenAt")
+    assert entry.get("lastSeenAt")
     assert market_router.ws_overlay_due() is False
 
 

@@ -64,3 +64,25 @@ def test_all_fresh_is_healthy():
     h = _health(now)
     assert h["healthy"] is True
     assert not [a for a in h["alerts"] if a["code"] == "RADAR_SCAN_STALE"]
+
+
+def test_stale_ws_entry_info_when_open_position_scan_skipped_and_overlay_fresh():
+    reset_health_for_tests()
+    now = datetime.now(IST)
+    record_source("ws_entry_scan", _snaps(), now=now - timedelta(seconds=200))
+    record_source("ws_overlay", _snaps(), now=now - timedelta(seconds=1))
+    with (
+        patch("app.services.upstox.get_market_phase", return_value="LIVE_MARKET"),
+        patch(
+            "app.services.upstox_ws.ws_status",
+            return_value={"connected": True, "streamStale": False, "hasRecentTicks": True},
+        ),
+        patch(
+            "app.routers.market.latency_stats",
+            return_value={"entryScanSkippable": True},
+        ),
+    ):
+        h = health_status(now=now)
+    assert h["healthy"] is True
+    stale_alerts = [a for a in h["alerts"] if a["code"] == "RADAR_SCAN_STALE"]
+    assert any(a["severity"] == "info" for a in stale_alerts)
