@@ -172,3 +172,63 @@ def test_oct21_73400_falling_through_75_line_sells_before_three_minutes():
     assert _at(50, under, -1.0) == "explosion_profit_ladder_peak_keep"
     assert _at(50, under, 0.4) is None
     assert _at(50, -8.0, -1.0) == "explosion_profit_ladder_peak_keep"
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+def test_oct29_sensex_73000_shallow_hole_defers_stage_runner_hole_take(_mp):
+    """Oct 29: +52pt peak, +35pt on pullback — tape later 830+; hole-take was too eager."""
+    from app.config import Settings
+    from app.engines.explosion_profit import stage_runner_mega_pullback_exit_reason
+    from app.models.schemas import PaperTrade, Side, StrategyType
+
+    s = Settings()
+    entry = 753.5
+    best = 52.3
+    pnl = 34.65
+    trade = PaperTrade(
+        id="oct29-sensex",
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=73000.0,
+        entryPremium=entry,
+        currentPremium=entry + pnl,
+        lots=11,
+        openedAt=datetime.now(IST) - timedelta(seconds=180),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=best,
+        maxLtp=entry + best,
+        maxLtpAt=datetime.now(IST) - timedelta(seconds=55),
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+            "momentType": "first_lift_local_base",
+            "exitPlan": {"projectedMaxTp": 800.0, "stageSize": 75.0},
+        },
+    )
+    with patch("app.engines.explosion_profit.get_settings", return_value=s), patch(
+        "app.engines.moment_stage_trail.get_settings", return_value=s
+    ):
+        reason = stage_runner_mega_pullback_exit_reason(
+            trade,
+            best=best,
+            pnl_pts=pnl,
+            hold_seconds=180,
+            live_velocity_3s=-0.5,
+        )
+    assert reason is None
+    # Deep hole like Oct 21 still books.
+    deep_pnl = 10.7
+    trade.currentPremium = entry + deep_pnl
+    with patch("app.engines.explosion_profit.get_settings", return_value=s), patch(
+        "app.engines.moment_stage_trail.get_settings", return_value=s
+    ):
+        reason = stage_runner_mega_pullback_exit_reason(
+            trade,
+            best=best,
+            pnl_pts=deep_pnl,
+            hold_seconds=400,
+            live_velocity_3s=-0.5,
+        )
+    assert reason == "explosion_stage_runner_hole_take"
