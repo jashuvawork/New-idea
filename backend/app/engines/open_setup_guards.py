@@ -118,12 +118,12 @@ def open_caution_side_align_ok(
     """Block PUT on bullish open / CALL on bearish open; allow either when tape is flat."""
     settings = settings or get_settings()
     meta: dict[str, Any] = {"openSideAlign": True}
-    if not bool(getattr(settings, "open_caution_side_align_index_enabled", True)):
-        return True, "ok", {}
     if bool(getattr(settings, "open_caution_block_puts_enabled", False)) and _side_value(side) == "PUT":
         nifty_put_lane = bool(getattr(settings, "open_nifty_put_lane_enabled", False))
         if not (nifty_put_lane and _index_bucket(symbol) == "NIFTY"):
             return False, "open_caution_puts_blocked", meta
+    if not bool(getattr(settings, "open_caution_side_align_index_enabled", True)):
+        return True, "ok", meta
     from app.engines.index_tick_helpers import resolve_index_session
 
     ext = resolve_index_session(symbol, snap)
@@ -150,6 +150,7 @@ def open_setup_guard_summary(settings: Any = None) -> dict[str, Any]:
     return {
         "sideAlignIndex": bool(getattr(settings, "open_caution_side_align_index_enabled", True)),
         "legacyBlockAllPuts": bool(getattr(settings, "open_caution_block_puts_enabled", False)),
+        "blockPutsInOpen": bool(getattr(settings, "open_caution_block_puts_enabled", False)),
         "nonLaneIndexBlocked": bool(
             getattr(settings, "open_caution_non_lane_index_blocked", True)
         ),

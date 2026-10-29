@@ -69,6 +69,22 @@ def test_sensex_put_allowed_on_bearish_open(mock_session):
     assert ok, reason
 
 
+def test_open_blocks_nifty_put_when_legacy_block_puts_on():
+    s = Settings(
+        open_setup_guards_enabled=True,
+        open_index_lane_enabled=True,
+        open_sensex_call_lane_enabled=True,
+        open_nifty_put_lane_enabled=False,
+        open_caution_block_puts_enabled=True,
+        open_caution_side_align_index_enabled=False,
+        open_caution_non_lane_index_blocked=True,
+    )
+    cand = _cand("NIFTY", Side.PUT, 22700.0)
+    ok, reason, _ = validate_open_setup_entry(cand, settings=s, when=OPEN)
+    assert not ok
+    assert reason == "open_caution_puts_blocked"
+
+
 def test_open_blocks_otm_sensex_call():
     s = Settings(
         open_setup_guards_enabled=True,
