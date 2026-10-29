@@ -22,6 +22,7 @@ def premium_fading_blocks_entry(
     pe_win_mirror_bypass: bool = False,
     symmetric_near_base_bypass: bool = False,
     building_rip_bypass: bool = False,
+    open_caution_bypass: bool = False,
 ) -> tuple[bool, str]:
     """
     Block entries when option premium is fading at execution.
@@ -113,12 +114,29 @@ def premium_fading_blocks_entry(
         if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
             return False, "building_rip_shallow_fade_ok"
 
+    if (
+        open_caution_bypass
+        and bool(getattr(settings, "open_caution_premium_fade_fill_enabled", True))
+        and tier in ("ELITE", "EXPLODING", "BUILDING", "WATCH")
+    ):
+        shallow_floor = float(
+            getattr(settings, "open_caution_premium_fade_max_drawdown_pct", -2.8) or -2.8
+        )
+        if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
+            return False, "open_caution_shallow_fade_ok"
+
     min_mom = settings.execution_chart_min_premium_momentum_pct
     if premium_momentum_5s < min_mom and premium_momentum_3s < 0:
+        if open_caution_bypass and premium_momentum_3s >= -0.08 and premium_momentum_5s >= min_mom - 0.35:
+            return False, "open_caution_flat_momentum_ok"
         return True, "premium_fading_at_execution"
     if premium_direction.upper() == "BEARISH" and premium_momentum_5s < -0.12:
+        if open_caution_bypass and premium_momentum_5s >= -0.35:
+            return False, "open_caution_chart_fade_ok"
         return True, "premium_chart_fading"
     if trade_score >= 90 and premium_momentum_3s < -0.25:
+        if open_caution_bypass and premium_momentum_3s >= -0.55:
+            return False, "open_caution_high_score_fade_ok"
         return True, "premium_fading_high_score"
     return False, "ok"
 

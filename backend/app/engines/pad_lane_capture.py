@@ -6,9 +6,13 @@ FTV policy → max lots → 100% trail. All lanes share the ₹18–₹220 pad b
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Mapping, Optional
+from zoneinfo import ZoneInfo
 
 from app.config import get_settings
+
+IST = ZoneInfo("Asia/Kolkata")
 from app.models.schemas import Side, SymbolSnapshot
 
 # Readiness reason strings — keep in sync with building_ftv_gates.PAD_LANE_READY_REASONS.
@@ -1468,17 +1472,84 @@ def atm_armed_local_base_premium_fade_bypass(
     return True
 
 
+def open_caution_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+    *,
+    when: Optional[datetime] = None,
+) -> bool:
+    """09:20–09:45 local-base first lift — exec 1m premium dip is often noise, not a real fade."""
+    settings = get_settings()
+    if not bool(getattr(settings, "open_caution_premium_fade_fill_enabled", True)):
+        return False
+    from app.engines.open_index_lane import in_open_caution_window_at
+
+    ts = when
+    if ts is None:
+        ts = datetime.now(IST)
+    elif ts.tzinfo is None:
+        ts = ts.replace(tzinfo=IST)
+    else:
+        ts = ts.astimezone(IST)
+    if not in_open_caution_window_at(ts):
+        return False
+    if not isinstance(alert, dict):
+        return False
+    tier = str(
+        alert.get("tier") or getattr(explosion_event, "tier", "") or ""
+    ).upper()
+    if tier not in ("ELITE", "EXPLODING", "BUILDING", "WATCH"):
+        return False
+    moment = str(alert.get("momentType") or "").lower()
+    first_lift = bool(
+        alert.get("ictFirstLift")
+        or alert.get("firstLift")
+        or alert.get("firstLiftCapture")
+        or alert.get("ictArmedBaseLaunch")
+        or alert.get("armedBaseLaunch")
+        or alert.get("ictFlatThenVertical")
+        or moment
+        in (
+            "first_lift_local_base",
+            "armed_base_launch",
+            "ict_base_armed",
+            "v_rip_session_low",
+        )
+    )
+    if not first_lift:
+        return False
+    min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
+    max_lb = float(
+        getattr(settings, "open_caution_premium_fade_max_local_base_pct", 28.0) or 28.0
+    )
+    lb = float(
+        alert.get("localBaseMovePct")
+        or alert.get("ictBaseRelativeMovePct")
+        or alert.get("offLowMovePct")
+        or 0
+    )
+    return min_lb <= lb <= max_lb
+
+
 def local_base_premium_fade_bypass(
     alert: Optional[dict[str, Any]],
     explosion_event: Any = None,
     snap: Optional[SymbolSnapshot] = None,
+    *,
+    when: Optional[datetime] = None,
 ) -> bool:
     """Shallow OTM stamp, ATM armed-base, or index-confirmed pad may fill through retest dip."""
     from app.engines.best_trade_policy import symmetric_near_base_premium_fade_bypass
     from app.engines.index_confirmed_local_base import index_confirmed_premium_fade_bypass
 
+    ts = when
+    if ts is None and snap is not None:
+        raw = getattr(snap, "timestamp", None)
+        ts = raw if isinstance(raw, datetime) else None
+
     return (
-        symmetric_near_base_premium_fade_bypass(alert, explosion_event)
+        open_caution_premium_fade_bypass(alert, explosion_event, when=ts)
+        or symmetric_near_base_premium_fade_bypass(alert, explosion_event)
         or shallow_otm_local_base_premium_fade_bypass(alert, explosion_event)
         or atm_armed_local_base_premium_fade_bypass(alert, explosion_event)
         or index_confirmed_premium_fade_bypass(alert, snap, explosion_event)
