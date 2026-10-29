@@ -3093,6 +3093,7 @@ class Settings(BaseSettings):
     # 09:20–09:45 index open lanes (idle after open_caution_until — normal CE/PE book).
     open_index_lane_enabled: bool = True
     open_sensex_call_lane_enabled: bool = True
+    open_sensex_put_lane_enabled: bool = True
     open_nifty_put_lane_enabled: bool = False
     open_index_lane_require_first_lift: bool = True
     open_index_lane_min_elite_score: float = 90.0
@@ -3106,14 +3107,19 @@ class Settings(BaseSettings):
     open_caution_premium_fade_allow_grade_s: bool = True
     # Combined open setup (selector + pretrade + selective fade bypass).
     open_setup_guards_enabled: bool = True
-    open_caution_block_puts_enabled: bool = True
+    # When True, block PUT on bullish open / CALL on bearish open (not all PUTs).
+    open_caution_side_align_index_enabled: bool = True
+    open_caution_block_puts_enabled: bool = False
     open_caution_non_lane_index_blocked: bool = True
     open_caution_itm_band_enabled: bool = True
     open_caution_sensex_call_max_itm_points: float = 800.0
+    open_caution_sensex_put_max_itm_points: float = 800.0
     open_caution_nifty_put_max_itm_points: float = 400.0
     open_caution_default_max_itm_points: float = 800.0
     open_caution_deep_itm_rank_bonus_enabled: bool = True
     open_caution_deep_itm_rank_bonus: float = 20.0
+    # Drop expiry OTM at selector (same rule as auto_trader) — avoids SELECTED→ORDER_REJECT spam.
+    selector_expiry_otm_prefilter_enabled: bool = True
     # Expiry SENSEX/BANKNIFTY OTM block — waive for stamped open first-lift at the pad.
     best_trade_expiry_otm_open_first_lift_waive_enabled: bool = True
     primary_window_start_hour: int = 10

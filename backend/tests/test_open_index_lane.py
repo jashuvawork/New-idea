@@ -66,8 +66,12 @@ def test_idle_after_0945():
     assert reason == "ok"
 
 
-def test_sensex_put_blocked_during_open():
-    s = Settings(open_index_lane_enabled=True, open_sensex_call_lane_enabled=True)
+def test_sensex_put_blocked_when_put_lane_off():
+    s = Settings(
+        open_index_lane_enabled=True,
+        open_sensex_call_lane_enabled=True,
+        open_sensex_put_lane_enabled=False,
+    )
     cand = _candidate(symbol="SENSEX", side="PUT")
     ok, reason, _ = validate_open_index_lane(cand, settings=s, when=OPEN_TIME)
     assert ok is False
@@ -111,8 +115,9 @@ def test_resolve_lane_when_uses_snap_timestamp():
 
 
 def test_open_index_lane_qualified_requires_passed_quality():
+    s = Settings(open_sensex_call_lane_enabled=True, open_sensex_put_lane_enabled=False)
     cand = _candidate(symbol="SENSEX", side="PUT")
-    ok, reason, _ = open_index_lane_qualified(cand, when=OPEN_TIME)
+    ok, reason, _ = open_index_lane_qualified(cand, settings=s, when=OPEN_TIME)
     assert ok is False
     assert reason == "open_index_lane_sensex_call_only"
 

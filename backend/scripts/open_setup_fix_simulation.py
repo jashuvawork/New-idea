@@ -100,12 +100,23 @@ def _collect_candidates(
 
 
 def _lane_side_ok(c: dict[str, Any]) -> bool:
-    """Production default: SENSEX CALL lane ON, NIFTY PUT lane OFF."""
-    if c["symbol"] == "SENSEX" and c["side"] == "CALL":
+    """Production default: SENSEX CALL+PUT lanes; NIFTY PUT opt-in."""
+    if c["symbol"] == "SENSEX" and c["side"] in ("CALL", "PUT"):
         return True
     if c["symbol"] == "NIFTY" and c["side"] == "PUT":
-        return False  # default off
+        return False
     return False
+
+
+def _side_align_ok(c: dict[str, Any], spot: float, cash_open: float) -> bool:
+    if cash_open <= 0:
+        return True
+    move_pct = (spot - cash_open) / cash_open * 100.0
+    if move_pct >= 0.10 and c["side"] == "PUT":
+        return False
+    if move_pct <= -0.10 and c["side"] == "CALL":
+        return False
+    return True
 
 
 def _itm_call(c: dict[str, Any], spot: float) -> bool:
@@ -126,9 +137,9 @@ def _itm_depth_ok(c: dict[str, Any], spot: float, max_points: float = 800.0) -> 
 
 def _combined_prod_pred(c: dict[str, Any], spot: float, op: float) -> bool:
     """Mirrors open_setup_guards production defaults."""
-    if c["side"] == "PUT" and not (c["symbol"] == "NIFTY"):
-        return False
     if not _lane_side_ok(c):
+        return False
+    if not _side_align_ok(c, spot, op):
         return False
     if not _side_confirm(c, spot, op):
         return False

@@ -1830,9 +1830,11 @@ def find_best_entry(
     # Unlike the established loss cooldown, ELITE/high-mover paths cannot bypass it.
     candidates = _exclude_preorder_rejected_candidates(candidates)
     try:
-        from app.engines.open_setup_guards import filter_open_setup_candidates
+        from app.engines.open_setup_guards import filter_daily_entry_candidates
 
-        candidates = filter_open_setup_candidates(candidates, snapshots, settings=settings)
+        candidates = filter_daily_entry_candidates(
+            candidates, snapshots, state=state, settings=settings,
+        )
     except Exception:
         pass
     if excluded_keys:

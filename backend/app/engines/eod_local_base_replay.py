@@ -932,13 +932,16 @@ def _merge_open_lane_contract_alerts(
         return alerts
 
     sym_u = str(sym or "").upper()
+    from app.engines.open_index_lane import allowed_open_lane_sides
+
     if "SENSEX" in sym_u:
-        required_side = "CALL" if bool(getattr(s, "open_sensex_call_lane_enabled", True)) else None
+        index_key = "SENSEX"
     elif "NIFTY" in sym_u and "BANK" not in sym_u:
-        required_side = "PUT" if bool(getattr(s, "open_nifty_put_lane_enabled", True)) else None
+        index_key = "NIFTY"
     else:
         return alerts
-    if not required_side or not bool(getattr(s, "open_index_lane_enabled", True)):
+    allowed_sides = allowed_open_lane_sides(index_key, s)
+    if not allowed_sides or not bool(getattr(s, "open_index_lane_enabled", True)):
         return alerts
 
     seen = {
@@ -947,7 +950,7 @@ def _merge_open_lane_contract_alerts(
     }
     for (strike_v, side_name), contract in symbol_state.items():
         side_u = str(side_name or "").upper()
-        if side_u != required_side or strike_v <= 0:
+        if side_u not in allowed_sides or strike_v <= 0:
             continue
         if (strike_v, side_u) in seen:
             continue
