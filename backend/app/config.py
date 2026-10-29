@@ -3080,6 +3080,12 @@ class Settings(BaseSettings):
     open_index_lane_min_elite_score: float = 90.0
     open_index_lane_max_local_base_pct: float = 15.0
     open_index_lane_allowed_setups_csv: str = "FTV,V"
+    # 09:20–09:45: cold 1m premium momentum often reads as “fade” on base lifts — allow shallow retest.
+    open_caution_premium_fade_fill_enabled: bool = True
+    open_caution_premium_fade_max_drawdown_pct: float = -2.8
+    open_caution_premium_fade_max_local_base_pct: float = 28.0
+    # Expiry SENSEX/BANKNIFTY OTM block — waive for stamped open first-lift at the pad.
+    best_trade_expiry_otm_open_first_lift_waive_enabled: bool = True
     primary_window_start_hour: int = 10
     primary_window_start_minute: int = 0
 
