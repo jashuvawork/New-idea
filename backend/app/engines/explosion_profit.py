@@ -2537,11 +2537,16 @@ def stage_runner_mega_pullback_exit_reason(
     min_best_hole = _cfg_float(settings, "stage_runner_mega_hole_exit_min_best_points", 28.0)
     min_remain = _cfg_float(settings, "stage_runner_mega_hole_exit_min_remain_points", 6.0)
 
+    min_hole_giveback = _cfg_float(
+        settings, "stage_runner_mega_hole_exit_min_giveback_frac", 0.45
+    )
+    hole_giveback_frac = (giveback / best) if best > 0 else 0.0
     if (
         bool(getattr(settings, "stage_runner_mega_hole_exit_enabled", True))
         and best + 1e-6 >= min_best_hole
         and pnl_pts + 1e-6 >= min_remain
         and pnl_pts + 1e-6 < pct_floor - touch - 1e-6
+        and hole_giveback_frac + 1e-6 >= min_hole_giveback
         and live_v3 <= 0
     ):
         return "explosion_stage_runner_hole_take"

@@ -1629,6 +1629,9 @@ class Settings(BaseSettings):
     stage_runner_mega_hole_exit_enabled: bool = True
     stage_runner_mega_hole_exit_min_best_points: float = 28.0
     stage_runner_mega_hole_exit_min_remain_points: float = 6.0
+    # Shallow dips under the 75% line must not hole-take (Oct 29 SENSEX 73000 CE: +52pt
+    # peak, +35pt exit, tape later 830+). Oct 21 73400 PE hole still qualifies (~78% GB).
+    stage_runner_mega_hole_exit_min_giveback_frac: float = 0.45
     # Once a mega peak matured, do not ride a 75% hole into red — scratch near BE.
     stage_runner_mega_red_giveback_enabled: bool = True
     stage_runner_mega_red_giveback_min_best_points: float = 28.0
