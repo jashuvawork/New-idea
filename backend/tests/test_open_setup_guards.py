@@ -1,17 +1,19 @@
-"""Combined open setup guards (Oct29 playbook)."""
+"""Open setup guards + daily selector prefilter (all sessions)."""
 
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from app.config import Settings
 from app.engines.open_setup_guards import (
+    daily_entry_prefilter_reason,
+    filter_daily_entry_candidates,
     open_caution_itm_depth_ok,
     open_caution_side_align_ok,
     validate_open_setup_entry,
 )
-from app.models.schemas import Side
+from app.models.schemas import Side, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 OPEN = datetime(2026, 10, 29, 9, 35, tzinfo=IST)
@@ -104,3 +106,53 @@ def test_sensex_call_itm_passes_lane_side():
     cand.snap.spot = 73500.0
     ok, reason, meta = validate_open_setup_entry(cand, settings=s, when=OPEN)
     assert ok, (reason, meta)
+
+
+@patch("app.engines.expiry_day_guards._today_str", return_value="2026-09-17")
+def test_daily_prefilter_drops_sensex_expiry_otm(_mock_today):
+    s = Settings(
+        open_setup_guards_enabled=True,
+        open_index_lane_enabled=False,
+        open_caution_side_align_index_enabled=False,
+        selector_expiry_otm_prefilter_enabled=True,
+    )
+    snap = SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp="2026-09-17T11:00:00+05:30",
+        marketPhase="LIVE_MARKET",
+        spot=74003.0,
+        atmStrike=74000.0,
+        dataAvailable=True,
+        optionExpiry="2026-09-17",
+    )
+    otm = MagicMock(
+        mode="explosion",
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=74500.0,
+        premium=192.0,
+        snap=snap,
+        alert={"premium": 192.0},
+    )
+    itm = MagicMock(
+        mode="explosion",
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=73500.0,
+        premium=350.0,
+        snap=snap,
+        alert={"premium": 350.0},
+    )
+    snapshots = {"SENSEX": snap}
+    assert daily_entry_prefilter_reason(otm, snapshots, settings=s) == (
+        "best_trade_block_expiry_otm_itm_atm_only"
+    )
+    assert daily_entry_prefilter_reason(itm, snapshots, settings=s) == ""
+
+    with patch(
+        "app.engines.open_setup_guards._record_selector_prefilter_rejection",
+    ) as mock_rec:
+        kept = filter_daily_entry_candidates([otm, itm], snapshots, settings=s)
+        assert kept == [itm]
+        mock_rec.assert_called_once()
+        assert mock_rec.call_args[0][1] == "best_trade_block_expiry_otm_itm_atm_only"

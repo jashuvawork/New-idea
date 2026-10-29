@@ -167,6 +167,9 @@ def open_setup_guard_summary(settings: Any = None) -> dict[str, Any]:
             getattr(settings, "open_caution_premium_fade_min_rank_score", 90.0) or 90.0
         ),
         "deepItmRankBonus": float(getattr(settings, "open_caution_deep_itm_rank_bonus", 20.0) or 20.0),
+        "selectorExpiryOtmPrefilter": bool(
+            getattr(settings, "selector_expiry_otm_prefilter_enabled", True)
+        ),
     }
 
 
@@ -271,20 +274,97 @@ def open_caution_deep_itm_rank_bonus(
     return round(frac * bonus, 2)
 
 
+def _record_selector_prefilter_rejection(candidate: Any, reason: str) -> None:
+    try:
+        from app.services.radar_learning import record_funnel_gate_block
+
+        side = getattr(candidate, "side", "")
+        side_v = side.value if hasattr(side, "value") else str(side)
+        record_funnel_gate_block(
+            str(getattr(candidate, "symbol", "") or "").upper(),
+            side_v,
+            float(getattr(candidate, "strike", 0) or 0),
+            str(reason or "selector_rejected"),
+            stage="SELECTOR_GATE",
+        )
+    except Exception:
+        pass
+
+
+def daily_entry_prefilter_reason(
+    candidate: Any,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+    *,
+    state: Any = None,
+    settings: Any = None,
+) -> str:
+    """Funnel reason if candidate must not rank; empty if OK. Day-agnostic (every session)."""
+    settings = settings or get_settings()
+    ok, reason, _ = validate_open_setup_entry(
+        candidate, settings=settings, snapshots=snapshots,
+    )
+    if not ok:
+        return str(reason or "open_setup_guard")
+
+    if not bool(getattr(settings, "selector_expiry_otm_prefilter_enabled", True)):
+        return ""
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        return ""
+
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    snap = getattr(candidate, "snap", None)
+    if snap is None and snapshots:
+        snap = snapshots.get(sym)
+    if snap is None:
+        return ""
+
+    from app.engines.best_trade_policy import expiry_cheap_otm_entry_blocked
+
+    alert = getattr(candidate, "alert", None)
+    blocked, otm_reason = expiry_cheap_otm_entry_blocked(
+        candidate,
+        snap,
+        alert if isinstance(alert, dict) else None,
+        state=state,
+        settings=settings,
+    )
+    return str(otm_reason or "") if blocked else ""
+
+
+def filter_daily_entry_candidates(
+    candidates: list[Any],
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    state: Any = None,
+    settings: Any = None,
+    record_rejections: bool = True,
+) -> list[Any]:
+    """Open setup + expiry OTM pre-rank filter with funnel telemetry."""
+    settings = settings or get_settings()
+    kept: list[Any] = []
+    for c in candidates:
+        reason = daily_entry_prefilter_reason(
+            c, snapshots, state=state, settings=settings,
+        )
+        if reason:
+            if record_rejections:
+                _record_selector_prefilter_rejection(c, reason)
+            continue
+        kept.append(c)
+    return kept
+
+
 def filter_open_setup_candidates(
     candidates: list[Any],
     snapshots: dict[str, SymbolSnapshot],
     *,
+    state: Any = None,
     settings: Any = None,
 ) -> list[Any]:
-    """Drop candidates that fail open setup guards (selector pre-rank)."""
-    settings = settings or get_settings()
-    kept: list[Any] = []
-    for c in candidates:
-        ok, _, _ = validate_open_setup_entry(c, settings=settings, snapshots=snapshots)
-        if ok:
-            kept.append(c)
-    return kept
+    """Backward-compatible alias — prefer filter_daily_entry_candidates."""
+    return filter_daily_entry_candidates(
+        candidates, snapshots, state=state, settings=settings,
+    )
 
 
 def open_caution_fade_bypass_rank_ok(

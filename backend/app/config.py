@@ -3118,6 +3118,8 @@ class Settings(BaseSettings):
     open_caution_default_max_itm_points: float = 800.0
     open_caution_deep_itm_rank_bonus_enabled: bool = True
     open_caution_deep_itm_rank_bonus: float = 20.0
+    # Drop expiry OTM at selector (same rule as auto_trader) — avoids SELECTED→ORDER_REJECT spam.
+    selector_expiry_otm_prefilter_enabled: bool = True
     # Expiry SENSEX/BANKNIFTY OTM block — waive for stamped open first-lift at the pad.
     best_trade_expiry_otm_open_first_lift_waive_enabled: bool = True
     primary_window_start_hour: int = 10
