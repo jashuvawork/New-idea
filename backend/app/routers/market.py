@@ -41,6 +41,7 @@ _sse_queues: set[asyncio.Queue] = set()
 _cache_json: Optional[bytes] = None
 _last_touch_mono: float = 0.0
 _last_ws_overlay_mono: float = 0.0
+_last_ws_cache_serialize_mono: float = 0.0
 _last_exit_eval_mono: float = 0.0
 _last_full_rest_mono: float = 0.0
 _last_json_meta_sync_mono: float = 0.0
@@ -149,11 +150,27 @@ async def _store_cache_async(snap: MultiSnapshot) -> None:
     _sse_payload_dict = None
 
 
-def ws_overlay_due() -> bool:
-    """Throttle WS overlay serialize+broadcast — balance freshness vs event-loop load."""
+def _ws_overlay_min_interval_ms() -> float:
     settings = get_settings()
-    min_ms = max(_WS_OVERLAY_MIN_MS, settings.sse_heartbeat_seconds * 1000)
-    return (time.monotonic() - _last_ws_overlay_mono) * 1000 >= min_ms
+    return max(_WS_OVERLAY_MIN_MS, settings.sse_heartbeat_seconds * 1000)
+
+
+def ws_overlay_due() -> bool:
+    """Throttle dedicated ws_overlay radar cycle (health source + optional broadcast)."""
+    return (time.monotonic() - _last_ws_overlay_mono) * 1000 >= _ws_overlay_min_interval_ms()
+
+
+def ws_cache_serialize_due() -> bool:
+    """Throttle full cache re-serialize on hot WS paths without blocking ws_overlay health."""
+    return (
+        (time.monotonic() - _last_ws_cache_serialize_mono) * 1000
+        >= _ws_overlay_min_interval_ms()
+    )
+
+
+def _mark_ws_cache_serialize_done() -> None:
+    global _last_ws_cache_serialize_mono
+    _last_ws_cache_serialize_mono = time.monotonic()
 
 
 def exit_eval_due() -> bool:
@@ -599,6 +616,19 @@ async def _record_radar_pipeline_async(
             pass
 
 
+async def _touch_ws_overlay_health_async(snapshots: dict) -> None:
+    """Keep ws_overlay lastSeenAt fresh when overlay runs outside run_ws_overlay_cycle."""
+    settings = get_settings()
+    if not bool(getattr(settings, "radar_record_on_ws_overlay_enabled", True)):
+        return
+    try:
+        from app.services.radar_health import record_source
+
+        await asyncio.to_thread(record_source, "ws_overlay", snapshots)
+    except Exception as exc:
+        logger.debug("ws_overlay health touch failed: %s", exc)
+
+
 async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnapshot]:
     """WS overlay only — refresh cache + SSE without trader REST work."""
     global _last_fast_cycle_ms, _last_ws_overlay_mono
@@ -622,6 +652,7 @@ async def run_ws_overlay_cycle(*, broadcast: bool = False) -> Optional[MultiSnap
     snapshot = _shallow_cache_copy(snapshots=overlays, auto_trader=get_state())
     await _store_cache_async(snapshot)
     _last_ws_overlay_mono = time.monotonic()
+    _mark_ws_cache_serialize_done()
     _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
 
     if broadcast:
@@ -665,11 +696,12 @@ async def run_building_ltp_entry_cycle(
     await _refresh_explosion_alerts_async(probe, today=today)
     probe = _stamp_snapshot_symbols_now(probe)
     await _record_radar_pipeline_async(probe, source="building_ltp")
+    await _touch_ws_overlay_health_async(probe)
     if not building_ltp_monitor_due(probe):
         snapshot = _shallow_cache_copy(snapshots=probe, auto_trader=get_state())
-        if ws_overlay_due():
+        if ws_cache_serialize_due():
             await _store_cache_async(snapshot)
-            _last_ws_overlay_mono = time.monotonic()
+            _mark_ws_cache_serialize_done()
         else:
             _update_cache_memory(snapshot)
         return snapshot
@@ -717,9 +749,9 @@ async def run_building_ltp_entry_cycle(
     clear_building_scoreboard()
     _last_fast_cycle_ms = round((time.perf_counter() - t0) * 1000, 2)
 
-    if ws_overlay_due():
+    if ws_cache_serialize_due():
         await _store_cache_async(snapshot)
-        _last_ws_overlay_mono = time.monotonic()
+        _mark_ws_cache_serialize_done()
         if broadcast:
             await broadcast_snapshot(snapshot)
     return snapshot
@@ -777,6 +809,7 @@ async def run_entry_scan_on_cache(
     await _refresh_explosion_alerts_async(overlays, today=today)
     overlays = _stamp_snapshot_symbols_now(overlays)
     await _record_radar_pipeline_async(overlays, source="ws_entry_scan")
+    await _touch_ws_overlay_health_async(overlays)
     news = await _fetch_news_cached()
     auto_state = get_state()
     at_max = _at_max_explosion_positions(auto_state)
@@ -836,9 +869,9 @@ async def run_entry_scan_on_cache(
     )
     _update_cache_memory(snapshot)
 
-    if ws_overlay_due():
+    if ws_cache_serialize_due():
         await _store_cache_async(snapshot)
-        _last_ws_overlay_mono = time.monotonic()
+        _mark_ws_cache_serialize_done()
         if broadcast:
             await broadcast_snapshot(snapshot)
 
@@ -866,10 +899,11 @@ async def run_tick_fast_cycle(*, broadcast: bool = False) -> Optional[MultiSnaps
     snapshot = _shallow_cache_copy(snapshots=overlays, auto_trader=auto_state)
     _update_cache_memory(snapshot)
     _last_exit_eval_mono = time.monotonic()
+    await _touch_ws_overlay_health_async(overlays)
 
-    if ws_overlay_due():
+    if ws_cache_serialize_due():
         await _store_cache_async(snapshot)
-        _last_ws_overlay_mono = time.monotonic()
+        _mark_ws_cache_serialize_done()
         if broadcast:
             await broadcast_snapshot(snapshot)
 
