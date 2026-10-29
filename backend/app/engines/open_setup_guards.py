@@ -1,0 +1,266 @@
+"""09:20–09:45 open book: lane + index scope + ITM depth + PUT block (CE/PE symmetric when PUT lane on)."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Optional
+
+from app.config import get_settings
+from app.engines.open_index_lane import (
+    _index_bucket,
+    _side_value,
+    in_open_caution_window_at,
+    resolve_lane_when,
+    validate_open_index_lane,
+)
+from app.models.schemas import SymbolSnapshot
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _active_open_lanes(settings: Any) -> list[tuple[str, str]]:
+    lanes: list[tuple[str, str]] = []
+    if bool(getattr(settings, "open_sensex_call_lane_enabled", True)):
+        lanes.append(("SENSEX", "CALL"))
+    if bool(getattr(settings, "open_nifty_put_lane_enabled", False)):
+        lanes.append(("NIFTY", "PUT"))
+    return lanes
+
+
+def _candidate_lane_tuple(candidate: Any) -> tuple[str | None, str]:
+    index = _index_bucket(str(getattr(candidate, "symbol", "") or ""))
+    side = _side_value(getattr(candidate, "side", ""))
+    return index, side
+
+
+def _max_itm_points(index: str | None, side: str, settings: Any) -> float:
+    if index == "NIFTY" and side == "PUT":
+        return float(getattr(settings, "open_caution_nifty_put_max_itm_points", 400.0) or 400.0)
+    if index == "SENSEX" and side == "CALL":
+        return float(getattr(settings, "open_caution_sensex_call_max_itm_points", 800.0) or 800.0)
+    return float(getattr(settings, "open_caution_default_max_itm_points", 800.0) or 800.0)
+
+
+def open_caution_itm_depth_ok(
+    side: str,
+    strike: float,
+    spot: float,
+    *,
+    symbol: str = "",
+    settings: Any = None,
+) -> tuple[bool, float, dict[str, Any]]:
+    """ITM with spot−strike (CALL) or strike−spot (PUT) within configured open band."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {"openItmBand": True}
+    if spot <= 0 or strike <= 0:
+        meta["itmReason"] = "missing_spot_or_strike"
+        return False, 0.0, meta
+    side_u = _side_value(side)
+    if side_u == "CALL":
+        if spot < strike:
+            meta["itmReason"] = "call_not_itm"
+            return False, 0.0, meta
+        depth = spot - strike
+    elif side_u == "PUT":
+        if spot > strike:
+            meta["itmReason"] = "put_not_itm"
+            return False, 0.0, meta
+        depth = strike - spot
+    else:
+        meta["itmReason"] = "unknown_side"
+        return False, 0.0, meta
+    index = _index_bucket(symbol)
+    cap = _max_itm_points(index, side_u, settings)
+    meta["itmDepthPoints"] = round(depth, 2)
+    meta["itmMaxPoints"] = cap
+    if depth > cap + 1e-6:
+        meta["itmReason"] = "open_caution_itm_too_deep"
+        return False, depth, meta
+    meta["itmReason"] = "ok"
+    return True, depth, meta
+
+
+def _resolve_spot(candidate: Any, snapshots: Optional[dict[str, SymbolSnapshot]]) -> float:
+    snap = getattr(candidate, "snap", None)
+    if snap is None and snapshots:
+        snap = snapshots.get(str(getattr(candidate, "symbol", "") or "").upper())
+    if snap is not None:
+        try:
+            return float(getattr(snap, "spot", 0) or 0)
+        except (TypeError, ValueError):
+            pass
+    alert = getattr(candidate, "alert", None)
+    if isinstance(alert, dict):
+        for key in ("spot", "indexSpot", "underlyingSpot"):
+            try:
+                val = float(alert.get(key) or 0)
+            except (TypeError, ValueError):
+                val = 0.0
+            if val > 0:
+                return val
+    return 0.0
+
+
+def open_setup_guard_summary(settings: Any = None) -> dict[str, Any]:
+    settings = settings or get_settings()
+    return {
+        "blockPutsInOpen": bool(getattr(settings, "open_caution_block_puts_enabled", True)),
+        "nonLaneIndexBlocked": bool(
+            getattr(settings, "open_caution_non_lane_index_blocked", True)
+        ),
+        "itmBandEnabled": bool(getattr(settings, "open_caution_itm_band_enabled", True)),
+        "sensexCallMaxItmPoints": float(
+            getattr(settings, "open_caution_sensex_call_max_itm_points", 800.0) or 800.0
+        ),
+        "niftyPutMaxItmPoints": float(
+            getattr(settings, "open_caution_nifty_put_max_itm_points", 400.0) or 400.0
+        ),
+        "fadeBypassMinRank": float(
+            getattr(settings, "open_caution_premium_fade_min_rank_score", 90.0) or 90.0
+        ),
+        "deepItmRankBonus": float(getattr(settings, "open_caution_deep_itm_rank_bonus", 20.0) or 20.0),
+    }
+
+
+def validate_open_setup_entry(
+    candidate: Any,
+    *,
+    settings: Any = None,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+    when: Optional[datetime] = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Open caution guards before SELECT / pretrade. Idle outside 09:20–09:45.
+    """
+    settings = settings or get_settings()
+    when = resolve_lane_when(candidate, when)
+    meta: dict[str, Any] = {"openSetupGuard": True}
+    if not in_open_caution_window_at(when):
+        return True, "ok", {}
+
+    if not bool(getattr(settings, "open_setup_guards_enabled", True)):
+        return True, "ok", meta
+
+    index, side = _candidate_lane_tuple(candidate)
+    meta["openIndex"] = index
+    meta["openSide"] = side
+
+    if bool(getattr(settings, "open_caution_block_puts_enabled", True)) and side == "PUT":
+        if not (
+            index == "NIFTY"
+            and bool(getattr(settings, "open_nifty_put_lane_enabled", False))
+        ):
+            return False, "open_caution_puts_blocked", meta
+
+    lanes = _active_open_lanes(settings)
+    if bool(getattr(settings, "open_caution_non_lane_index_blocked", True)) and lanes:
+        allowed = any(index == idx and side == req for idx, req in lanes)
+        if not allowed:
+            return False, "open_caution_non_lane_index", meta
+
+    lane_ok, lane_reason, lane_meta = validate_open_index_lane(
+        candidate, settings=settings, when=when,
+    )
+    meta.update(lane_meta)
+    if not lane_ok:
+        return False, lane_reason, meta
+
+    if bool(getattr(settings, "open_caution_itm_band_enabled", True)):
+        strike = float(getattr(candidate, "strike", 0) or 0)
+        spot = _resolve_spot(candidate, snapshots)
+        itm_ok, depth, itm_meta = open_caution_itm_depth_ok(
+            side,
+            strike,
+            spot,
+            symbol=str(getattr(candidate, "symbol", "") or ""),
+            settings=settings,
+        )
+        meta.update(itm_meta)
+        meta["openItmDepthPoints"] = depth
+        if not itm_ok:
+            reason = str(itm_meta.get("itmReason") or "open_caution_itm_band")
+            return False, reason, meta
+
+    meta["openSetupGuardPassed"] = True
+    return True, "ok", meta
+
+
+def open_caution_deep_itm_rank_bonus(
+    candidate: Any,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+    *,
+    settings: Any = None,
+    when: Optional[datetime] = None,
+) -> float:
+    """Prefer deeper ITM (73000 over 73400) during open caution."""
+    settings = settings or get_settings()
+    when = resolve_lane_when(candidate, when)
+    if not in_open_caution_window_at(when):
+        return 0.0
+    if not bool(getattr(settings, "open_caution_deep_itm_rank_bonus_enabled", True)):
+        return 0.0
+    _, side = _candidate_lane_tuple(candidate)
+    strike = float(getattr(candidate, "strike", 0) or 0)
+    spot = _resolve_spot(candidate, snapshots)
+    itm_ok, depth, _ = open_caution_itm_depth_ok(
+        side,
+        strike,
+        spot,
+        symbol=str(getattr(candidate, "symbol", "") or ""),
+        settings=settings,
+    )
+    if not itm_ok or depth <= 0:
+        return 0.0
+    cap = _max_itm_points(_index_bucket(str(getattr(candidate, "symbol", "") or "")), side, settings)
+    if cap <= 0:
+        return 0.0
+    frac = min(1.0, depth / cap)
+    bonus = float(getattr(settings, "open_caution_deep_itm_rank_bonus", 20.0) or 20.0)
+    return round(frac * bonus, 2)
+
+
+def filter_open_setup_candidates(
+    candidates: list[Any],
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    settings: Any = None,
+) -> list[Any]:
+    """Drop candidates that fail open setup guards (selector pre-rank)."""
+    settings = settings or get_settings()
+    kept: list[Any] = []
+    for c in candidates:
+        ok, _, _ = validate_open_setup_entry(c, settings=settings, snapshots=snapshots)
+        if ok:
+            kept.append(c)
+    return kept
+
+
+def open_caution_fade_bypass_rank_ok(
+    alert: Optional[dict[str, Any]],
+    *,
+    settings: Any = None,
+    causal_rank_score: Optional[float] = None,
+    causal_grade: Optional[str] = None,
+) -> bool:
+    settings = settings or get_settings()
+    min_rank = float(getattr(settings, "open_caution_premium_fade_min_rank_score", 90.0) or 90.0)
+    rank = causal_rank_score
+    grade = (causal_grade or "").upper()
+    if rank is None and isinstance(alert, dict):
+        try:
+            rank = float(
+                alert.get("causalRankScore")
+                or alert.get("rankScore")
+                or alert.get("selectionScore")
+                or 0
+            )
+        except (TypeError, ValueError):
+            rank = 0.0
+    if grade == "" and isinstance(alert, dict):
+        grade = str(alert.get("causalGrade") or alert.get("grade") or "").upper()
+    if rank is not None and float(rank) >= min_rank - 1e-6:
+        return True
+    if bool(getattr(settings, "open_caution_premium_fade_allow_grade_s", True)) and grade == "S":
+        return True
+    return False

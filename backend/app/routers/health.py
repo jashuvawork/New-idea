@@ -7,6 +7,7 @@ from app.engines.capital_allocator import get_lot_sizes_meta
 from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.engines.sep917_legacy_profile import sep917_legacy_profile_summary as _sep917_legacy_profile_summary
 from app.engines.open_index_lane import open_index_lane_summary
+from app.engines.open_setup_guards import open_setup_guard_summary
 from app.engines.structural_guard_settings import structural_guard_summary
 from app.services import trade_store
 from app.services.redis_store import has_upstox_token
@@ -97,6 +98,7 @@ async def deployment_status():
             "openCautionUntilIst": f"{settings.open_caution_until_hour:02d}:{settings.open_caution_until_minute:02d}",
             "openCautionMinExplosionScore": settings.open_caution_min_explosion_score,
             "openIndexLane": open_index_lane_summary(settings),
+            "openSetupGuards": open_setup_guard_summary(settings),
             "aggressiveMinExplosionScore": settings.aggressive_min_explosion_score,
             "explosionConfirmedMinScore": settings.explosion_confirmed_min_score,
             "explosionTargetStandard": settings.explosion_target_standard,

@@ -1477,6 +1477,9 @@ def open_caution_premium_fade_bypass(
     explosion_event: Any = None,
     *,
     when: Optional[datetime] = None,
+    snap: Optional[SymbolSnapshot] = None,
+    causal_rank_score: Optional[float] = None,
+    causal_grade: Optional[str] = None,
 ) -> bool:
     """09:20–09:45 local-base first lift — exec 1m premium dip is often noise, not a real fade."""
     settings = get_settings()
@@ -1528,7 +1531,50 @@ def open_caution_premium_fade_bypass(
         or alert.get("offLowMovePct")
         or 0
     )
-    return min_lb <= lb <= max_lb
+    if not (min_lb <= lb <= max_lb):
+        return False
+    from app.engines.open_setup_guards import (
+        open_caution_fade_bypass_rank_ok,
+        open_caution_itm_depth_ok,
+    )
+
+    if not open_caution_fade_bypass_rank_ok(
+        alert,
+        settings=settings,
+        causal_rank_score=causal_rank_score,
+        causal_grade=causal_grade,
+    ):
+        return False
+    side = str(alert.get("side") or getattr(explosion_event, "side", "") or "").upper()
+    if side in {"CE", "C"}:
+        side = "CALL"
+    elif side in {"PE", "P"}:
+        side = "PUT"
+    try:
+        strike = float(alert.get("strike") or getattr(explosion_event, "strike", 0) or 0)
+    except (TypeError, ValueError):
+        strike = 0.0
+    spot = 0.0
+    if snap is not None:
+        try:
+            spot = float(getattr(snap, "spot", 0) or 0)
+        except (TypeError, ValueError):
+            spot = 0.0
+    if spot <= 0 and isinstance(alert, dict):
+        try:
+            spot = float(alert.get("spot") or alert.get("indexSpot") or 0)
+        except (TypeError, ValueError):
+            spot = 0.0
+    if strike > 0 and spot > 0 and bool(
+        getattr(settings, "open_caution_itm_band_enabled", True)
+    ):
+        sym = str(alert.get("symbol") or getattr(explosion_event, "symbol", "") or "")
+        itm_ok, _, _ = open_caution_itm_depth_ok(
+            side, strike, spot, symbol=sym, settings=settings,
+        )
+        if not itm_ok:
+            return False
+    return True
 
 
 def local_base_premium_fade_bypass(
@@ -1548,7 +1594,7 @@ def local_base_premium_fade_bypass(
         ts = raw if isinstance(raw, datetime) else None
 
     return (
-        open_caution_premium_fade_bypass(alert, explosion_event, when=ts)
+        open_caution_premium_fade_bypass(alert, explosion_event, when=ts, snap=snap)
         or symmetric_near_base_premium_fade_bypass(alert, explosion_event)
         or shallow_otm_local_base_premium_fade_bypass(alert, explosion_event)
         or atm_armed_local_base_premium_fade_bypass(alert, explosion_event)
