@@ -1730,6 +1730,11 @@ class Settings(BaseSettings):
     runner_profit_guard_tier3_keep_ratio: float = 0.55
     runner_profit_guard_tier4_gain_pct: float = 50.0
     runner_profit_guard_tier4_keep_ratio: float = 0.70
+    # Defer guard for V-base / micro-pullback stage runners until TP rung owns exits (+28pt)
+    # or the leg matures (Oct 29 NIFTY 22800 CE: +10pt peak scratched on retest v3≈0).
+    runner_profit_guard_defer_vbase_runner_enabled: bool = True
+    runner_profit_guard_defer_vbase_max_gain_pct: float = 12.0
+    runner_profit_guard_defer_vbase_max_progress_frac: float = 0.08
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.

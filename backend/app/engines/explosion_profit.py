@@ -2366,6 +2366,58 @@ def runner_profit_guard_floor(
     return best * keep
 
 
+def _defer_runner_profit_guard_for_vbase_runner(
+    trade: PaperTrade,
+    *,
+    best: float,
+    settings: Any,
+) -> bool:
+    """Hold stage-ladder V-base / micro-pullback runners through early guard floors.
+
+    The runner guard exists for sub-+28pt legs that would otherwise bleed to the
+    adaptive stop (Oct 21 73300 PE). Micro-pullback entries *expect* flat/negative
+    v3 on the retest — selling at tier-1 20% keep after a +5% wiggle exits winners
+    before the TP rung ladder or stage trail can work (Oct 29 NIFTY 22800 CE).
+    """
+    if not bool(getattr(settings, "runner_profit_guard_defer_vbase_runner_enabled", True)):
+        return False
+    ctx = trade.entryContext or {}
+    from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
+
+    if not trade_uses_moment_stage_ladder(trade):
+        return False
+    best_f = float(best or 0)
+    if best_f + 1e-6 >= _cfg_float(settings, "tp_rung_ladder_min_best_to_arm_exits", 28.0):
+        return False
+    moment = str(ctx.get("momentType") or "").lower()
+    vbase = bool(
+        ctx.get("vBaseFtvRunner")
+        or ctx.get("microPullbackRetest")
+        or moment in ("micro_pullback_retest", "v_rip_session_low")
+    )
+    if not vbase or not ctx.get("maxProfitCapture"):
+        return False
+    entry = float(trade.entryPremium or 0)
+    if entry <= 0 or best_f <= 0:
+        return False
+    gain_pct = best_f / entry * 100.0
+    max_gain = _cfg_float(settings, "runner_profit_guard_defer_vbase_max_gain_pct", 12.0)
+    if gain_pct > max_gain + 1e-6:
+        return False
+    projected = float(
+        ctx.get("projectedMaxTp")
+        or ((ctx.get("exitPlan") or {}).get("projectedMaxTp"))
+        or 0
+    )
+    if projected > 0:
+        max_prog = _cfg_float(
+            settings, "runner_profit_guard_defer_vbase_max_progress_frac", 0.08
+        )
+        if (best_f / projected) + 1e-6 < max_prog:
+            return True
+    return gain_pct + 1e-6 < max_gain
+
+
 def runner_profit_guard_exit_reason(
     trade: PaperTrade,
     *,
@@ -2381,9 +2433,16 @@ def runner_profit_guard_exit_reason(
     to the entry-time velocity.
     """
     settings = get_settings()
+    from app.engines.moment_stage_trail import _local_observed_best
+
+    best = _local_observed_best(trade, pnl_pts)
     floor_pts = runner_profit_guard_floor(trade, settings=settings, pnl_pts=pnl_pts)
     ctx = trade.entryContext if trade.entryContext is not None else {}
     pnl = float(pnl_pts or 0)
+    if _defer_runner_profit_guard_for_vbase_runner(trade, best=best, settings=settings):
+        ctx.pop("runnerGuardBelowSince", None)
+        trade.entryContext = ctx
+        return None
     if floor_pts is None or pnl > floor_pts + 1e-6:
         ctx.pop("runnerGuardBelowSince", None)
         return None
