@@ -68,7 +68,7 @@ def _open_leg(*, strike=22950.0):
 
 
 @patch("app.engines.chop_rally_session_discipline.get_settings")
-@patch("app.engines.chop_rally_session_discipline.is_chop_rally_day", return_value=True)
+@patch("app.engines.chop_rally_session_discipline.is_session_repeat_discipline_day", return_value=True)
 def test_open_cap_blocks_second_ce_strike(_day, mock_gs):
     mock_gs.return_value = settings_mock(
         chop_rally_session_discipline_enabled=True,
@@ -83,11 +83,11 @@ def test_open_cap_blocks_second_ce_strike(_day, mock_gs):
         state, symbol="NIFTY", side=Side.CALL,
     )
     assert blocked is True
-    assert reason == "chop_rally_one_open_leg_per_symbol_side"
+    assert reason == "session_one_open_leg_per_symbol_side"
 
 
 @patch("app.engines.chop_rally_session_discipline.get_settings")
-@patch("app.engines.chop_rally_session_discipline.is_chop_rally_day", return_value=True)
+@patch("app.engines.chop_rally_session_discipline.is_session_repeat_discipline_day", return_value=True)
 def test_same_strike_loss_no_restack(_day, mock_gs):
     mock_gs.return_value = settings_mock(
         chop_rally_block_same_strike_after_loss=True,
@@ -105,11 +105,11 @@ def test_same_strike_loss_no_restack(_day, mock_gs):
         premium=80.0,
     )
     assert blocked is True
-    assert reason == "chop_rally_same_strike_loss_no_restack"
+    assert reason == "session_same_strike_loss_no_restack"
 
 
 @patch("app.engines.chop_rally_session_discipline.get_settings")
-@patch("app.engines.chop_rally_session_discipline.is_chop_rally_day", return_value=True)
+@patch("app.engines.chop_rally_session_discipline.is_session_repeat_discipline_day", return_value=True)
 @patch(
     "app.engines.session_mode_feedback.same_strike_post_win_fresh_base_reentry",
     return_value=(False, {"reason": "no_fresh_base"}),
@@ -131,11 +131,11 @@ def test_same_strike_win_requires_fresh_base(_fresh, _day, mock_gs):
         premium=170.0,
     )
     assert blocked is True
-    assert reason == "chop_rally_same_strike_requires_fresh_base"
+    assert reason == "session_same_strike_requires_fresh_base"
 
 
 @patch("app.engines.chop_rally_session_discipline.get_settings")
-@patch("app.engines.chop_rally_session_discipline.is_chop_rally_day", return_value=True)
+@patch("app.engines.chop_rally_session_discipline.is_session_repeat_discipline_day", return_value=True)
 @patch(
     "app.engines.session_mode_feedback.same_strike_post_win_fresh_base_reentry",
     return_value=(True, {"reason": "fresh_base_reentry"}),
@@ -166,7 +166,7 @@ def test_chop_rally_blowout_uses_22pct_pad(_blow, _fresh, _day, mock_gs):
     assert _blow.call_args.kwargs["max_premium_above_win_entry_pct"] == 22.0
 
 
-@patch("app.engines.chop_rally_session_discipline.is_chop_rally_day", return_value=False)
+@patch("app.engines.chop_rally_session_discipline.is_session_repeat_discipline_day", return_value=False)
 def test_inactive_off_chop_rally_day(_day):
     from app.engines.chop_rally_session_discipline import (
         chop_rally_symbol_side_open_cap_blocked,
@@ -180,7 +180,25 @@ def test_inactive_off_chop_rally_day(_day):
 
 
 @patch("app.engines.chop_rally_session_discipline.get_settings")
-@patch("app.engines.chop_rally_session_discipline.is_chop_rally_day", return_value=True)
+def test_expiry_worst_excluded_from_default_modes(mock_gs):
+    mock_gs.return_value = settings_mock()
+    from app.engines.chop_rally_session_discipline import is_session_repeat_discipline_day
+
+    state = SimpleNamespace(dailyStrategy={"dayMode": "EXPIRY WORST"})
+    assert is_session_repeat_discipline_day(state, None) is False
+
+
+@patch("app.engines.chop_rally_session_discipline.get_settings")
+def test_bullish_day_in_default_modes(mock_gs):
+    mock_gs.return_value = settings_mock()
+    from app.engines.chop_rally_session_discipline import is_session_repeat_discipline_day
+
+    state = SimpleNamespace(dailyStrategy={"dayMode": "BULLISH DAY"})
+    assert is_session_repeat_discipline_day(state, None) is True
+
+
+@patch("app.engines.chop_rally_session_discipline.get_settings")
+@patch("app.engines.chop_rally_session_discipline.is_session_repeat_discipline_day", return_value=True)
 def test_put_side_symmetric_open_cap(_day, mock_gs):
     mock_gs.return_value = settings_mock(chop_rally_max_open_legs_per_symbol_side=1)
     from app.engines.chop_rally_session_discipline import (
@@ -202,4 +220,4 @@ def test_put_side_symmetric_open_cap(_day, mock_gs):
         state, symbol="NIFTY", side=Side.PUT,
     )
     assert blocked is True
-    assert reason == "chop_rally_one_open_leg_per_symbol_side"
+    assert reason == "session_one_open_leg_per_symbol_side"

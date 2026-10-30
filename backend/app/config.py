@@ -464,7 +464,19 @@ class Settings(BaseSettings):
     same_strike_post_win_premium_blowout_block_enabled: bool = True
     same_strike_post_win_max_premium_above_win_entry_pct: float = 28.0
     same_strike_post_win_premium_blowout_min_velocity_3s: float = 2.5
-    # CHOP + RALLY (#676 book): one open leg per index+side; fresh-base-only same-strike reentry; 22% blowout pad.
+    # Session repeat discipline (#676 book): one open leg per index+side; fresh-base same-strike; 22% pad.
+    # 21-day radar replay: this bundle (without extra ladder blocks) ~+₹97k; #890 ladder alone ~−₹209k.
+    session_repeat_discipline_enabled: bool = True
+    session_repeat_discipline_day_modes_csv: str = (
+        "CHOP + RALLY,CHOP DAY,CHOP (PRE-10),MOMENTUM RALLY,MIXED DAY,NORMAL,"
+        "BULLISH DAY,LEAN BULLISH,BEARISH DAY,LEAN BEARISH,EXPIRY DAY"
+    )
+    session_repeat_discipline_exclude_day_modes_csv: str = "EXPIRY WORST,NO_DATA"
+    session_repeat_discipline_max_open_legs_per_symbol_side: int = 1
+    session_repeat_discipline_block_same_strike_after_loss: bool = True
+    session_repeat_discipline_same_strike_post_win_requires_fresh_base: bool = True
+    session_repeat_discipline_same_strike_post_win_max_premium_above_win_entry_pct: float = 22.0
+    # Legacy env aliases (still read as fallbacks; #891 on main)
     chop_rally_session_discipline_enabled: bool = True
     chop_rally_max_open_legs_per_symbol_side: int = 1
     chop_rally_block_same_strike_after_loss: bool = True

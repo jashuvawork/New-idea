@@ -458,6 +458,9 @@ def test_entry_path_rejects_immediate_reentry_at_exhausted_ftv_high():
     with patch(
         "app.engines.session_mode_feedback.reentry_ml_win_prob_blocked",
         return_value=(False, {}),
+    ), patch(
+        "app.engines.chop_rally_session_discipline.is_session_repeat_discipline_day",
+        return_value=False,
     ):
         opened, reason = asyncio.run(
             _open_from_candidate(

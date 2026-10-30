@@ -1,9 +1,13 @@
-"""CHOP + RALLY session discipline — #676 bottom line (base capture, not ladder stacks).
+"""Session repeat discipline — #676 bottom line (base capture, not ladder stacks).
 
-On CHOP + RALLY only (CE + PE symmetric):
-- At most one open explosion leg per index + side (no 22950 + 23050 CE together).
+Applies on configured day modes (default: all regular capture days except EXPIRY WORST).
+CE + PE symmetric:
+- At most one open explosion leg per index + side.
 - Same strike after a loss: no restack for the rest of the session.
 - Same strike after a win: only #866 fresh-base reentry inside the 22% pad (+ tighter blowout).
+
+Does not replace #890 post-win different-strike ladder (global); EOD showed ladder blocks
+hurt trend days when combined with this bundle on all 21 radar ZIPs.
 """
 
 from __future__ import annotations
@@ -13,6 +17,70 @@ from typing import Any, Optional
 from app.config import get_settings
 from app.models.schemas import Side, SymbolSnapshot
 
+# Modes where EOD / worst-day machinery already caps behavior — skip repeat bundle.
+_DEFAULT_EXCLUDED_MODES = frozenset({"EXPIRY WORST", "NO_DATA"})
+
+_DEFAULT_DISCIPLINE_MODES = frozenset({
+    "CHOP + RALLY",
+    "CHOP DAY",
+    "CHOP (PRE-10)",
+    "MOMENTUM RALLY",
+    "MIXED DAY",
+    "NORMAL",
+    "BULLISH DAY",
+    "LEAN BULLISH",
+    "BEARISH DAY",
+    "LEAN BEARISH",
+    "EXPIRY DAY",
+})
+
+
+def _parse_modes_csv(raw: str) -> frozenset[str]:
+    text = str(raw or "").strip()
+    if not text:
+        return frozenset()
+    if text == "*":
+        return _DEFAULT_DISCIPLINE_MODES
+    return frozenset(s.strip().upper() for s in text.split(",") if s.strip())
+
+
+def session_repeat_discipline_modes(settings: Any = None) -> frozenset[str]:
+    settings = settings or get_settings()
+    csv = getattr(settings, "session_repeat_discipline_day_modes_csv", None)
+    if csv is not None and str(csv).strip():
+        modes = _parse_modes_csv(str(csv))
+    elif bool(getattr(settings, "chop_rally_session_discipline_enabled", True)):
+        modes = frozenset({"CHOP + RALLY"})
+    else:
+        modes = frozenset()
+    exclude = _parse_modes_csv(
+        str(getattr(settings, "session_repeat_discipline_exclude_day_modes_csv", "") or "")
+    )
+    if not exclude:
+        exclude = _DEFAULT_EXCLUDED_MODES
+    return frozenset(m for m in modes if m not in exclude)
+
+
+def is_session_repeat_discipline_day(
+    state: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    *,
+    day_mode: str = "",
+) -> bool:
+    settings = get_settings()
+    if not bool(getattr(settings, "session_repeat_discipline_enabled", True)):
+        if not bool(getattr(settings, "chop_rally_session_discipline_enabled", True)):
+            return False
+    modes = session_repeat_discipline_modes(settings)
+    if not modes:
+        return False
+    from app.engines.pe_win_ce_mirror import _resolve_chop_rally_day_mode
+
+    dm = _resolve_chop_rally_day_mode(day_mode, state=state, snap=snap).strip().upper()
+    if not dm:
+        return False
+    return dm in modes
+
 
 def is_chop_rally_day(
     state: Any = None,
@@ -20,13 +88,36 @@ def is_chop_rally_day(
     *,
     day_mode: str = "",
 ) -> bool:
-    settings = get_settings()
-    if not bool(getattr(settings, "chop_rally_session_discipline_enabled", True)):
-        return False
-    from app.engines.pe_win_ce_mirror import _resolve_chop_rally_day_mode
+    """Backward-compatible alias."""
+    return is_session_repeat_discipline_day(state, snap, day_mode=day_mode)
 
-    dm = _resolve_chop_rally_day_mode(day_mode, state=state, snap=snap)
-    return dm == "CHOP + RALLY"
+
+def _open_cap(settings: Any) -> int:
+    cap = getattr(settings, "session_repeat_discipline_max_open_legs_per_symbol_side", None)
+    if cap is None:
+        cap = getattr(settings, "chop_rally_max_open_legs_per_symbol_side", 1)
+    return int(cap or 1)
+
+
+def _block_same_strike_after_loss(settings: Any) -> bool:
+    v = getattr(settings, "session_repeat_discipline_block_same_strike_after_loss", None)
+    if v is None:
+        return bool(getattr(settings, "chop_rally_block_same_strike_after_loss", True))
+    return bool(v)
+
+
+def _require_fresh_base_after_win(settings: Any) -> bool:
+    v = getattr(settings, "session_repeat_discipline_same_strike_post_win_requires_fresh_base", None)
+    if v is None:
+        return bool(getattr(settings, "chop_rally_same_strike_post_win_requires_fresh_base", True))
+    return bool(v)
+
+
+def _blowout_pct(settings: Any) -> float:
+    v = getattr(settings, "session_repeat_discipline_same_strike_post_win_max_premium_above_win_entry_pct", None)
+    if v is None:
+        v = getattr(settings, "chop_rally_same_strike_post_win_max_premium_above_win_entry_pct", 22.0)
+    return float(v or 22.0)
 
 
 def chop_rally_symbol_side_open_cap_blocked(
@@ -37,13 +128,13 @@ def chop_rally_symbol_side_open_cap_blocked(
     snap: Optional[SymbolSnapshot] = None,
     day_mode: str = "",
 ) -> tuple[bool, str, dict[str, Any]]:
-    """Block a second open explosion on the same index + side (Oct30 22950 + 23050 CE)."""
-    meta: dict[str, Any] = {"chopRallyOpenCap": False}
-    if not is_chop_rally_day(state, snap, day_mode=day_mode):
+    """Block a second open explosion on the same index + side."""
+    meta: dict[str, Any] = {"sessionRepeatOpenCap": False}
+    if not is_session_repeat_discipline_day(state, snap, day_mode=day_mode):
         return False, "", meta
 
     settings = get_settings()
-    cap = int(getattr(settings, "chop_rally_max_open_legs_per_symbol_side", 1) or 1)
+    cap = _open_cap(settings)
     if cap < 1:
         return False, "", meta
 
@@ -71,10 +162,16 @@ def chop_rally_symbol_side_open_cap_blocked(
             continue
         open_count += 1
 
-    meta.update({"openExplosionLegs": open_count, "cap": cap, "chopRallyOpenCap": True})
+    meta.update({
+        "openExplosionLegs": open_count,
+        "cap": cap,
+        "sessionRepeatOpenCap": True,
+        "chopRallyOpenCap": True,
+    })
     if open_count >= cap:
-        reason = "chop_rally_one_open_leg_per_symbol_side"
+        reason = "session_one_open_leg_per_symbol_side"
         meta["reason"] = reason
+        meta["legacyReason"] = "chop_rally_one_open_leg_per_symbol_side"
         return True, reason, meta
     return False, "", meta
 
@@ -91,9 +188,9 @@ def chop_rally_same_strike_reentry_discipline_blocked(
     snap: Optional[SymbolSnapshot] = None,
     day_mode: str = "",
 ) -> tuple[bool, str, dict[str, Any]]:
-    """Same-strike reentry on CHOP + RALLY: no restack after loss; win only via fresh base."""
-    meta: dict[str, Any] = {"chopRallySameStrikeDiscipline": False}
-    if not is_chop_rally_day(state, snap, day_mode=day_mode):
+    """Same-strike reentry: no restack after loss; win only via fresh base (+ 22% blowout)."""
+    meta: dict[str, Any] = {"sessionRepeatSameStrikeDiscipline": False}
+    if not is_session_repeat_discipline_day(state, snap, day_mode=day_mode):
         return False, "", meta
 
     settings = get_settings()
@@ -113,16 +210,18 @@ def chop_rally_same_strike_reentry_discipline_blocked(
         getattr(prior, "pnlInr", 0) or getattr(prior, "pnl_inr", 0) or 0
     )
     meta["priorPnlInr"] = round(prior_pnl, 2)
+    meta["sessionRepeatSameStrikeDiscipline"] = True
     meta["chopRallySameStrikeDiscipline"] = True
 
     if prior_pnl < -1e-6:
-        if bool(getattr(settings, "chop_rally_block_same_strike_after_loss", True)):
-            reason = "chop_rally_same_strike_loss_no_restack"
+        if _block_same_strike_after_loss(settings):
+            reason = "session_same_strike_loss_no_restack"
             meta["reason"] = reason
+            meta["legacyReason"] = "chop_rally_same_strike_loss_no_restack"
             return True, reason, meta
         return False, "", meta
 
-    if not bool(getattr(settings, "chop_rally_same_strike_post_win_requires_fresh_base", True)):
+    if not _require_fresh_base_after_win(settings):
         return False, "", meta
 
     side_enum = side if isinstance(side, Side) else Side.CALL if _side_str(side) == "CALL" else Side.PUT
@@ -137,14 +236,12 @@ def chop_rally_same_strike_reentry_discipline_blocked(
     )
     meta["freshBaseCheck"] = fresh_meta
     if not fresh_ok:
-        reason = "chop_rally_same_strike_requires_fresh_base"
+        reason = "session_same_strike_requires_fresh_base"
         meta["reason"] = reason
+        meta["legacyReason"] = "chop_rally_same_strike_requires_fresh_base"
         return True, reason, meta
 
-    max_pct = float(
-        getattr(settings, "chop_rally_same_strike_post_win_max_premium_above_win_entry_pct", 22.0)
-        or 22.0
-    )
+    max_pct = _blowout_pct(settings)
     blow_b, blow_r, blow_m = same_strike_post_win_premium_blowout_blocked(
         state,
         symbol=symbol,
