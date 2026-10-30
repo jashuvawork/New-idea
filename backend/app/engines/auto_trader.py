@@ -905,6 +905,18 @@ async def _open_from_candidate(
                     trap_meta, trap_reason=trap_reason,
                 )
 
+        from app.engines.chop_day_guards import (
+            chop_midday_post_win_different_strike_explosion_blocked,
+        )
+
+        chop_ladder_block, chop_ladder_reason, _chop_ladder_meta = (
+            chop_midday_post_win_different_strike_explosion_blocked(
+                candidate, snap, state, ict=trap_ict, settings=settings,
+            )
+        )
+        if chop_ladder_block:
+            return False, chop_ladder_reason
+
         from app.engines.best_trade_policy import (
             best_trade_chop_deep_chase_blocked,
             expiry_cheap_otm_entry_blocked,

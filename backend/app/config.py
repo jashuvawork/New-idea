@@ -452,6 +452,11 @@ class Settings(BaseSettings):
     symmetric_chop_counter_trend_guard_enabled: bool = False
     chop_post_win_afternoon_block_enabled: bool = False
     chop_post_win_afternoon_min_win_inr: float = 2000.0
+    # Midday chop window + post-win + different strike: block explosion ladder; waive fresh sudden lift / #866 / adjacent peak-keep.
+    chop_midday_post_win_different_strike_block_enabled: bool = True
+    chop_midday_post_win_min_win_inr: float = 2000.0
+    chop_midday_post_win_fresh_lift_max_base_rel_pct: float = 10.0
+    chop_midday_post_win_fresh_sudden_lift_min_velocity_3s: float = 0.65
     # Sep-9 best trades: allow FTV + V near-base; block generic EXPLOSIVE mid-rip chase.
     elite_trade_v_rip_only_enabled: bool = False
     elite_trade_block_explosive_chase_enabled: bool = True
