@@ -207,13 +207,18 @@ def test_explosion_entries_allowed_915_to_920(mock_phase, mock_settings, mock_mi
 
 
 @patch("app.engines.morning_premium_capture.in_premium_capture_window", return_value=True)
+@patch("app.engines.directional_lock.get_settings")
 @patch("app.engines.morning_premium_capture.get_settings")
-def test_directional_lock_bypassed_for_premium_led_put(mock_settings, mock_window):
+def test_directional_lock_bypassed_for_premium_led_put(
+    mock_settings, mock_lock_settings, mock_window,
+):
     from app.engines.directional_lock import check_directional_side_lock
 
     s = mock_settings.return_value
     _mock_premium_settings(s)
     s.directional_side_lock_enabled = True
+    s.symmetric_best_trade_capture_enabled = False
+    mock_lock_settings.return_value = s
 
     snap = SymbolSnapshot(
         symbol="NIFTY",

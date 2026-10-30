@@ -2121,8 +2121,8 @@ class Settings(BaseSettings):
     explosion_high_premium_threshold_inr: float = 90.0
     explosion_high_premium_lot_cap: int = 15
 
-    # Directional lock — aligned side default; CE↔PE switch only on full confirmation
-    directional_side_lock_enabled: bool = True
+    # Directional lock — off by default (#676 pad book does not sticky-lock CE↔PE; flip uses index/breadth gates only).
+    directional_side_lock_enabled: bool = False
     directional_sticky_per_symbol: bool = True
     directional_lock_use_chart: bool = True
     directional_lock_block_chart_counter: bool = True
