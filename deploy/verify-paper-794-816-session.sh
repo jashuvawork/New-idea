@@ -18,11 +18,14 @@ with urllib.request.urlopen(url, timeout=20) as resp:
 f = d.get("flags") or {}
 failed = []
 
-entry_want = os.environ.get("EXPECT_ENTRY_EARLIEST", "09:20")
+entry_want = os.environ.get("EXPECT_ENTRY_EARLIEST", "09:15")
+open_setup_want = os.environ.get("EXPECT_OPEN_SETUP_START", "09:15")
 checks = [
     ("paperTrading", True),
     ("enableLiveTrading", False),
     ("entryEarliestIst", entry_want),
+    ("openSetupStartIst", open_setup_want),
+    ("openCautionUntilIst", os.environ.get("EXPECT_OPEN_CAUTION_UNTIL", "09:45")),
     ("paperLiveParityEnabled", False),
 ]
 
