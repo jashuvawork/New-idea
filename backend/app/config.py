@@ -3580,7 +3580,8 @@ class Settings(BaseSettings):
     elite_ride_max_tp_enabled: bool = True
     # 3) Whipsaw flip — after a same-session WIN on the opposite side, don't max-size the
     #    counter-flip (Aug6: CALLs won, then a max-size PUT flip lost). Cap flip size.
-    explosion_whipsaw_flip_guard_enabled: bool = True
+    # Off by default: do not cap/block opposite-side entries after a session win (flip sizing uses normal paths).
+    explosion_whipsaw_flip_guard_enabled: bool = False
     explosion_whipsaw_flip_lookback_seconds: int = 3600
     explosion_whipsaw_flip_lot_cap: int = 8
     # After opposite-side win, weak tape flips are blocked (Aug6 PUT v3=0.54).
