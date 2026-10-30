@@ -637,6 +637,8 @@ async def _open_from_candidate(
     if candidate.mode == "explosion":
         from app.engines.session_mode_feedback import (
             exhausted_ftv_reentry_blocked,
+            open_duplicate_leg_blocked,
+            same_strike_post_win_premium_blowout_blocked,
             win_reentry_velocity_blocked,
             failed_launch_reentry_blocked,
             peak_fade_same_side_reentry_blocked,
@@ -646,6 +648,15 @@ async def _open_from_candidate(
             session_same_side_loss_reentry_blocked,
             session_same_strike_loss_reentry_blocked,
         )
+
+        dup_blocked, dup_reason, _dup_meta = open_duplicate_leg_blocked(
+            state,
+            symbol=symbol,
+            side=candidate.side,
+            strike=float(candidate.strike or 0),
+        )
+        if dup_blocked:
+            return False, dup_reason or "same_leg_already_open"
 
         fail_blocked, _fail_meta = failed_launch_reentry_blocked(
             state,
@@ -663,6 +674,21 @@ async def _open_from_candidate(
         )
         if peak_fade_blocked:
             return False, "peak_fade_same_side_reentry_cooldown"
+
+        blowout_blocked, blowout_reason, _blowout_meta = (
+            same_strike_post_win_premium_blowout_blocked(
+                state,
+                symbol=symbol,
+                side=candidate.side,
+                strike=float(candidate.strike or 0),
+                premium=float(candidate.premium or 0),
+                velocity_3s=float(
+                    getattr(candidate.explosion_event, "velocity_3s", 0) or 0
+                ),
+            )
+        )
+        if blowout_blocked:
+            return False, blowout_reason or "same_strike_post_win_premium_blowout"
 
         strike_loss_blocked, _strike_loss_meta = session_same_strike_loss_reentry_blocked(
             state,
@@ -906,16 +932,16 @@ async def _open_from_candidate(
                 )
 
         from app.engines.chop_day_guards import (
-            chop_midday_post_win_different_strike_explosion_blocked,
+            post_win_different_strike_explosion_blocked,
         )
 
-        chop_ladder_block, chop_ladder_reason, _chop_ladder_meta = (
-            chop_midday_post_win_different_strike_explosion_blocked(
+        post_win_ladder_block, post_win_ladder_reason, _post_win_ladder_meta = (
+            post_win_different_strike_explosion_blocked(
                 candidate, snap, state, ict=trap_ict, settings=settings,
             )
         )
-        if chop_ladder_block:
-            return False, chop_ladder_reason
+        if post_win_ladder_block:
+            return False, post_win_ladder_reason
 
         from app.engines.best_trade_policy import (
             best_trade_chop_deep_chase_blocked,

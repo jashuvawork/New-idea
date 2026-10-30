@@ -642,6 +642,111 @@ def same_strike_post_win_fresh_base_reentry(
     return True, meta
 
 
+def same_strike_post_win_premium_blowout_blocked(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    premium: float,
+    velocity_3s: float = 0.0,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Block same-strike re-entry far above the prior winning entry premium (Oct30 22950 chase)."""
+    settings = get_settings()
+    meta: dict[str, Any] = {"sameStrikePostWinPremiumBlowout": False}
+    if not bool(
+        getattr(settings, "same_strike_post_win_premium_blowout_block_enabled", True)
+    ):
+        return False, "", meta
+    if state is None:
+        return False, "", meta
+
+    lookback = float(
+        getattr(settings, "post_win_late_reentry_waive_lookback_seconds", 14400) or 14400
+    )
+    prior, age = _latest_same_strike_win_close(
+        state,
+        symbol=symbol,
+        side=side,
+        strike=strike,
+        max_age_seconds=lookback,
+    )
+    if prior is None:
+        return False, "", meta
+
+    win_entry = float(
+        getattr(prior, "entryPremium", None)
+        or getattr(prior, "entry_premium", None)
+        or 0
+    )
+    if win_entry <= 0:
+        return False, "", meta
+
+    max_pct = float(
+        getattr(settings, "same_strike_post_win_max_premium_above_win_entry_pct", 28.0)
+        or 28.0
+    )
+    min_v = float(
+        getattr(settings, "same_strike_post_win_premium_blowout_min_velocity_3s", 2.5)
+        or 2.5
+    )
+    prem = float(premium or 0)
+    ceiling = win_entry * (1.0 + max_pct / 100.0)
+    meta.update({
+        "priorWinTradeId": getattr(prior, "id", None),
+        "priorWinEntryPremium": round(win_entry, 2),
+        "candidatePremium": round(prem, 2),
+        "premiumCeiling": round(ceiling, 2),
+        "secondsSinceWinClose": round(age, 1),
+    })
+    if prem <= ceiling + 1e-6:
+        return False, "", meta
+    if float(velocity_3s or 0) >= min_v - 1e-6:
+        meta["blowoutBypass"] = "hot_velocity"
+        return False, "", meta
+
+    meta["sameStrikePostWinPremiumBlowout"] = True
+    reason = "same_strike_post_win_premium_blowout"
+    meta["reason"] = reason
+    return True, reason, meta
+
+
+def open_duplicate_leg_blocked(
+    state: AutoTraderState | None,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Block a second open leg on the same symbol+side+strike (Oct30 duplicate 23050 CE)."""
+    settings = get_settings()
+    meta: dict[str, Any] = {"duplicateOpenLegGuard": False}
+    if not bool(getattr(settings, "block_duplicate_open_leg", True)):
+        return False, "", meta
+    if state is None or float(strike or 0) <= 0:
+        return False, "", meta
+
+    sym = str(symbol or "").upper()
+    side_v = _side_key(side)
+    strike_f = float(strike)
+    for t in getattr(state, "openPaperTrades", []) or []:
+        if str(getattr(t, "status", "OPEN") or "").upper() != "OPEN":
+            continue
+        if str(getattr(t, "symbol", "") or "").upper() != sym:
+            continue
+        if _side_key(getattr(t, "side", "")) != side_v:
+            continue
+        if abs(float(getattr(t, "strike", 0) or 0) - strike_f) > 0.01:
+            continue
+        meta.update({
+            "duplicateOpenLegGuard": True,
+            "openTradeId": getattr(t, "id", None),
+            "reason": "same_leg_already_open",
+        })
+        return True, "same_leg_already_open", meta
+    return False, "", meta
+
+
 def fresh_base_pretrade_meta_from_alert(alert: Any) -> dict[str, Any]:
     """Copy fresh-base reentry stamp from a radar alert into candidate pretrade_meta."""
     if not isinstance(alert, dict) or not alert.get("sameStrikePostWinFreshBase"):
@@ -1779,11 +1884,19 @@ def session_same_strike_loss_reentry_blocked(
     if not getattr(settings, "session_same_strike_loss_reentry_enabled", True):
         return False, meta
 
+    strike_f = float(strike or 0)
+    dup_blocked, dup_reason, dup_meta = open_duplicate_leg_blocked(
+        state, symbol=symbol, side=side, strike=strike_f,
+    )
+    if dup_blocked:
+        meta.update(dup_meta)
+        return True, meta
+
     prior = _latest_same_strike_explosion_close(
         state,
         symbol=symbol,
         side=side,
-        strike=float(strike or 0),
+        strike=strike_f,
     )
     if prior is None:
         return False, meta

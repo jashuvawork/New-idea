@@ -119,11 +119,13 @@ class RiskEngine:
                     return False, "per_trade_risk_exceeded"
 
         if not is_swing and settings.block_duplicate_open_leg and strike > 0:
+            side_v = side.value if isinstance(side, Side) else str(side or "").upper()
             for t in open_trades:
+                t_side = t.side.value if isinstance(t.side, Side) else str(t.side or "").upper()
                 if (
                     t.strategyType != StrategyType.SWING
                     and t.symbol.upper() == symbol.upper()
-                    and t.side == side
+                    and t_side == side_v
                     and abs(float(t.strike) - float(strike)) < 0.01
                 ):
                     return False, "same_leg_already_open"

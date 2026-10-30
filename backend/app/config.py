@@ -457,6 +457,13 @@ class Settings(BaseSettings):
     chop_midday_post_win_min_win_inr: float = 2000.0
     chop_midday_post_win_fresh_lift_max_base_rel_pct: float = 10.0
     chop_midday_post_win_fresh_sudden_lift_min_velocity_3s: float = 0.65
+    # All session after a win: block different-strike explosion ladder (Oct30 23150/23050); same waivers as midday guard.
+    session_post_win_different_strike_block_enabled: bool = True
+    session_post_win_different_strike_min_win_inr: float = 2000.0
+    # Same strike re-entry after win only when premium is not far above the winning entry (Oct30 22950 @ ~168 vs ~94).
+    same_strike_post_win_premium_blowout_block_enabled: bool = True
+    same_strike_post_win_max_premium_above_win_entry_pct: float = 28.0
+    same_strike_post_win_premium_blowout_min_velocity_3s: float = 2.5
     # Sep-9 best trades: allow FTV + V near-base; block generic EXPLOSIVE mid-rip chase.
     elite_trade_v_rip_only_enabled: bool = False
     elite_trade_block_explosive_chase_enabled: bool = True
