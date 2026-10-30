@@ -1,4 +1,4 @@
-"""Open index lanes (09:20–09:45): SENSEX CALL default, NIFTY PUT opt-in."""
+"""Open index lanes (09:15–09:45): SENSEX CALL default, NIFTY PUT opt-in."""
 
 from __future__ import annotations
 
@@ -123,8 +123,11 @@ def test_open_index_lane_qualified_requires_passed_quality():
 
 
 def test_in_open_caution_window_at_boundaries():
-    s = Settings()
+    t914 = datetime(2026, 10, 21, 9, 14, tzinfo=IST)
+    t915 = datetime(2026, 10, 21, 9, 15, tzinfo=IST)
     t920 = datetime(2026, 10, 21, 9, 20, tzinfo=IST)
     t945 = datetime(2026, 10, 21, 9, 45, tzinfo=IST)
+    assert in_open_caution_window_at(t914) is False
+    assert in_open_caution_window_at(t915) is True
     assert in_open_caution_window_at(t920) is True
     assert in_open_caution_window_at(t945) is False
