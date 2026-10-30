@@ -908,11 +908,43 @@ def validate_candidate(
         return False, reason, meta
 
     if getattr(candidate, "mode", "") == "explosion":
+        from app.engines.chop_rally_session_discipline import (
+            chop_rally_same_strike_reentry_discipline_blocked,
+            chop_rally_symbol_side_open_cap_blocked,
+        )
         from app.engines.session_mode_feedback import (
             peak_fade_same_side_reentry_blocked,
             session_same_side_loss_reentry_blocked,
             session_same_strike_loss_reentry_blocked,
         )
+
+        _snap = getattr(candidate, "snap", None)
+        _alert = getattr(candidate, "alert", None)
+        cr_open, cr_open_reason, cr_open_meta = chop_rally_symbol_side_open_cap_blocked(
+            state,
+            symbol=str(getattr(candidate, "symbol", "") or ""),
+            side=getattr(candidate, "side", ""),
+            snap=_snap,
+        )
+        if cr_open:
+            meta.update({"chopRallyOpenCapBlocked": True, **cr_open_meta})
+            return False, cr_open_reason, meta
+
+        cr_strike, cr_strike_reason, cr_strike_meta = (
+            chop_rally_same_strike_reentry_discipline_blocked(
+                state,
+                symbol=str(getattr(candidate, "symbol", "") or ""),
+                side=getattr(candidate, "side", ""),
+                strike=float(getattr(candidate, "strike", 0) or 0),
+                premium=float(getattr(candidate, "premium", 0) or 0),
+                velocity_3s=float(getattr(candidate, "velocity_3s", 0) or 0),
+                alert=_alert if isinstance(_alert, dict) else None,
+                snap=_snap,
+            )
+        )
+        if cr_strike:
+            meta.update({"chopRallySameStrikeBlocked": True, **cr_strike_meta})
+            return False, cr_strike_reason, meta
 
         peak_fade_blocked, peak_fade_meta = peak_fade_same_side_reentry_blocked(
             state,
