@@ -127,6 +127,14 @@ def in_midday_chop_window() -> bool:
     return start <= current < end
 
 
+def in_regular_explosion_session_window() -> bool:
+    """09:20–15:30 IST — standard intraday explosion entry window."""
+    allowed, _ = entries_allowed_now()
+    if not allowed:
+        return False
+    return _minutes_now() < 15 * 60 + 30
+
+
 def entry_window_label() -> str:
     settings = get_settings()
     return f"{settings.entry_earliest_hour:02d}:{settings.entry_earliest_minute:02d} IST"

@@ -11,6 +11,7 @@ import pytest
 
 from app.engines.chop_day_guards import (
     chop_midday_post_win_different_strike_explosion_blocked,
+    post_win_different_strike_explosion_blocked,
 )
 from tests.mock_defaults import settings_mock
 

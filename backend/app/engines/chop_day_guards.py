@@ -1142,7 +1142,30 @@ def _chop_post_win_fresh_sudden_lift_ok(
     return False, meta["reason"], meta
 
 
-def chop_midday_post_win_different_strike_explosion_blocked(
+def _post_win_different_strike_block_window_active(
+    settings: Any,
+) -> tuple[bool, str]:
+    from app.engines.session_timing import (
+        in_midday_chop_window,
+        in_regular_explosion_session_window,
+    )
+
+    all_day = bool(
+        getattr(settings, "session_post_win_different_strike_block_enabled", True)
+    )
+    midday = bool(
+        getattr(settings, "chop_midday_post_win_different_strike_block_enabled", True)
+    )
+    in_midday = in_midday_chop_window()
+    in_session = in_regular_explosion_session_window()
+    if all_day and in_session:
+        return True, "session_post_win_window"
+    if midday and in_midday:
+        return True, "midday_chop_window"
+    return False, "outside_post_win_block_windows"
+
+
+def post_win_different_strike_explosion_blocked(
     candidate: Any,
     snap: SymbolSnapshot,
     state: Any = None,
@@ -1151,22 +1174,18 @@ def chop_midday_post_win_different_strike_explosion_blocked(
     settings: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
-    Block explosion entries on a new strike during midday chop after a session win.
+    Block explosion entries on a new strike after a session win.
 
+    Active in midday chop (11:30–13:30) and/or all regular session (09:20–15:30) per config.
     Waives: adjacent peak-keep continuation, same-strike fresh-base reentry, or fresh sudden lift.
     """
     settings = settings or get_settings()
-    meta: dict[str, Any] = {"chopMiddayPostWinGuard": True}
-    if not bool(
-        getattr(settings, "chop_midday_post_win_different_strike_block_enabled", True)
-    ):
-        meta["chopMiddayPostWinGuard"] = False
-        return False, "", meta
-
-    from app.engines.session_timing import in_midday_chop_window
-
-    if not in_midday_chop_window():
-        meta["reason"] = "outside_midday_chop_window"
+    meta: dict[str, Any] = {"postWinDifferentStrikeGuard": True}
+    window_ok, window_reason = _post_win_different_strike_block_window_active(settings)
+    meta["blockWindow"] = window_reason
+    if not window_ok:
+        meta["postWinDifferentStrikeGuard"] = False
+        meta["reason"] = window_reason
         return False, "", meta
 
     if str(getattr(candidate, "mode", "") or "") != "explosion":
@@ -1182,7 +1201,9 @@ def chop_midday_post_win_different_strike_explosion_blocked(
         return False, "", meta
 
     min_win = float(
-        getattr(settings, "chop_midday_post_win_min_win_inr", 2000.0) or 2000.0
+        getattr(settings, "session_post_win_different_strike_min_win_inr", None)
+        or getattr(settings, "chop_midday_post_win_min_win_inr", 2000.0)
+        or 2000.0
     )
     if float(post_meta.get("lastPnlInr") or 0) < min_win - 1e-6:
         meta["reason"] = "win_below_min_inr"
@@ -1260,10 +1281,28 @@ def chop_midday_post_win_different_strike_explosion_blocked(
         meta["waiver"] = lift_reason
         return False, "", meta
 
+    reason = "post_win_different_strike_explosion_ladder"
     meta.update({
         "action": "block",
         "winStrike": win_strike,
         "candidateStrike": strike,
-        "blockReason": "chop_midday_post_win_explosion_ladder",
+        "blockReason": reason,
     })
-    return True, "chop_midday_post_win_explosion_ladder", meta
+    return True, reason, meta
+
+
+def chop_midday_post_win_different_strike_explosion_blocked(
+    candidate: Any,
+    snap: SymbolSnapshot,
+    state: Any = None,
+    *,
+    ict: Any = None,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Backward-compatible alias for post_win_different_strike_explosion_blocked."""
+    blocked, reason, meta = post_win_different_strike_explosion_blocked(
+        candidate, snap, state, ict=ict, settings=settings,
+    )
+    if blocked and reason == "post_win_different_strike_explosion_ladder":
+        return True, "chop_midday_post_win_explosion_ladder", meta
+    return blocked, reason, meta
