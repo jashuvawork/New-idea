@@ -69,7 +69,11 @@ def test_aug6_trap_soft_cap_not_restored():
         assert cap_fake_explosion_trap_lots(27, meta, bypass_soft_cap=True) == 6
 
 
-def test_aug6_weak_flip_blocked():
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_aug6_weak_flip_blocked(mock_gs):
+    from tests.mock_defaults import settings_mock
+
+    mock_gs.return_value = settings_mock(explosion_whipsaw_flip_guard_enabled=True)
     state = AutoTraderState()
     state.closedPaperTrades = [
         PaperTrade(

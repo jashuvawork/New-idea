@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from app.engines.explosion_profit import evaluate_explosion_exit
 from app.engines.session_mode_feedback import cap_opposite_side_flip_after_win
 from app.models.schemas import AutoTraderState, PaperTrade, Side, StrategyType
+from tests.mock_defaults import settings_mock
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -227,8 +228,10 @@ def _closed(side, pnl, symbol="SENSEX", mins_ago=10):
     )
 
 
-def test_whipsaw_flip_caps_after_opposite_side_win():
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_whipsaw_flip_caps_after_opposite_side_win(mock_gs):
     """CALLs won this session → a hot PUT flip is capped (Aug6 size mechanism)."""
+    mock_gs.return_value = settings_mock(explosion_whipsaw_flip_guard_enabled=True)
     state = AutoTraderState()
     state.closedPaperTrades = [_closed(Side.CALL, 24000.0)]
     lots, meta = cap_opposite_side_flip_after_win(
@@ -240,8 +243,10 @@ def test_whipsaw_flip_caps_after_opposite_side_win():
     assert meta["flipFromWinSide"] == "CALL"
 
 
-def test_whipsaw_flip_blocks_weak_velocity():
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_whipsaw_flip_blocks_weak_velocity(mock_gs):
     """Aug6 PUT v3=0.54 after CALL wins — weak flip is blocked, not just sized down."""
+    mock_gs.return_value = settings_mock(explosion_whipsaw_flip_guard_enabled=True)
     state = AutoTraderState()
     state.closedPaperTrades = [_closed(Side.CALL, 24000.0)]
     lots, meta = cap_opposite_side_flip_after_win(
@@ -252,8 +257,10 @@ def test_whipsaw_flip_blocks_weak_velocity():
     assert meta["blockReason"] == "whipsaw_flip_velocity_below_breakout"
 
 
-def test_whipsaw_flip_no_cap_same_side():
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_whipsaw_flip_no_cap_same_side(mock_gs):
     """Same side as the winner (CALL after CALL win) — not a flip, no cap."""
+    mock_gs.return_value = settings_mock(explosion_whipsaw_flip_guard_enabled=True)
     state = AutoTraderState()
     state.closedPaperTrades = [_closed(Side.CALL, 24000.0)]
     lots, meta = cap_opposite_side_flip_after_win(
@@ -263,8 +270,10 @@ def test_whipsaw_flip_no_cap_same_side():
     assert meta["applied"] is False
 
 
-def test_whipsaw_flip_no_cap_after_opposite_loss():
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_whipsaw_flip_no_cap_after_opposite_loss(mock_gs):
     """Opposite side LOST (not a win) → no whipsaw cap."""
+    mock_gs.return_value = settings_mock(explosion_whipsaw_flip_guard_enabled=True)
     state = AutoTraderState()
     state.closedPaperTrades = [_closed(Side.CALL, -5000.0)]
     lots, meta = cap_opposite_side_flip_after_win(
@@ -274,12 +283,12 @@ def test_whipsaw_flip_no_cap_after_opposite_loss():
     assert meta["applied"] is False
 
 
-def test_always_max_does_not_undo_whipsaw_flip_cap():
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_always_max_does_not_undo_whipsaw_flip_cap(mock_gs):
     """Aug6 pattern: whipsaw cap to 8 lots must not be re-floored to max lots."""
-    from unittest.mock import patch
-
     from app.engines.capital_allocator import apply_explosion_always_max_lots
 
+    mock_gs.return_value = settings_mock(explosion_whipsaw_flip_guard_enabled=True)
     state = AutoTraderState()
     state.closedPaperTrades = [_closed(Side.CALL, 24000.0)]
     lots, flip_cap_meta = cap_opposite_side_flip_after_win(
@@ -298,3 +307,17 @@ def test_always_max_does_not_undo_whipsaw_flip_cap():
                 lots, "SENSEX", 50.0, mode="explosion",
             )
     assert lots == 8
+
+
+@patch("app.engines.session_mode_feedback.get_settings")
+def test_whipsaw_flip_guard_off_allows_full_lots_after_opposite_win(mock_gs):
+    """Production default: no post-win opposite-side lot cap or velocity block."""
+    mock_gs.return_value = settings_mock()
+    state = AutoTraderState()
+    state.closedPaperTrades = [_closed(Side.CALL, 24000.0)]
+    lots, meta = cap_opposite_side_flip_after_win(
+        27, state, symbol="SENSEX", side=Side.PUT, velocity_3s=0.54,
+    )
+    assert lots == 27
+    assert meta["applied"] is False
+    assert meta.get("blocked") is False

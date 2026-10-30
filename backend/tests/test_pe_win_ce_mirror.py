@@ -248,11 +248,17 @@ def test_call_rally_entry_unlock_armed_prefers_mirror(_mock_mirror, mock_rally):
     mock_rally.assert_not_called()
 
 
+@patch("app.engines.directional_lock.get_settings")
 @patch("app.engines.aligned_side_guard.breadth_hard_blocks_side", return_value=(False, "ok"))
 @patch("app.engines.best_trade_policy.call_pe_parity_from_candidate", return_value=True)
-def test_directional_lock_uses_mirror_state(mock_parity, _mock_breadth):
+def test_directional_lock_uses_mirror_state(mock_parity, _mock_breadth, mock_lock_settings):
     from app.engines.directional_lock import check_directional_side_lock
+    from tests.mock_defaults import settings_mock
 
+    mock_lock_settings.return_value = settings_mock(
+        directional_side_lock_enabled=True,
+        symmetric_best_trade_capture_enabled=False,
+    )
     snap = _rally_snap()
     cand = SimpleNamespace(side=Side.CALL, alert={"tier": "ELITE"}, symbol="NIFTY")
     blocked, reason = check_directional_side_lock(

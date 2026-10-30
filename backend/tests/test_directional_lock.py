@@ -158,3 +158,18 @@ def test_reset_clears_sticky_lock():
     assert session_locked_side("NIFTY") == "CALL"
     reset_directional_lock()
     assert session_locked_side("NIFTY") is None
+
+
+@patch("app.engines.directional_lock.get_settings")
+def test_production_default_directional_lock_off(mock_gs):
+    """Live Settings default: no CE↔PE sticky lock (676-style book)."""
+    from tests.mock_defaults import settings_mock
+
+    mock_gs.return_value = settings_mock()
+    reset_directional_lock()
+    record_trade_side("NIFTY", Side.CALL, _snap(bias="BULLISH"))
+    blocked, reason = check_directional_side_lock(
+        "NIFTY", Side.PUT, _snap(bias="BULLISH", velocity=0.5, explosion_side="PUT", explosion_score=40),
+    )
+    assert blocked is False
+    assert reason == "ok"
