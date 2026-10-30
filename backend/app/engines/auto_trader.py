@@ -875,6 +875,7 @@ async def _open_from_candidate(
     stop_pts = 8.0 if candidate.strategy_type == StrategyType.SWING else profile.stopPoints
     faded_rip_meta: dict[str, Any] = {}
     trap_meta: dict[str, Any] = {}
+    trap_reason: str = ""
     from app.engines.explosion_entry_guards import trap_post_small_win_active
 
     early_base_entry_ready = False
@@ -898,7 +899,11 @@ async def _open_from_candidate(
             from app.engines.building_ftv_gates import building_rip_bypasses_fake_trap
 
             if not building_rip_bypasses_fake_trap(candidate=candidate):
-                return False, trap_reason
+                from app.engines.explosion_entry_guards import fake_explosion_trap_reject_reason
+
+                return False, fake_explosion_trap_reject_reason(
+                    trap_meta, trap_reason=trap_reason,
+                )
 
         from app.engines.best_trade_policy import (
             best_trade_chop_deep_chase_blocked,
@@ -1693,7 +1698,11 @@ async def _open_from_candidate(
         elevated_size = False
 
     if candidate.mode == "explosion" and trap_meta:
-        from app.engines.explosion_entry_guards import cap_fake_explosion_trap_lots
+        from app.engines.building_ftv_gates import building_rip_bypasses_fake_trap
+        from app.engines.explosion_entry_guards import (
+            cap_fake_explosion_trap_lots,
+            fake_explosion_trap_reject_reason,
+        )
 
         if index_confirmed_ftv:
             trap_meta["indexConfirmedFtv"] = True
@@ -1715,11 +1724,14 @@ async def _open_from_candidate(
                 )
             )
         ) or index_confirmed_ftv
-        lots = cap_fake_explosion_trap_lots(
-            lots, trap_meta, bypass_soft_cap=bypass_soft,
-        )
-        if lots <= 0:
-            return False, str(trap_meta.get("action") or "fake_explosion_trap")
+        if not building_rip_bypasses_fake_trap(candidate=candidate):
+            lots = cap_fake_explosion_trap_lots(
+                lots, trap_meta, bypass_soft_cap=bypass_soft,
+            )
+            if lots <= 0:
+                return False, fake_explosion_trap_reject_reason(
+                    trap_meta, trap_reason=trap_reason,
+                )
     skip_first_green = always_max_entry or (
         force_max_size and (
             high_conviction

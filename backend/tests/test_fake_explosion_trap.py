@@ -10,6 +10,7 @@ from app.engines.explosion_detector import ExplosionEvent
 from app.engines.explosion_entry_guards import (
     cap_fake_explosion_trap_lots,
     detect_fake_explosion_trap,
+    fake_explosion_trap_reject_reason,
 )
 from app.engines.ict_breakout_monitor import ICTBreakoutSignal
 from app.engines.pretrade_validator import TradeRecord
@@ -845,3 +846,16 @@ def test_trap_soft_cap_honor_bypassed_for_index_confirmed_ftv():
     }
     assert _trap_soft_cap_must_honor(meta) is False
     assert cap_fake_explosion_trap_lots(17, meta, bypass_soft_cap=True) == 17
+
+
+def test_fake_trap_reject_reason_never_bare_block():
+    assert fake_explosion_trap_reject_reason(
+        {"action": "block", "fakeExplosionTrap": True},
+        trap_reason="block",
+    ) == "fake_explosion_trap_block"
+    assert fake_explosion_trap_reject_reason(
+        {"action": "cut_size", "fakeExplosionTrap": True, "lotCap": 0},
+    ) == "fake_explosion_trap_lot_cap"
+    assert fake_explosion_trap_reject_reason(
+        {"action": "block", "postWinVelocityBlock": True, "fakeExplosionTrap": True},
+    ) == "fake_explosion_trap_post_win_cold_velocity"
