@@ -1030,3 +1030,240 @@ def chop_post_win_afternoon_fomo_risk(
         f"last_pnl_{last_pnl:.0f}",
     ]
     return True, reasons
+
+
+def _last_closed_same_side_win(
+    state: Any,
+    *,
+    symbol: str,
+    side: str,
+    min_pnl_inr: float,
+) -> tuple[Any | None, dict[str, Any]]:
+    """Most recent closed green on this index + side (for post-win chop ladder guard)."""
+    meta: dict[str, Any] = {}
+    if state is None:
+        return None, meta
+    try:
+        from app.engines.pretrade_validator import collect_session_trades
+        from app.engines.session_mode_feedback import _side_key
+
+        trades = list(collect_session_trades(state) or [])
+    except Exception:
+        return None, meta
+
+    sym = str(symbol or "").upper()
+    side_u = _side_key(side)
+    for trade in reversed(trades):
+        status = str(
+            getattr(trade, "status", trade.get("status") if isinstance(trade, dict) else "")
+            or ""
+        ).upper()
+        if status != "CLOSED":
+            continue
+        tsym = str(
+            getattr(trade, "symbol", None)
+            or (trade.get("symbol") if isinstance(trade, dict) else "")
+            or ""
+        ).upper()
+        if tsym != sym:
+            continue
+        tside = _side_key(
+            getattr(trade, "side", None)
+            or (trade.get("side") if isinstance(trade, dict) else "")
+        )
+        if tside != side_u:
+            continue
+        pnl = float(
+            getattr(trade, "pnl_inr", None)
+            or (trade.get("pnlInr") if isinstance(trade, dict) else 0)
+            or 0
+        )
+        if pnl < min_pnl_inr - 1e-6:
+            continue
+        strike = float(
+            getattr(trade, "strike", None)
+            or (trade.get("strike") if isinstance(trade, dict) else 0)
+            or 0
+        )
+        meta["lastWinStrike"] = strike
+        meta["lastWinPnlInr"] = round(pnl, 2)
+        return trade, meta
+    return None, meta
+
+
+def _chop_post_win_fresh_sudden_lift_ok(
+    *,
+    local_pad: float,
+    velocity_3s: float,
+    ict: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Fresh near-base + real lift (V-rip / first-lift / armed launch), not slow coil chase."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {"freshSuddenLift": False}
+    max_pad = float(
+        getattr(settings, "chop_midday_post_win_fresh_lift_max_base_rel_pct", 10.0) or 10.0
+    )
+    min_v = float(
+        getattr(settings, "chop_midday_post_win_fresh_sudden_lift_min_velocity_3s", 0.65)
+        or 0.65
+    )
+    if local_pad > max_pad + 1e-6:
+        meta["reason"] = "local_pad_extended"
+        return False, meta["reason"], meta
+
+    from app.engines.explosion_entry_guards import fresh_near_local_base
+
+    fresh, fresh_meta = fresh_near_local_base(
+        local_pad=local_pad, ict=ict, alert=alert, settings=settings,
+    )
+    meta.update(fresh_meta)
+    if not fresh:
+        meta["reason"] = "not_fresh_near_base"
+        return False, meta["reason"], meta
+
+    al = alert if isinstance(alert, dict) else {}
+    if getattr(ict, "first_lift", False) or al.get("firstLift") or al.get("armedBaseLaunch"):
+        meta["freshSuddenLift"] = True
+        meta["reason"] = "first_lift_or_armed_launch"
+        return True, meta["reason"], meta
+
+    moment = str(al.get("momentType") or al.get("moment_type") or "").lower()
+    readiness = str(al.get("readinessReason") or al.get("ictBaseReadinessReason") or "").lower()
+    lift_tokens = ("v_rip", "v_base", "first_lift", "armed_base", "building_rip")
+    has_lift_story = any(tok in moment or tok in readiness for tok in lift_tokens)
+    if has_lift_story and velocity_3s >= min_v - 1e-6:
+        meta["freshSuddenLift"] = True
+        meta["reason"] = "v_rip_sudden_lift"
+        return True, meta["reason"], meta
+
+    meta["reason"] = "no_sudden_lift_signal"
+    return False, meta["reason"], meta
+
+
+def chop_midday_post_win_different_strike_explosion_blocked(
+    candidate: Any,
+    snap: SymbolSnapshot,
+    state: Any = None,
+    *,
+    ict: Any = None,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Block explosion entries on a new strike during midday chop after a session win.
+
+    Waives: adjacent peak-keep continuation, same-strike fresh-base reentry, or fresh sudden lift.
+    """
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {"chopMiddayPostWinGuard": True}
+    if not bool(
+        getattr(settings, "chop_midday_post_win_different_strike_block_enabled", True)
+    ):
+        meta["chopMiddayPostWinGuard"] = False
+        return False, "", meta
+
+    from app.engines.session_timing import in_midday_chop_window
+
+    if not in_midday_chop_window():
+        meta["reason"] = "outside_midday_chop_window"
+        return False, "", meta
+
+    if str(getattr(candidate, "mode", "") or "") != "explosion":
+        meta["reason"] = "not_explosion_mode"
+        return False, "", meta
+
+    from app.engines.explosion_entry_guards import _post_session_win
+
+    post_win, post_meta = _post_session_win(state)
+    meta.update(post_meta)
+    if not post_win:
+        meta["reason"] = "no_post_session_win"
+        return False, "", meta
+
+    min_win = float(
+        getattr(settings, "chop_midday_post_win_min_win_inr", 2000.0) or 2000.0
+    )
+    if float(post_meta.get("lastPnlInr") or 0) < min_win - 1e-6:
+        meta["reason"] = "win_below_min_inr"
+        return False, "", meta
+
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    side = getattr(candidate, "side", "")
+    strike = float(getattr(candidate, "strike", 0) or 0)
+    premium = float(getattr(candidate, "premium", 0) or 0)
+    velocity_3s = float(getattr(candidate, "velocity_3s", 0) or 0)
+    alert = getattr(candidate, "alert", None)
+    if not isinstance(alert, dict):
+        alert = {}
+
+    _last, win_meta = _last_closed_same_side_win(
+        state, symbol=sym, side=side, min_pnl_inr=min_win,
+    )
+    meta.update(win_meta)
+    win_strike = float(win_meta.get("lastWinStrike") or 0)
+    if win_strike <= 0 or strike <= 0:
+        meta["reason"] = "missing_strike"
+        return False, "", meta
+    if abs(strike - win_strike) < 1e-6:
+        meta["reason"] = "same_strike_as_last_win"
+        return False, "", meta
+
+    event = getattr(candidate, "explosion_event", None)
+    from app.engines.explosion_entry_guards import effective_local_base_move_pct
+
+    local_pad = float(effective_local_base_move_pct(event, ict) or 0.0)
+    meta["localBaseMovePct"] = round(local_pad, 2)
+
+    from app.engines.session_mode_feedback import (
+        adjacent_strike_post_peak_keep_continuation,
+        same_strike_post_win_fresh_base_reentry,
+    )
+
+    adj_ok, adj_meta = adjacent_strike_post_peak_keep_continuation(
+        state,
+        symbol=sym,
+        side=side,
+        strike=strike,
+        premium=premium,
+        velocity_3s=velocity_3s,
+        alert=alert,
+    )
+    meta["adjacentPeakKeep"] = adj_meta
+    if adj_ok:
+        meta["waiver"] = "adjacent_strike_post_peak_keep_continuation"
+        return False, "", meta
+
+    fresh_ok, fresh_meta = same_strike_post_win_fresh_base_reentry(
+        state,
+        symbol=sym,
+        side=side,
+        strike=strike,
+        premium=premium,
+        velocity_3s=velocity_3s,
+        alert=alert,
+    )
+    meta["sameStrikeFreshBase"] = fresh_meta
+    if fresh_ok:
+        meta["waiver"] = "same_strike_post_win_fresh_base_reentry"
+        return False, "", meta
+
+    lift_ok, lift_reason, lift_meta = _chop_post_win_fresh_sudden_lift_ok(
+        local_pad=local_pad,
+        velocity_3s=velocity_3s,
+        ict=ict,
+        alert=alert,
+        settings=settings,
+    )
+    meta["freshSuddenLiftCheck"] = lift_meta
+    if lift_ok:
+        meta["waiver"] = lift_reason
+        return False, "", meta
+
+    meta.update({
+        "action": "block",
+        "winStrike": win_strike,
+        "candidateStrike": strike,
+        "blockReason": "chop_midday_post_win_explosion_ladder",
+    })
+    return True, "chop_midday_post_win_explosion_ladder", meta
