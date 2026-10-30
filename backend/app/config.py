@@ -464,6 +464,12 @@ class Settings(BaseSettings):
     same_strike_post_win_premium_blowout_block_enabled: bool = True
     same_strike_post_win_max_premium_above_win_entry_pct: float = 28.0
     same_strike_post_win_premium_blowout_min_velocity_3s: float = 2.5
+    # CHOP + RALLY (#676 book): one open leg per index+side; fresh-base-only same-strike reentry; 22% blowout pad.
+    chop_rally_session_discipline_enabled: bool = True
+    chop_rally_max_open_legs_per_symbol_side: int = 1
+    chop_rally_block_same_strike_after_loss: bool = True
+    chop_rally_same_strike_post_win_requires_fresh_base: bool = True
+    chop_rally_same_strike_post_win_max_premium_above_win_entry_pct: float = 22.0
     # Sep-9 best trades: allow FTV + V near-base; block generic EXPLOSIVE mid-rip chase.
     elite_trade_v_rip_only_enabled: bool = False
     elite_trade_block_explosive_chase_enabled: bool = True

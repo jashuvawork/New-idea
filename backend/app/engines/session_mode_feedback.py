@@ -650,6 +650,7 @@ def same_strike_post_win_premium_blowout_blocked(
     strike: float,
     premium: float,
     velocity_3s: float = 0.0,
+    max_premium_above_win_entry_pct: float | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Block same-strike re-entry far above the prior winning entry premium (Oct30 22950 chase)."""
     settings = get_settings()
@@ -683,7 +684,9 @@ def same_strike_post_win_premium_blowout_blocked(
         return False, "", meta
 
     max_pct = float(
-        getattr(settings, "same_strike_post_win_max_premium_above_win_entry_pct", 28.0)
+        max_premium_above_win_entry_pct
+        if max_premium_above_win_entry_pct is not None
+        else getattr(settings, "same_strike_post_win_max_premium_above_win_entry_pct", 28.0)
         or 28.0
     )
     min_v = float(

@@ -658,6 +658,42 @@ async def _open_from_candidate(
         if dup_blocked:
             return False, dup_reason or "same_leg_already_open"
 
+        from app.engines.chop_rally_session_discipline import (
+            chop_rally_same_strike_reentry_discipline_blocked,
+            chop_rally_symbol_side_open_cap_blocked,
+        )
+
+        _alert_raw = getattr(candidate, "alert", None)
+        _alert_dict = _alert_raw if isinstance(_alert_raw, dict) else {}
+        _v3 = float(
+            getattr(candidate.explosion_event, "velocity_3s", 0)
+            if candidate.explosion_event is not None
+            else 0
+        ) or 0.0
+        cr_open, cr_open_reason, _cr_open_meta = chop_rally_symbol_side_open_cap_blocked(
+            state,
+            symbol=symbol,
+            side=candidate.side,
+            snap=snap,
+        )
+        if cr_open:
+            return False, cr_open_reason or "chop_rally_one_open_leg_per_symbol_side"
+
+        cr_strike, cr_strike_reason, _cr_strike_meta = (
+            chop_rally_same_strike_reentry_discipline_blocked(
+                state,
+                symbol=symbol,
+                side=candidate.side,
+                strike=float(candidate.strike or 0),
+                premium=float(candidate.premium or 0),
+                velocity_3s=_v3,
+                alert=_alert_dict,
+                snap=snap,
+            )
+        )
+        if cr_strike:
+            return False, cr_strike_reason or "chop_rally_same_strike_requires_fresh_base"
+
         fail_blocked, _fail_meta = failed_launch_reentry_blocked(
             state,
             symbol=symbol,
