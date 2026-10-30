@@ -2623,6 +2623,35 @@ def _trap_soft_cap_must_honor(trap_meta: dict[str, Any]) -> bool:
     return chopish and (elite_hot or int(trap_meta.get("conflictCount") or 0) >= 3)
 
 
+def fake_explosion_trap_reject_reason(
+    trap_meta: Optional[dict[str, Any]],
+    *,
+    trap_reason: str = "",
+) -> str:
+    """Funnel-safe reject reason — never emit bare meta.action ('block')."""
+    reason = str(trap_reason or "").strip()
+    if reason and reason not in {"ok", "block"}:
+        return reason
+    meta = trap_meta or {}
+    stamped = str(meta.get("blockReason") or meta.get("rejectReason") or "").strip()
+    if stamped and stamped not in {"ok", "block"}:
+        return stamped
+    for flag, code in (
+        ("postWinChopAfternoon", "fake_explosion_trap_chop_post_win_afternoon"),
+        ("postWinAfternoonBlock", "fake_explosion_trap_post_win_afternoon"),
+        ("postWinVelocityBlock", "fake_explosion_trap_post_win_cold_velocity"),
+        ("postWinTopConfidenceBlock", "fake_explosion_trap_post_win_not_top_confidence"),
+    ):
+        if meta.get(flag):
+            return code
+    action = str(meta.get("action") or "")
+    if action == "cut_size":
+        return "fake_explosion_trap_lot_cap"
+    if action == "block":
+        return "fake_explosion_trap_block"
+    return reason or "fake_explosion_trap_lot_cap_zero"
+
+
 def cap_fake_explosion_trap_lots(
     lots: int,
     trap_meta: Optional[dict[str, Any]],
