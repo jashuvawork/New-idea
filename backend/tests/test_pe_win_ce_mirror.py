@@ -19,8 +19,10 @@ from app.engines.pe_win_ce_mirror import (
     pe_win_ce_mirror_armed,
     pe_win_ce_mirror_fingerprint,
     pe_win_ce_mirror_near_miss_waive,
+    pe_win_ce_mirror_premium_fade_bypass,
     pe_win_ce_mirror_put_chase_blocked,
     session_put_win_meta,
+    session_win_side_continuation_ok,
 )
 from app.engines.winner_entry_guards import premium_fading_blocks_entry
 from app.models.schemas import (
@@ -38,6 +40,16 @@ def _put_win_trade(pnl: float = 16000.0) -> SimpleNamespace:
     return SimpleNamespace(
         status="CLOSED",
         side="PUT",
+        symbol="NIFTY",
+        pnl_inr=pnl,
+        exit_reason="explosion_peak_keep_trail",
+    )
+
+
+def _call_win_trade(pnl: float = 16000.0) -> SimpleNamespace:
+    return SimpleNamespace(
+        status="CLOSED",
+        side="CALL",
         symbol="NIFTY",
         pnl_inr=pnl,
         exit_reason="explosion_peak_keep_trail",
@@ -278,3 +290,29 @@ def test_put_chase_blocked_after_put_win_on_other_index(mock_trades, _mock_bo):
     assert blocked is True
     assert reason == "pe_win_ce_mirror_block_cross_index_put"
     assert meta.get("putWinSymbol") == "NIFTY"
+
+
+@patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_armed")
+@patch("app.engines.pe_win_ce_mirror._collect_session_trades")
+def test_session_win_side_continuation_after_call_win(mock_trades, mock_rally_armed):
+    mock_trades.return_value = [_call_win_trade()]
+    mock_rally_armed.return_value = (True, "call_rally_unlock", {"rallyPoints": 120.0})
+    snap = _rally_snap("NIFTY")
+    state = SimpleNamespace()
+    ok, reason, _ = session_win_side_continuation_ok(
+        Side.CALL, state, snap, "NIFTY", settings=Settings(),
+    )
+    assert ok is True
+    assert reason == "call_win_rally_continuation"
+
+
+@patch("app.engines.pe_win_ce_mirror.session_win_side_continuation_ok", return_value=(True, "call_win_rally_continuation", {}))
+def test_premium_fade_bypass_on_call_win_continuation(_mock_cont):
+    snap = _rally_snap("NIFTY")
+    assert pe_win_ce_mirror_premium_fade_bypass(
+        side=Side.CALL,
+        state=SimpleNamespace(),
+        snap=snap,
+        symbol="NIFTY",
+        settings=Settings(),
+    ) is True
