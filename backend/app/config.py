@@ -476,7 +476,7 @@ class Settings(BaseSettings):
     session_repeat_discipline_block_same_strike_after_loss: bool = True
     session_repeat_discipline_same_strike_post_win_requires_fresh_base: bool = True
     session_repeat_discipline_same_strike_post_win_max_premium_above_win_entry_pct: float = 22.0
-    # Legacy env aliases (still read as fallbacks)
+    # Legacy env aliases (still read as fallbacks; #891 on main)
     chop_rally_session_discipline_enabled: bool = True
     chop_rally_max_open_legs_per_symbol_side: int = 1
     chop_rally_block_same_strike_after_loss: bool = True
