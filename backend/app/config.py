@@ -3100,13 +3100,16 @@ class Settings(BaseSettings):
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5
 
-    # Entries from 9:20 IST — skip 9:15 open auction; open caution until 9:45
-    entry_earliest_hour: int = 9
-    entry_earliest_minute: int = 20
+    # Open setup book: 09:15–09:45 IST only (lanes, open guards, first-lift capture). Idle after 09:45.
+    open_setup_start_hour: int = 9
+    open_setup_start_minute: int = 15
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
+    # First explosion order aligns with open setup start (not extended past 09:45).
+    entry_earliest_hour: int = 9
+    entry_earliest_minute: int = 15
     # Macro side check 09:25–09:45. Idle before 09:25 and after 09:45.
-    # The cash-candle hold covers 09:15–09:45. The first order stays 09:20.
+    # The cash-candle hold covers 09:15–09:45. First order at 09:15 with open-setup guards.
     open_side_confirmation_enabled: bool = True
     open_side_confirmation_start_hour: int = 9
     open_side_confirmation_start_minute: int = 25
@@ -3122,7 +3125,7 @@ class Settings(BaseSettings):
     open_caution_min_explosion_score: int = 45
     open_caution_score_bonus: int = 0
     open_caution_min_rank_score: float = 55.0
-    # 09:20–09:45 index open lanes (idle after open_caution_until — normal CE/PE book).
+    # 09:15–09:45 index open lanes (idle after open_caution_until — normal CE/PE book).
     open_index_lane_enabled: bool = True
     open_sensex_call_lane_enabled: bool = True
     open_sensex_put_lane_enabled: bool = True
@@ -3131,7 +3134,7 @@ class Settings(BaseSettings):
     open_index_lane_min_elite_score: float = 90.0
     open_index_lane_max_local_base_pct: float = 15.0
     open_index_lane_allowed_setups_csv: str = "FTV,V"
-    # 09:20–09:45: cold 1m premium momentum often reads as “fade” on base lifts — allow shallow retest.
+    # 09:15–09:45: cold 1m premium momentum often reads as “fade” on base lifts — allow shallow retest.
     open_caution_premium_fade_fill_enabled: bool = True
     open_caution_premium_fade_max_drawdown_pct: float = -2.8
     open_caution_premium_fade_max_local_base_pct: float = 28.0
@@ -3222,11 +3225,10 @@ class Settings(BaseSettings):
     premium_led_counter_breadth_min_score: float = 90.0
     premium_led_elite_counter_min_score: float = 90.0
     premium_led_explosion_bypass_enabled: bool = True
-    # First order is 09:20, same as the general entry clock. The 09:16 explosion
-    # window is closed — 21 Oct NIFTY 23350 PE filled at 09:16 on a one-bar chart.
+    # Open premium explosion aligns with open setup (09:15–09:45). Mid-rip still gated by lanes + first lift.
     explosion_open_entry_enabled: bool = True
     explosion_entry_earliest_hour: int = 9
-    explosion_entry_earliest_minute: int = 20
+    explosion_entry_earliest_minute: int = 15
     # Open premium explosion — NIFTY PE 60→160 style gap rips at 9:15
     open_premium_explosion_enabled: bool = True
     open_premium_min_move_pct: float = 25.0

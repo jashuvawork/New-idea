@@ -23,27 +23,27 @@ def test_entries_blocked_before_915():
             mock_dt.now.return_value = datetime(2026, 6, 30, 9, 14, 0, tzinfo=IST)
             ok, reason = entries_allowed_now()
     assert not ok
-    assert "09:20" in reason
+    assert "09:15" in reason
 
 
-def test_entries_blocked_at_915():
+def test_entries_allowed_at_915():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 6, 30, 9, 15, 0, tzinfo=IST)
             ok, reason = entries_allowed_now()
-    assert not ok
-    assert "09:20" in reason
+    assert ok
+    assert reason == "ok"
 
 
-def test_no_explosion_order_before_920():
+def test_explosion_and_entries_aligned_at_open_setup_start():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 10, 21, 9, 16, 37, tzinfo=IST)
             early_ok, _ = explosion_entries_allowed_now()
             ok, reason = entries_allowed_now()
     assert early_ok is False
-    assert ok is False
-    assert "09:20" in reason
+    assert ok is True
+    assert reason == "ok"
 
 
 def test_entries_allowed_at_920():
@@ -62,10 +62,21 @@ def test_open_caution_active_until_945():
             assert min_explosion_score_now() == 45
 
 
-def test_open_caution_starts_at_920_not_915():
+def test_open_caution_starts_at_915_not_before():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 18, 0, tzinfo=IST)
+            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 14, 59, tzinfo=IST)
+            assert not in_open_caution_window()
+            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 15, 0, tzinfo=IST)
+            assert in_open_caution_window()
+
+
+def test_open_caution_ends_at_945_not_extended():
+    with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
+        with patch("app.engines.session_timing.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 44, 59, tzinfo=IST)
+            assert in_open_caution_window()
+            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 45, 0, tzinfo=IST)
             assert not in_open_caution_window()
 
 

@@ -1,4 +1,4 @@
-"""09:20–09:45 IST index-specific open lanes (then normal book after open caution ends).
+"""09:15–09:45 IST index-specific open lanes (then normal book after open caution ends).
 
 Research-backed defaults on main: SENSEX CALL + first lift ON; NIFTY PUT opt-in via
 ``open_nifty_put_lane_enabled``. Does not waive cash-candle hold, open macro, or premium band.
@@ -53,7 +53,7 @@ def in_open_caution_window_at(when: datetime) -> bool:
         except (TypeError, ValueError):
             return default_h * 60 + default_m
 
-    earliest = _clock_minutes("entry_earliest_hour", "entry_earliest_minute", 9, 20)
+    earliest = _clock_minutes("open_setup_start_hour", "open_setup_start_minute", 9, 15)
     end = _clock_minutes("open_caution_until_hour", "open_caution_until_minute", 9, 45)
     return earliest <= current < end
 
@@ -100,7 +100,7 @@ def open_index_lane_summary(settings: Any = None) -> dict[str, Any]:
             getattr(settings, "open_index_lane_max_local_base_pct", 15.0) or 15.0
         ),
         "allowedSetups": str(getattr(settings, "open_index_lane_allowed_setups_csv", "FTV,V") or "FTV,V"),
-        "windowIst": "entry_earliest through open_caution_until (default 09:20–09:45)",
+        "windowIst": "open_setup_start through open_caution_until (default 09:15–09:45)",
     }
 
 

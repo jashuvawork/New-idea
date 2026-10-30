@@ -1,4 +1,4 @@
-"""Paper #794 / #816 deploy contract — template pins, no 09:16 overlay."""
+"""Paper #794 / #816 deploy contract — template pins, open setup 09:15–09:45."""
 
 from pathlib import Path
 
@@ -22,8 +22,10 @@ def test_production_template_paper_794_816_entry_and_exits():
     assert env.get("PAPER_TRADING") == "true"
     assert env.get("ENABLE_LIVE_TRADING") == "false"
     assert env.get("ENTRY_EARLIEST_HOUR") == "9"
-    assert env.get("ENTRY_EARLIEST_MINUTE") == "20"
-    assert env.get("EXPLOSION_ENTRY_EARLIEST_MINUTE") == "20"
+    assert env.get("OPEN_SETUP_START_MINUTE") == "15"
+    assert env.get("ENTRY_EARLIEST_MINUTE") == "15"
+    assert env.get("EXPLOSION_ENTRY_EARLIEST_MINUTE") == "15"
+    assert env.get("OPEN_CAUTION_UNTIL_MINUTE") == "45"
     assert env.get("UNIFIED_PROFIT_LADDER_ENABLED") == "true"
     assert env.get("UNIFIED_PROFIT_LADDER_BREAKEVEN_ENABLED") == "false"
     assert env.get("TP_RUNG_LADDER_EXIT_ENABLED") == "true"

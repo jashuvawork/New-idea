@@ -24,8 +24,15 @@ def open_caution_until_minutes() -> int:
     return settings.open_caution_until_hour * 60 + settings.open_caution_until_minute
 
 
+def open_setup_start_minutes() -> int:
+    settings = get_settings()
+    h = int(getattr(settings, "open_setup_start_hour", settings.entry_earliest_hour))
+    m = int(getattr(settings, "open_setup_start_minute", settings.entry_earliest_minute))
+    return h * 60 + m
+
+
 def entries_allowed_now() -> tuple[bool, str]:
-    """False until configured IST time (default 09:20) during live market — skips open auction."""
+    """False until configured IST time (default 09:15) during live market."""
     phase = get_market_phase()
     if phase != "LIVE_MARKET":
         return False, "market_not_live"
@@ -57,11 +64,11 @@ def explosion_entries_allowed_now() -> tuple[bool, str]:
 
 
 def in_open_caution_window() -> bool:
-    """09:20–09:45 IST — stricter rank gates while opening range forms."""
+    """09:15–09:45 IST — open setup only; stricter rank gates while opening range forms."""
     if get_market_phase() != "LIVE_MARKET":
         return False
     current = _minutes_now()
-    return entry_earliest_minutes() <= current < open_caution_until_minutes()
+    return open_setup_start_minutes() <= current < open_caution_until_minutes()
 
 
 def _minutes_at(dt: datetime) -> int:
@@ -128,7 +135,7 @@ def in_midday_chop_window() -> bool:
 
 
 def in_regular_explosion_session_window() -> bool:
-    """09:20–15:30 IST — standard intraday explosion entry window."""
+    """From entry_earliest through 15:30 IST — standard intraday explosion entry window."""
     allowed, _ = entries_allowed_now()
     if not allowed:
         return False

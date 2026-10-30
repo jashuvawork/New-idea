@@ -122,8 +122,9 @@ def test_enabled_at_one_minute_by_default():
     assert s.open_side_confirmation_enabled is True
     assert s.open_side_confirmation_start_minute == 25
     assert s.open_side_confirmation_min_minutes == 1.0
-    assert s.entry_earliest_minute == 20
-    assert s.explosion_entry_earliest_minute == 20
+    assert s.entry_earliest_minute == 15
+    assert s.explosion_entry_earliest_minute == 15
+    assert s.open_setup_start_minute == 15
     snap = _tape("NIFTY", open_=22300.0, hi=22410.0, lo=22285.0, last=22395.0)
     for clock in (_at(9, 15, 37), _at(9, 16, 18), _at(9, 20, 0)):
         blocked, reason, _ = open_side_confirmation("NIFTY", Side.CALL, snap, now=clock, settings=s)

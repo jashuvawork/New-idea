@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Paper #794 book on main: pull latest, paper mode, 09:20 entry (template — no detach, no 09:16 overlay).
+# Paper #794 book on main: pull latest, paper mode, 09:15–09:45 open setup (template).
 #
 # On EC2 (root):
 #   sudo bash deploy/redeploy-paper-794-816-session.sh
@@ -51,8 +51,9 @@ fi
 _run sudo ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" SKIP_RESTART=0 \
   bash "$REPO_DIR/deploy/set-execution-mode.sh" --paper
 
-export EXPECT_ENTRY_EARLIEST="${EXPECT_ENTRY_EARLIEST:-09:20}"
-export EXPECT_EXPLOSION_ENTRY_EARLIEST="${EXPECT_EXPLOSION_ENTRY_EARLIEST:-09:20}"
+export EXPECT_ENTRY_EARLIEST="${EXPECT_ENTRY_EARLIEST:-09:15}"
+export EXPECT_EXPLOSION_ENTRY_EARLIEST="${EXPECT_EXPLOSION_ENTRY_EARLIEST:-09:15}"
+export EXPECT_OPEN_SETUP_START="${EXPECT_OPEN_SETUP_START:-09:15}"
 
 _run bash "$REPO_DIR/deploy/verify-paper-794-816-session.sh"
 

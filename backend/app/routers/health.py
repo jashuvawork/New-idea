@@ -95,6 +95,10 @@ async def deployment_status():
             "scalpStopPoints": settings.scalp_stop_points,
             "explosionInitialStopPoints": settings.explosion_initial_stop_points,
             "entryEarliestIst": f"{settings.entry_earliest_hour:02d}:{settings.entry_earliest_minute:02d}",
+            "openSetupStartIst": (
+                f"{int(getattr(settings, 'open_setup_start_hour', settings.entry_earliest_hour)):02d}:"
+                f"{int(getattr(settings, 'open_setup_start_minute', settings.entry_earliest_minute)):02d}"
+            ),
             "openCautionUntilIst": f"{settings.open_caution_until_hour:02d}:{settings.open_caution_until_minute:02d}",
             "openCautionMinExplosionScore": settings.open_caution_min_explosion_score,
             "openIndexLane": open_index_lane_summary(settings),
