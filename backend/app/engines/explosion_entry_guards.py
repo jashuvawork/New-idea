@@ -1922,6 +1922,21 @@ def post_win_fresh_near_base_blocked(
     if not post_session_win:
         return False, "", meta
 
+    snap = getattr(candidate, "snap", None)
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    from app.engines.pe_win_ce_mirror import session_win_side_continuation_ok
+
+    cont_ok, cont_reason, cont_meta = session_win_side_continuation_ok(
+        getattr(candidate, "side", ""),
+        state,
+        snap,
+        sym,
+    )
+    if cont_ok:
+        meta["sessionWinSideContinuation"] = cont_reason
+        meta.update(cont_meta)
+        return False, "", meta
+
     fresh, fresh_meta = fresh_near_local_base(
         local_pad=local_pad, ict=ict, alert=alert, settings=settings,
     )
@@ -1959,6 +1974,21 @@ def _post_win_extended_chase_blocked(
     post_session_win, post_meta = _post_session_win(state)
     meta.update(post_meta)
     if not post_session_win:
+        return False, "", meta
+
+    snap = getattr(candidate, "snap", None)
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    from app.engines.pe_win_ce_mirror import session_win_side_continuation_ok
+
+    cont_ok, cont_reason, cont_meta = session_win_side_continuation_ok(
+        getattr(candidate, "side", ""),
+        state,
+        snap,
+        sym,
+    )
+    if cont_ok:
+        meta["sessionWinSideContinuation"] = cont_reason
+        meta.update(cont_meta)
         return False, "", meta
 
     pad_floor = float(

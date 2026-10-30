@@ -1315,6 +1315,62 @@ def pe_win_ce_mirror_near_miss_waive(
     return _building_rip_launch_ok(alert, readiness_reason=readiness_reason, settings=settings)
 
 
+def session_win_side_continuation_ok(
+    side: Side | str,
+    state: Any,
+    snap: Optional[SymbolSnapshot],
+    symbol: str = "",
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """After a session win, allow same-index same-side re-entry when rally/slide unlock is armed."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "session_win_side_continuation_enabled", True)):
+        return False, "disabled", meta
+    if state is None or snap is None:
+        return False, "missing_state", meta
+    side_u = _side_val(side)
+    sym = str(symbol or getattr(snap, "symbol", "") or "").upper()
+    if side_u == "CALL":
+        from app.engines.put_slide_ce_mirror import session_call_win_meta
+
+        win, win_meta = session_call_win_meta(state, settings=settings)
+        meta.update(win_meta)
+        if not win:
+            return False, "no_call_win", meta
+        armed, reason, arm_meta = call_rally_entry_unlock_armed(
+            state, snap, sym, settings=settings,
+        )
+        meta.update(arm_meta)
+        if not armed:
+            return False, reason or "call_rally_not_armed", meta
+        from app.engines.index_tick_helpers import index_trend_breakout
+
+        if index_trend_breakout(sym, "CALL", snap).get("breakout"):
+            meta["indexBreakout"] = True
+        return True, "call_win_rally_continuation", meta
+    if side_u == "PUT":
+        from app.engines.put_slide_ce_mirror import put_slide_entry_unlock_armed
+
+        win, win_meta = session_put_win_meta(state, settings=settings)
+        meta.update(win_meta)
+        if not win:
+            return False, "no_put_win", meta
+        armed, reason, arm_meta = put_slide_entry_unlock_armed(
+            state, snap, sym, settings=settings,
+        )
+        meta.update(arm_meta)
+        if not armed:
+            return False, reason or "put_slide_not_armed", meta
+        from app.engines.index_tick_helpers import index_trend_breakout
+
+        if index_trend_breakout(sym, "PUT", snap).get("breakout"):
+            meta["indexBreakout"] = True
+        return True, "put_win_slide_continuation", meta
+    return False, "unknown_side", meta
+
+
 def pe_win_ce_mirror_premium_fade_bypass(
     *,
     side: Side | str,
@@ -1334,9 +1390,17 @@ def pe_win_ce_mirror_premium_fade_bypass(
     )
     if not fade_waive:
         return False
-    if _side_val(side) != "CALL" or snap is None or state is None:
+    if snap is None or state is None:
         return False
     sym = str(symbol or (evidence or {}).get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    side_u = _side_val(side)
+    cont_ok, _, _ = session_win_side_continuation_ok(
+        side_u, state, snap, sym, settings=settings,
+    )
+    if cont_ok:
+        return True
+    if side_u != "CALL":
+        return False
     ev = evidence or {}
     from app.engines.index_session_dominant_trend import index_trend_premium_fade_aligned
 

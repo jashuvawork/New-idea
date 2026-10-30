@@ -420,6 +420,8 @@ class Settings(BaseSettings):
     call_rally_unlock_waive_mtf_premium_fade: bool = True
     call_rally_unlock_near_miss_enabled: bool = True
     call_rally_unlock_waive_chop_shallow: bool = True
+    # After trail-proved same-side win: allow next leg when index rally/slide unlock is armed (normal trend days).
+    session_win_side_continuation_enabled: bool = True
     # CE at base — same near-base max-lots bar as PE best trades (score ≥90, local ≤20%).
     call_at_base_best_trade_enabled: bool = True
     call_at_base_best_trade_min_grade: str = "A"
