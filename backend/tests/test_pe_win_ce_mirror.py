@@ -299,7 +299,7 @@ def test_put_chase_blocked_after_put_win_on_other_index(mock_trades, _mock_bo):
 
 
 @patch("app.engines.pe_win_ce_mirror.call_rally_entry_unlock_armed")
-@patch("app.engines.pe_win_ce_mirror._collect_session_trades")
+@patch("app.engines.put_slide_ce_mirror._collect_session_trades")
 def test_session_win_side_continuation_after_call_win(mock_trades, mock_rally_armed):
     mock_trades.return_value = [_call_win_trade()]
     mock_rally_armed.return_value = (True, "call_rally_unlock", {"rallyPoints": 120.0})
