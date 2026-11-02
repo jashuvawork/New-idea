@@ -1295,6 +1295,22 @@ def pe_win_ce_mirror_near_miss_waive(
     if snap is None or state is None:
         return False
     sym = str(alert.get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    from app.engines.ce_rally_lift_timing import (
+        ce_at_armed_base_capture_ok,
+        ce_rally_lift_ready,
+    )
+
+    at_base, _ = ce_at_armed_base_capture_ok(
+        type("C", (), {"alert": alert, "side": Side.CALL})(),
+        settings=settings,
+    )
+    rally_ready, _, _ = ce_rally_lift_ready(sym, snap, settings=settings)
+    if bool(getattr(settings, "ce_rally_lift_near_miss_waive_enabled", True)) and (
+        at_base or rally_ready
+    ):
+        tier = str(alert.get("tier") or "").upper()
+        if tier in ("ELITE", "EXPLODING", "BUILDING"):
+            return True
     if not call_ce_base_context_armed(
         state,
         snap,
@@ -1402,6 +1418,15 @@ def pe_win_ce_mirror_premium_fade_bypass(
     if side_u != "CALL":
         return False
     ev = evidence or {}
+    if bool(getattr(settings, "ce_rally_at_base_waive_mtf_premium_fade", True)):
+        from app.engines.ce_rally_lift_timing import ce_at_armed_base_capture_ok
+
+        at_base, _ = ce_at_armed_base_capture_ok(
+            type("C", (), {"alert": dict(ev), "side": Side.CALL})(),
+            settings=settings,
+        )
+        if at_base:
+            return True
     from app.engines.index_session_dominant_trend import index_trend_premium_fade_aligned
 
     if index_trend_premium_fade_aligned(

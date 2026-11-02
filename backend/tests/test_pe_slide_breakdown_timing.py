@@ -1,4 +1,4 @@
-"""PE slide breakdown timing — block bounce PUT, allow breakdown leg."""
+"""PE slide breakdown timing — at-base waivers; mid-leg PUT entries allowed."""
 
 from datetime import datetime
 from types import SimpleNamespace
@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from app.config import Settings
 from app.engines.pe_slide_breakdown_timing import (
-    pe_slide_breakdown_put_entry_blocked,
+    pe_at_armed_base_capture_ok,
     pe_slide_breakdown_ready,
 )
 from app.models.schemas import Side
@@ -29,12 +29,24 @@ def _snap(*, mom5: float, candle_bias: str = "NEUTRAL", direction: str = "BEARIS
     return SimpleNamespace(symbol="NIFTY", spot=23300.0, spotChart=chart, timestamp=AFTERNOON_SLIDE)
 
 
-def _candidate(snap):
-    return SimpleNamespace(symbol="NIFTY", side=Side.PUT, strike=23500.0, snap=snap, mode="explosion")
+def _candidate(snap, *, local_pct: float = 8.0):
+    return SimpleNamespace(
+        symbol="NIFTY",
+        side=Side.PUT,
+        strike=23500.0,
+        snap=snap,
+        mode="explosion",
+        alert={
+            "ictBaseArmed": True,
+            "localBaseMovePct": local_pct,
+            "firstLift": True,
+        },
+    )
 
 
 @patch("app.engines.index_rally_side_flip.index_rally_metrics")
-def test_blocks_bounce_trap_at_1206(mock_metrics):
+def test_bounce_trap_not_pretrade_blocked(mock_metrics):
+    """Bounce bar fails slide-ready (signal quality) but pretrade no longer hard-blocks."""
     mock_metrics.return_value = {
         "sessionHigh": 23360.5,
         "sessionLow": 23211.8,
@@ -47,12 +59,13 @@ def test_blocks_bounce_trap_at_1206(mock_metrics):
     ready, reason, _ = pe_slide_breakdown_ready("NIFTY", snap)
     assert not ready and reason == "pe_slide_bounce_trap"
 
-    blocked, pre_reason, _ = pe_slide_breakdown_put_entry_blocked(
-        _candidate(snap),
-        day_mode="CHOP + RALLY",
-        when=NOON_BOUNCE,
+
+def test_at_armed_base_inside_book_pad_band():
+    ok, meta = pe_at_armed_base_capture_ok(
+        _candidate(_snap(mom5=-0.1), local_pct=14.0),
+        settings=Settings(pe_slide_at_base_max_local_base_pct=22.0),
     )
-    assert blocked and pre_reason == "pe_slide_bounce_trap"
+    assert ok and meta["localBasePct"] == 14.0
 
 
 @patch("app.engines.index_rally_side_flip.index_rally_metrics")
@@ -68,10 +81,3 @@ def test_allows_breakdown_slide_leg(mock_metrics):
     snap = _snap(mom5=-0.15, candle_bias="BEARISH", direction="BEARISH", macd_hist=-8.0)
     ready, reason, _ = pe_slide_breakdown_ready("NIFTY", snap)
     assert ready and reason == "pe_slide_breakdown_ready"
-
-    blocked, _, _ = pe_slide_breakdown_put_entry_blocked(
-        _candidate(snap),
-        day_mode="CHOP + RALLY",
-        when=AFTERNOON_SLIDE,
-    )
-    assert not blocked

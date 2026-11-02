@@ -642,8 +642,15 @@ def put_slide_near_miss_waive(
     if snap is None or state is None:
         return False
     sym = str(alert.get("symbol") or getattr(snap, "symbol", "") or "").upper()
-    from app.engines.pe_slide_breakdown_timing import pe_slide_breakdown_ready
+    from app.engines.pe_slide_breakdown_timing import (
+        pe_at_armed_base_capture_ok,
+        pe_slide_breakdown_ready,
+    )
 
+    at_base, _ = pe_at_armed_base_capture_ok(
+        type("C", (), {"alert": alert, "side": Side.PUT})(),
+        settings=settings,
+    )
     slide_ready, _, _ = pe_slide_breakdown_ready(sym, snap, settings=settings)
     base_armed = put_pe_base_context_armed(
         state,
@@ -655,7 +662,9 @@ def put_slide_near_miss_waive(
     )[0]
     if not base_armed and not slide_ready:
         return False
-    if bool(getattr(settings, "pe_slide_breakdown_near_miss_waive_enabled", True)) and slide_ready:
+    if bool(getattr(settings, "pe_slide_breakdown_near_miss_waive_enabled", True)) and (
+        at_base or slide_ready
+    ):
         tier = str(alert.get("tier") or "").upper()
         if tier in ("ELITE", "EXPLODING", "BUILDING"):
             return True
@@ -693,6 +702,15 @@ def put_slide_premium_fade_bypass(
         return False
     sym = str(symbol or (evidence or {}).get("symbol") or getattr(snap, "symbol", "") or "").upper()
     ev = evidence or {}
+    if bool(getattr(settings, "pe_slide_at_base_waive_mtf_premium_fade", True)):
+        from app.engines.pe_slide_breakdown_timing import pe_at_armed_base_capture_ok
+
+        at_base, _ = pe_at_armed_base_capture_ok(
+            type("C", (), {"alert": dict(ev), "side": Side.PUT})(),
+            settings=settings,
+        )
+        if at_base:
+            return True
     from app.engines.index_session_dominant_trend import index_trend_premium_fade_aligned
 
     if index_trend_premium_fade_aligned(
