@@ -652,6 +652,17 @@ def validate_candidate(
     if slide_block:
         return False, slide_reason, policy_meta
 
+    from app.engines.ce_rally_lift_timing import ce_rally_lift_call_entry_blocked
+
+    ce_block, ce_reason, ce_meta = ce_rally_lift_call_entry_blocked(
+        candidate,
+        day_mode=day_mode_early,
+        settings=settings,
+    )
+    policy_meta.update(ce_meta)
+    if ce_block:
+        return False, ce_reason, policy_meta
+
     from app.engines.bad_day_routing import (
         candidate_is_expiry_deep_itm_trade,
         severe_pause_expiring_deep_itm_lift_active,
