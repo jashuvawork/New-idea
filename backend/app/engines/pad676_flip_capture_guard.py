@@ -33,7 +33,7 @@ _DEFAULT_PAD676_FLIP_DAY_MODES = frozenset({
     "MOMENTUM RALLY",
 })
 
-_ce_fade_flip_until: dict[str, datetime] = {}
+_opposite_fade_defer_until: dict[tuple[str, str], datetime] = {}
 _session_date: str | None = None
 
 
@@ -41,8 +41,24 @@ def _roll_session(now: datetime) -> None:
     global _session_date
     today = now.astimezone(IST).strftime("%Y-%m-%d")
     if _session_date != today:
-        _ce_fade_flip_until.clear()
+        _opposite_fade_defer_until.clear()
         _session_date = today
+
+
+def pad676_side_aligns_with_session_tape(
+    symbol: str,
+    side: Side | str,
+    snap: Any = None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """True when index move from session open does not oppose this side (CE/PE mirror)."""
+    from app.engines.open_setup_guards import open_caution_side_align_ok
+
+    align_ok, _, _ = open_caution_side_align_ok(
+        symbol, side, snap, settings=settings or get_settings(),
+    )
+    return bool(align_ok)
 
 
 def _side_val(side: Side | str) -> str:
@@ -70,19 +86,23 @@ def pad676_flip_capture_active(
     return dm in _flip_day_modes(settings)
 
 
-def record_pad676_ce_mtf_fade_reject(
+def record_pad676_mtf_fade_reject(
     symbol: str,
     side: Side | str,
     reason: str,
     *,
     now: Optional[datetime] = None,
 ) -> None:
-    """After a CALL MTF/fade reject, defer same-index PUT fills briefly."""
+    """After one side's MTF/fade reject, defer the opposite side on the same index briefly."""
     settings = get_settings()
     if not bool(getattr(settings, "pad676_defer_put_after_ce_fade_enabled", True)):
         return
     side_v = _side_val(side)
-    if side_v != "CALL":
+    if side_v == "CALL":
+        defer_side = "PUT"
+    elif side_v == "PUT":
+        defer_side = "CALL"
+    else:
         return
     if reason not in MTF_PREMIUM_FADE_REJECT_REASONS:
         return
@@ -93,10 +113,21 @@ def record_pad676_ce_mtf_fade_reject(
         return
     sym = str(symbol or "").upper()
     if sym:
-        _ce_fade_flip_until[sym] = current + timedelta(seconds=seconds)
+        _opposite_fade_defer_until[(sym, defer_side)] = current + timedelta(seconds=seconds)
 
 
-def pad676_defer_put_after_ce_fade_blocked(
+def record_pad676_ce_mtf_fade_reject(
+    symbol: str,
+    side: Side | str,
+    reason: str,
+    *,
+    now: Optional[datetime] = None,
+) -> None:
+    """Backward-compatible alias — records CE/PE symmetric opposite defer."""
+    record_pad676_mtf_fade_reject(symbol, side, reason, now=now)
+
+
+def pad676_defer_opposite_after_mtf_fade_blocked(
     symbol: str,
     side: Side | str,
     *,
@@ -105,15 +136,32 @@ def pad676_defer_put_after_ce_fade_blocked(
     settings = get_settings()
     if not bool(getattr(settings, "pad676_defer_put_after_ce_fade_enabled", True)):
         return False, ""
-    if _side_val(side) != "PUT":
+    side_v = _side_val(side)
+    if side_v not in ("CALL", "PUT"):
         return False, ""
     current = (now or datetime.now(IST)).astimezone(IST)
     _roll_session(current)
     sym = str(symbol or "").upper()
-    until = _ce_fade_flip_until.get(sym)
+    until = _opposite_fade_defer_until.get((sym, side_v))
     if until is None or current >= until:
         return False, ""
-    return True, "pad676_defer_put_after_ce_mtf_fade_reject"
+    if side_v == "PUT":
+        return True, "pad676_defer_put_after_ce_mtf_fade_reject"
+    return True, "pad676_defer_call_after_pe_mtf_fade_reject"
+
+
+def pad676_defer_put_after_ce_fade_blocked(
+    symbol: str,
+    side: Side | str,
+    *,
+    now: Optional[datetime] = None,
+) -> tuple[bool, str]:
+    blocked, reason = pad676_defer_opposite_after_mtf_fade_blocked(
+        symbol, side, now=now,
+    )
+    if blocked and _side_val(side) == "PUT":
+        return True, reason
+    return False, ""
 
 
 def pad676_session_tape_blocks_side(
@@ -198,13 +246,19 @@ def premium_mtf_opposes_entry_side(
     *,
     settings: Any = None,
     waive_opposing: bool = False,
+    symbol: str = "",
+    snap: Any = None,
 ) -> tuple[bool, str]:
     """
     PUT + bullish expanding premium / CALL + bearish collapsing premium at execution.
-    Waive when explicit open-setup or strict first-lift pad lane already validated.
+    Waive pad-lane / open-setup fade only when session tape still aligns with this side.
     """
     if waive_opposing:
-        return False, ""
+        if snap is None:
+            return False, ""
+        if pad676_side_aligns_with_session_tape(symbol, side, snap, settings=settings):
+            return False, ""
+        # Misaligned side (e.g. PUT on bullish open): never waive opposing premium.
     settings = settings or get_settings()
     if not bool(getattr(settings, "pad676_premium_mtf_opposing_block_enabled", True)):
         return False, ""
@@ -253,7 +307,7 @@ def pad676_flip_capture_entry_blocked(
     if when is not None and not isinstance(when, datetime):
         when = None
 
-    defer, defer_reason = pad676_defer_put_after_ce_fade_blocked(sym, side, now=when)
+    defer, defer_reason = pad676_defer_opposite_after_mtf_fade_blocked(sym, side, now=when)
     if defer:
         return True, defer_reason, meta
 

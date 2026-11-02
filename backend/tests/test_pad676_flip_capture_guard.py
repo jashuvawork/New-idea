@@ -8,12 +8,14 @@ from zoneinfo import ZoneInfo
 from app.config import Settings
 from app.engines.mtf_chart_analysis import TimeframeChartRead, validate_mtf_scalp
 from app.engines.pad676_flip_capture_guard import (
+    pad676_defer_opposite_after_mtf_fade_blocked,
     pad676_defer_put_after_ce_fade_blocked,
     pad676_flip_capture_entry_blocked,
     pad676_put_into_index_rally_blocked,
     pad676_session_tape_blocks_side,
     premium_mtf_opposes_entry_side,
     record_pad676_ce_mtf_fade_reject,
+    record_pad676_mtf_fade_reject,
 )
 from app.models.schemas import Side
 
@@ -87,6 +89,16 @@ def test_defer_put_after_ce_fade_reject():
     assert blocked and reason == "pad676_defer_put_after_ce_mtf_fade_reject"
 
 
+def test_defer_call_after_pe_fade_reject_symmetric():
+    record_pad676_mtf_fade_reject(
+        "NIFTY", Side.PUT, "exec_mtf_premium_5m_fading", now=NOON,
+    )
+    blocked, reason = pad676_defer_opposite_after_mtf_fade_blocked(
+        "NIFTY", Side.CALL, now=NOON + timedelta(seconds=15),
+    )
+    assert blocked and reason == "pad676_defer_call_after_pe_mtf_fade_reject"
+
+
 @patch("app.engines.index_tick_helpers.resolve_index_session")
 @patch("app.engines.index_rally_side_flip.index_rally_metrics")
 def test_pretrade_bundle_blocks_put(mock_metrics, mock_session):
@@ -109,8 +121,10 @@ def test_pretrade_bundle_blocks_put(mock_metrics, mock_session):
     }
 
 
+@patch("app.engines.index_tick_helpers.resolve_index_session")
 @patch("app.engines.mtf_chart_analysis.get_settings")
-def test_mtf_bypass_still_blocks_opposing_put_premium(mock_settings):
+def test_mtf_bypass_still_blocks_opposing_put_premium(mock_settings, mock_session):
+    mock_session.return_value = {"open": 23222.0, "last": 23350.0, "hi": 23360.0, "lo": 23211.0}
     mock_settings.return_value = Settings(
         execution_mtf_enabled=True,
         execution_chart_premium_check_enabled=True,
@@ -134,5 +148,8 @@ def test_mtf_bypass_still_blocks_opposing_put_premium(mock_settings):
         index_mtf,
         premium_mtf,
         pad_lane_bypass=True,
+        first_lift_bypass=True,
+        symbol="NIFTY",
+        snap=_snap(),
     )
     assert not ok and reason == "exec_mtf_premium_5m_opposing_put"

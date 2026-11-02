@@ -265,6 +265,8 @@ def validate_mtf_scalp(
     pad_lane_bypass: bool = False,
     open_setup_fade_bypass: bool = False,
     scalp_mode: bool = False,
+    symbol: str = "",
+    snap: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
     Pre-trade MTF gate for scalping:
@@ -339,6 +341,8 @@ def validate_mtf_scalp(
             premium_mtf,
             settings=settings,
             waive_opposing=bool(first_lift_bypass or open_setup_fade_bypass),
+            symbol=symbol,
+            snap=snap,
         )
         if oppose:
             meta["passed"] = False
@@ -409,7 +413,11 @@ def validate_mtf_scalp(
         from app.engines.pad676_flip_capture_guard import premium_mtf_opposes_entry_side
 
         oppose, oppose_reason = premium_mtf_opposes_entry_side(
-            side, premium_mtf, settings=settings,
+            side,
+            premium_mtf,
+            settings=settings,
+            symbol=symbol,
+            snap=snap,
         )
         if oppose:
             meta["passed"] = False
