@@ -9,13 +9,14 @@ from zoneinfo import ZoneInfo
 
 from app.config import Settings
 from app.engines.open_index_lane import (
+    allowed_open_lane_sides,
     in_open_caution_window_at,
     open_index_lane_qualified,
     open_index_lane_summary,
     resolve_lane_when,
     validate_open_index_lane,
 )
-from app.models.schemas import Side
+from app.models.schemas import MarketPhase, Side, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 OPEN_TIME = datetime(2026, 10, 21, 9, 25, tzinfo=IST)
@@ -120,6 +121,66 @@ def test_open_index_lane_qualified_requires_passed_quality():
     ok, reason, _ = open_index_lane_qualified(cand, settings=s, when=OPEN_TIME)
     assert ok is False
     assert reason == "open_index_lane_sensex_call_only"
+
+
+def _snap(symbol: str, expiry: str) -> SymbolSnapshot:
+    return SymbolSnapshot(
+        symbol=symbol,
+        timestamp=OPEN_TIME,
+        marketPhase=MarketPhase.LIVE_MARKET,
+        spot=23300.0 if symbol == "NIFTY" else 73000.0,
+        dataAvailable=True,
+        optionExpiry=expiry,
+    )
+
+
+def test_expiry_pair_nifty_primary_ce_and_sensex_pe():
+    """Mon before Tue NIFTY expiry: NIFTY CE + SENSEX PE lanes (not SENSEX CE)."""
+    snapshots = {
+        "NIFTY": _snap("NIFTY", "2026-11-03"),
+        "SENSEX": _snap("SENSEX", "2026-11-05"),
+    }
+    s = Settings(open_session_expiry_lane_enabled=True, open_sensex_call_lane_enabled=True)
+    assert allowed_open_lane_sides("NIFTY", s, snapshots=snapshots) == {"CALL"}
+    assert allowed_open_lane_sides("SENSEX", s, snapshots=snapshots) == {"PUT"}
+
+
+def test_expiry_pair_sensex_primary_ce_and_nifty_pe():
+    """When SENSEX is nearest expiry: SENSEX CE + NIFTY PE."""
+    snapshots = {
+        "NIFTY": _snap("NIFTY", "2026-11-05"),
+        "SENSEX": _snap("SENSEX", "2026-11-03"),
+    }
+    s = Settings(open_session_expiry_lane_enabled=True, open_sensex_call_lane_enabled=True)
+    assert allowed_open_lane_sides("SENSEX", s, snapshots=snapshots) == {"CALL"}
+    assert allowed_open_lane_sides("NIFTY", s, snapshots=snapshots) == {"PUT"}
+
+
+@patch("app.engines.elite_score_engine.compute_elite_score")
+@patch("app.engines.elite_score_engine.infer_stage")
+@patch("app.engines.elite_score_engine.infer_setup_type")
+@patch("app.engines.trade_ranking.rank_entry_candidate")
+def test_nifty_call_passes_lane_when_nifty_expiry_primary(
+    mock_rank, mock_setup, mock_stage, mock_elite,
+):
+    mock_rank.return_value = {"evidence": {"tier": "ELITE"}, "grade": "A", "rankScore": 90.0}
+    mock_setup.return_value = "V"
+    mock_stage.return_value = "ARMED"
+    mock_elite.return_value = (95.0, "ELITE", {})
+
+    snapshots = {
+        "NIFTY": _snap("NIFTY", "2026-11-03"),
+        "SENSEX": _snap("SENSEX", "2026-11-05"),
+    }
+    s = Settings(open_session_expiry_lane_enabled=True, open_sensex_call_lane_enabled=True)
+    cand = _candidate(symbol="NIFTY", side="CALL")
+    cand.snap = snapshots["NIFTY"]
+    ok, reason, meta = validate_open_index_lane(
+        cand, settings=s, when=OPEN_TIME, snapshots=snapshots,
+    )
+    assert ok is True, reason
+    assert meta.get("openIndexLaneLane") == "NIFTY_CALL"
+    assert meta.get("primaryCeIndex") == "NIFTY"
 
 
 def test_in_open_caution_window_at_boundaries():
