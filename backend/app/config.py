@@ -3100,14 +3100,15 @@ class Settings(BaseSettings):
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5
 
-    # Open setup book: 09:15–09:45 IST only (lanes, open guards, first-lift capture). Idle after 09:45.
+    # Open setup book: 09:20–09:45 IST entries (lanes, open guards, first-lift). Idle after 09:45.
+    # Radar/explosion detect may start at explosion_entry_earliest (default 09:15).
     open_setup_start_hour: int = 9
-    open_setup_start_minute: int = 15
+    open_setup_start_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
-    # First explosion order aligns with open setup start (not extended past 09:45).
+    # First order clock — aligns with open setup start (default 09:20 IST).
     entry_earliest_hour: int = 9
-    entry_earliest_minute: int = 15
+    entry_earliest_minute: int = 20
     # Macro side check 09:25–09:45. Idle before 09:25 and after 09:45.
     # The cash-candle hold covers 09:15–09:45. First order at 09:15 with open-setup guards.
     open_side_confirmation_enabled: bool = True
