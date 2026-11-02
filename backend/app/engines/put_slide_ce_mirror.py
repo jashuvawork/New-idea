@@ -642,15 +642,23 @@ def put_slide_near_miss_waive(
     if snap is None or state is None:
         return False
     sym = str(alert.get("symbol") or getattr(snap, "symbol", "") or "").upper()
-    if not put_pe_base_context_armed(
+    from app.engines.pe_slide_breakdown_timing import pe_slide_breakdown_ready
+
+    slide_ready, _, _ = pe_slide_breakdown_ready(sym, snap, settings=settings)
+    base_armed = put_pe_base_context_armed(
         state,
         snap,
         sym,
         alert,
         readiness_reason=readiness_reason,
         settings=settings,
-    )[0]:
+    )[0]
+    if not base_armed and not slide_ready:
         return False
+    if bool(getattr(settings, "pe_slide_breakdown_near_miss_waive_enabled", True)) and slide_ready:
+        tier = str(alert.get("tier") or "").upper()
+        if tier in ("ELITE", "EXPLODING", "BUILDING"):
+            return True
     tier = str(alert.get("tier") or "").upper()
     if tier not in ("ELITE", "EXPLODING", "BUILDING"):
         return False

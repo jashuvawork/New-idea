@@ -641,16 +641,16 @@ def validate_candidate(
         day_mode_early = resolve_policy_day_mode(state)
     except Exception:
         day_mode_early = ""
-    from app.engines.pad676_flip_capture_guard import pad676_flip_capture_entry_blocked
+    from app.engines.pe_slide_breakdown_timing import pe_slide_breakdown_put_entry_blocked
 
-    flip_block, flip_reason, flip_meta = pad676_flip_capture_entry_blocked(
+    slide_block, slide_reason, slide_meta = pe_slide_breakdown_put_entry_blocked(
         candidate,
         day_mode=day_mode_early,
         settings=settings,
     )
-    policy_meta.update(flip_meta)
-    if flip_block:
-        return False, flip_reason, policy_meta
+    policy_meta.update(slide_meta)
+    if slide_block:
+        return False, slide_reason, policy_meta
 
     from app.engines.bad_day_routing import (
         candidate_is_expiry_deep_itm_trade,
