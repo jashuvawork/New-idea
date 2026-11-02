@@ -3156,6 +3156,8 @@ class Settings(BaseSettings):
     pe_slide_breakdown_bounce_max_mom5_pct: float = 0.05
     pe_slide_breakdown_min_bearish_mom5_pct: float = 0.03
     pe_slide_breakdown_near_miss_waive_enabled: bool = True
+    pe_slide_at_base_max_local_base_pct: float = 22.0
+    pe_slide_at_base_waive_mtf_premium_fade: bool = True
     # Midday CALL rally lift timing (base capture or rally-ready; block cold chase).
     ce_rally_lift_timing_enabled: bool = True
     ce_rally_lift_day_modes_csv: str = "CHOP + RALLY,CHOP DAY,CHOP (PRE-10),MOMENTUM RALLY"

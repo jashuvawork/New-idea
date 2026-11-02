@@ -641,17 +641,6 @@ def validate_candidate(
         day_mode_early = resolve_policy_day_mode(state)
     except Exception:
         day_mode_early = ""
-    from app.engines.pe_slide_breakdown_timing import pe_slide_breakdown_put_entry_blocked
-
-    slide_block, slide_reason, slide_meta = pe_slide_breakdown_put_entry_blocked(
-        candidate,
-        day_mode=day_mode_early,
-        settings=settings,
-    )
-    policy_meta.update(slide_meta)
-    if slide_block:
-        return False, slide_reason, policy_meta
-
     from app.engines.bad_day_routing import (
         candidate_is_expiry_deep_itm_trade,
         severe_pause_expiring_deep_itm_lift_active,

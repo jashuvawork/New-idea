@@ -1,19 +1,15 @@
-"""Midday PUT slide timing — enter on breakdown, not on post-top bounce (CE/PE book infra).
+"""Midday PUT slide timing — prefer capture at armed base; allow mid-leg continuation.
 
-Replaces PAD676 flip *blocks* with a positive readiness bar: index off session high with
-bearish micro-momentum (no bullish 5m bounce bar). Does not change pad ranking.
+Slide-ready detection and at-base band for near_miss / premium-fade waivers (CE mirror).
+Does not pretrade-block bounce or mid-leg PUTs — miss at base, still take mid slide like CE 15:22.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Optional
-from zoneinfo import ZoneInfo
+from typing import Any, Mapping, Optional
 
 from app.config import get_settings
-from app.models.schemas import Side, SymbolSnapshot
-
-IST = ZoneInfo("Asia/Kolkata")
+from app.models.schemas import SymbolSnapshot
 
 _DEFAULT_DAY_MODES = frozenset({
     "CHOP + RALLY",
@@ -32,6 +28,55 @@ def _day_modes(settings: Any) -> frozenset[str]:
     if raw:
         return frozenset(s.strip().upper() for s in raw.split(",") if s.strip())
     return _DEFAULT_DAY_MODES
+
+
+def _local_base_pct(candidate: Any, timing_meta: Optional[Mapping[str, Any]] = None) -> float:
+    if timing_meta:
+        try:
+            val = float(timing_meta.get("localBasePct") or 0)
+            if val > 0:
+                return val
+        except (TypeError, ValueError):
+            pass
+    alert = getattr(candidate, "alert", None)
+    if isinstance(alert, dict):
+        for key in ("localBaseMovePct", "localBasePct", "ictBaseRelativeMovePct"):
+            try:
+                val = float(alert.get(key) or 0)
+            except (TypeError, ValueError):
+                val = 0.0
+            if val > 0:
+                return val
+    return 0.0
+
+
+def pe_at_armed_base_capture_ok(
+    candidate: Any,
+    *,
+    settings: Any = None,
+    timing_meta: Optional[Mapping[str, Any]] = None,
+) -> tuple[bool, dict[str, Any]]:
+    """True when PUT strike is still on the armed local base (capture at base, not only breakdown)."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {"peAtBaseCapture": True}
+    local_pct = _local_base_pct(candidate, timing_meta)
+    meta["localBasePct"] = round(local_pct, 2)
+    max_pct = float(getattr(settings, "pe_slide_at_base_max_local_base_pct", 22.0) or 22.0)
+    meta["atBaseMaxPct"] = max_pct
+    if local_pct <= 0 or local_pct > max_pct:
+        return False, meta
+    alert = getattr(candidate, "alert", None)
+    alert = alert if isinstance(alert, dict) else {}
+    armed = bool(
+        alert.get("ictBaseArmed")
+        or alert.get("armedBaseLaunch")
+        or alert.get("firstLift")
+        or alert.get("ictArmedBaseLaunch")
+    )
+    meta["ictBaseArmed"] = bool(alert.get("ictBaseArmed"))
+    if not armed:
+        return False, meta
+    return True, meta
 
 
 def pe_slide_breakdown_active(*, day_mode: str = "", settings: Any = None) -> bool:
@@ -106,34 +151,3 @@ def pe_slide_breakdown_ready(
         return False, "pe_slide_momentum_not_bearish", meta
 
     return True, "pe_slide_breakdown_ready", meta
-
-
-def pe_slide_breakdown_put_entry_blocked(
-    candidate: Any,
-    *,
-    day_mode: str = "",
-    settings: Any = None,
-    when: Optional[datetime] = None,
-) -> tuple[bool, str, dict[str, Any]]:
-    """Pretrade: block PUT until slide breakdown timing is ready (midday chop/rally days)."""
-    settings = settings or get_settings()
-    if _side_val(getattr(candidate, "side", "")) != "PUT":
-        return False, "", {}
-    if not pe_slide_breakdown_active(day_mode=day_mode, settings=settings):
-        return False, "", {}
-
-    when = when or datetime.now(IST)
-    from app.engines.open_index_lane import in_open_caution_window_at
-
-    if in_open_caution_window_at(when.astimezone(IST)):
-        return False, "", {}
-
-    sym = str(getattr(candidate, "symbol", "") or "")
-    snap = getattr(candidate, "snap", None)
-    if snap is None:
-        return False, "", {}
-
-    ready, reason, meta = pe_slide_breakdown_ready(sym, snap, settings=settings)
-    if ready:
-        return False, "", meta
-    return True, reason, meta
