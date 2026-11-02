@@ -605,6 +605,13 @@ def _record_deferred_candidate_fallback(
     reason: str,
 ) -> bool:
     """Record only typed failures emitted by the chart gate before order submission."""
+    from app.engines.pad676_flip_capture_guard import record_pad676_ce_mtf_fade_reject
+
+    record_pad676_ce_mtf_fade_reject(
+        str(getattr(candidate, "symbol", "") or ""),
+        getattr(candidate, "side", ""),
+        reason,
+    )
     return suppress_after_preorder_rejection(candidate, reason)
 
 

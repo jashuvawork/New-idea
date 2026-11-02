@@ -332,6 +332,18 @@ def validate_mtf_scalp(
                 ):
                     meta["passed"] = False
                     return False, f"exec_mtf_premium_{req}_fading", meta
+        from app.engines.pad676_flip_capture_guard import premium_mtf_opposes_entry_side
+
+        oppose, oppose_reason = premium_mtf_opposes_entry_side(
+            side,
+            premium_mtf,
+            settings=settings,
+            waive_opposing=bool(first_lift_bypass or open_setup_fade_bypass),
+        )
+        if oppose:
+            meta["passed"] = False
+            meta["premiumMtfOpposing"] = True
+            return False, oppose_reason, meta
         return True, "ok", meta
 
     side_val = side.value
@@ -394,6 +406,14 @@ def validate_mtf_scalp(
             if pt and pt.direction == "BEARISH" and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct:
                 meta["passed"] = False
                 return False, f"exec_mtf_premium_{req}_fading", meta
+        from app.engines.pad676_flip_capture_guard import premium_mtf_opposes_entry_side
+
+        oppose, oppose_reason = premium_mtf_opposes_entry_side(
+            side, premium_mtf, settings=settings,
+        )
+        if oppose:
+            meta["passed"] = False
+            return False, oppose_reason, meta
 
     meta["passed"] = True
     return True, "ok", meta

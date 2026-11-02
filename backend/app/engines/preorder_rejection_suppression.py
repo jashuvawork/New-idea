@@ -15,6 +15,8 @@ PREORDER_PREMIUM_FADING_REASONS = frozenset({
     "exec_premium_fading_at_execution",
     "exec_premium_chart_fading",
     "exec_premium_fading_high_score",
+    "exec_mtf_premium_1m_fading",
+    "exec_mtf_premium_5m_fading",
 })
 
 _suppressed_until: dict[tuple[str, str, str, float, str, str], datetime] = {}
