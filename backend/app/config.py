@@ -3148,6 +3148,11 @@ class Settings(BaseSettings):
     open_nifty_call_lane_on_aligned_open_enabled: bool = True
     open_nifty_put_lane_on_aligned_open_enabled: bool = True
     open_index_lane_align_to_session_enabled: bool = True
+    # 09:15–09:45: nearest weekly expiry → CE lane; same-week next index → PE lane
+    # (SENSEX CE + NIFTY PE when SENSEX is #1; NIFTY CE + SENSEX PE when NIFTY is #1).
+    open_session_expiry_lane_enabled: bool = True
+    open_session_primary_ce_lane_enabled: bool = True
+    open_session_secondary_pe_lane_enabled: bool = True
     # Midday PUT slide breakdown timing (enter on roll-off high, not bounce).
     pe_slide_breakdown_timing_enabled: bool = True
     pe_slide_breakdown_day_modes_csv: str = "CHOP + RALLY,CHOP DAY,CHOP (PRE-10),MOMENTUM RALLY"

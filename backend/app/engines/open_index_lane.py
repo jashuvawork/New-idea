@@ -1,7 +1,10 @@
 """09:15–09:45 IST index-specific open lanes (then normal book after open caution ends).
 
-Research-backed defaults on main: SENSEX CALL + first lift ON; NIFTY PUT opt-in via
-``open_nifty_put_lane_enabled``. Does not waive cash-candle hold, open macro, or premium band.
+Weekly expiry priority (Tue NIFTY / Thu SENSEX): nearest index gets the always-on **CE**
+lane (like legacy SENSEX CALL); same-week next index gets the **PE** lane (like opt-in
+NIFTY PUT). Roles flip through the week — NIFTY CE + SENSEX PE when NIFTY is #1.
+
+Legacy flags still apply when expiry lanes are off or snapshots are missing.
 Replay uses ``resolve_lane_when`` (snap timestamp, not wall clock).
 """
 
@@ -12,6 +15,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
+from app.models.schemas import SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -117,14 +121,73 @@ def _index_open_side_aligned(
     return False
 
 
+def _index_from_symbol_list(symbols: list[str]) -> str | None:
+    for raw in symbols:
+        bucket = _index_bucket(str(raw or ""))
+        if bucket:
+            return bucket
+    return None
+
+
+def resolve_open_session_expiry_lane_pair(
+    snapshots: dict[str, SymbolSnapshot] | None,
+    *,
+    settings: Any = None,
+) -> tuple[str | None, str | None, dict[str, Any]]:
+    """
+    Map expiry proximity to open lane pair: (primary_ce_index, secondary_pe_index).
+
+    Uses ``expiry_proximity_ranks`` (nearest weekly expiry vs same-week next index).
+    """
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {"openSessionExpiryLanes": True}
+    if not bool(getattr(settings, "open_session_expiry_lane_enabled", True)):
+        return None, None, {**meta, "mode": "legacy"}
+    if not snapshots:
+        return None, None, {**meta, "mode": "no_snapshots"}
+    from app.engines.bad_day_routing import expiry_proximity_ranks
+
+    nearest, nxt = expiry_proximity_ranks(snapshots)
+    meta["nearestSymbols"] = list(nearest)
+    meta["nextSymbols"] = list(nxt)
+    primary = _index_from_symbol_list(nearest)
+    secondary = _index_from_symbol_list(nxt)
+    if not primary:
+        return None, None, {**meta, "mode": "legacy"}
+    meta["mode"] = "expiry_pair"
+    meta["primaryCeIndex"] = primary
+    meta["secondaryPeIndex"] = secondary
+    return primary, secondary, meta
+
+
 def allowed_open_lane_sides(
     index: str,
     settings: Any,
     *,
     symbol: str = "",
     snap: Any = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
 ) -> set[str] | None:
     """Sides allowed in open caution for this index, or None when lane idle."""
+    settings = settings or get_settings()
+    if snapshots:
+        primary, secondary, prof = resolve_open_session_expiry_lane_pair(
+            snapshots, settings=settings,
+        )
+        if prof.get("mode") == "expiry_pair" and primary:
+            sides: set[str] = set()
+            if index == primary and bool(
+                getattr(settings, "open_session_primary_ce_lane_enabled", True)
+            ):
+                sides.add("CALL")
+            if (
+                secondary
+                and index == secondary
+                and bool(getattr(settings, "open_session_secondary_pe_lane_enabled", True))
+            ):
+                sides.add("PUT")
+            return sides or None
+
     if index == "SENSEX":
         sides: set[str] = set()
         if bool(getattr(settings, "open_sensex_call_lane_enabled", True)):
@@ -171,6 +234,9 @@ def open_index_lane_summary(settings: Any = None) -> dict[str, Any]:
         ),
         "niftyPutLaneOnAlignedOpen": bool(
             getattr(settings, "open_nifty_put_lane_on_aligned_open_enabled", True)
+        ),
+        "sessionExpiryLanesEnabled": bool(
+            getattr(settings, "open_session_expiry_lane_enabled", True)
         ),
         "postOpenSetupUntilIst": (
             f"{getattr(settings, 'post_open_setup_until_hour', 10):02d}:"
@@ -269,10 +335,14 @@ def open_index_lane_qualified(
     *,
     settings: Any = None,
     when: Optional[datetime] = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """True when open caution window + index lane side + lane quality all pass."""
     ok, reason, meta = validate_open_index_lane(
-        candidate, settings=settings, when=resolve_lane_when(candidate, when),
+        candidate,
+        settings=settings,
+        when=resolve_lane_when(candidate, when),
+        snapshots=snapshots,
     )
     if not ok:
         return False, reason, meta
@@ -286,6 +356,7 @@ def validate_open_index_lane(
     *,
     settings: Any = None,
     when: Optional[datetime] = None,
+    snapshots: dict[str, SymbolSnapshot] | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
     Returns (allowed, reason, meta). Idle outside open caution and when master off.
@@ -304,15 +375,25 @@ def validate_open_index_lane(
         return True, "ok", {}
 
     snap = getattr(candidate, "snap", None)
-    allowed_sides = allowed_open_lane_sides(index, settings, symbol=sym, snap=snap)
+    if snapshots is None and snap is not None:
+        sym_u = sym.upper()
+        if sym_u:
+            snapshots = {sym_u: snap}
+    allowed_sides = allowed_open_lane_sides(
+        index, settings, symbol=sym, snap=snap, snapshots=snapshots,
+    )
     if not allowed_sides:
         return True, "ok", {}
 
     side = _side_value(getattr(candidate, "side", ""))
+    _, _, expiry_meta = resolve_open_session_expiry_lane_pair(
+        snapshots, settings=settings,
+    )
     meta: dict[str, Any] = {
         "openIndexLane": True,
         "openIndexLaneIndex": index,
         "openIndexLaneAllowedSides": sorted(allowed_sides),
+        **expiry_meta,
     }
     if side not in allowed_sides:
         if len(allowed_sides) == 1:

@@ -34,7 +34,9 @@ def _active_open_lanes(
             snap = getattr(candidate, "snap", None)
         if snap is None and snapshots:
             snap = snapshots.get(index)
-        sides = allowed_open_lane_sides(index, settings, symbol=index, snap=snap)
+        sides = allowed_open_lane_sides(
+            index, settings, symbol=index, snap=snap, snapshots=snapshots,
+        )
         if not sides:
             continue
         for side in sorted(sides):
@@ -225,7 +227,7 @@ def validate_open_setup_entry(
             return False, "open_caution_non_lane_index", meta
 
     lane_ok, lane_reason, lane_meta = validate_open_index_lane(
-        candidate, settings=settings, when=when,
+        candidate, settings=settings, when=when, snapshots=snapshots,
     )
     meta.update(lane_meta)
     if not lane_ok:
