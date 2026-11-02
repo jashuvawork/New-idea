@@ -247,8 +247,6 @@ def validate_execution_charts(
     building_rip_bypass: bool = False,
     open_caution_bypass: bool = False,
     open_setup_fade_bypass: bool = False,
-    symbol: str = "",
-    snap: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
@@ -314,8 +312,6 @@ def validate_execution_charts(
             pad_lane_bypass=pad_lane_bypass,
             open_setup_fade_bypass=open_setup_fade_bypass,
             scalp_mode=scalp_mode,
-            symbol=symbol,
-            snap=snap,
         )
         if not passed:
             return False, reason, mtf_meta
@@ -622,8 +618,6 @@ async def monitor_trade_chart_before_execution(
         building_rip_bypass=building_rip_fade_bypass,
         open_caution_bypass=open_setup_fade_bypass,
         open_setup_fade_bypass=open_setup_fade_bypass,
-        symbol=symbol,
-        snap=snap,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta

@@ -3148,15 +3148,14 @@ class Settings(BaseSettings):
     open_nifty_call_lane_on_aligned_open_enabled: bool = True
     open_nifty_put_lane_on_aligned_open_enabled: bool = True
     open_index_lane_align_to_session_enabled: bool = True
-    # #676 symmetric capture: flip-day entry guards (no pad rank changes).
-    pad676_flip_capture_guard_enabled: bool = True
-    pad676_flip_capture_day_modes_csv: str = "CHOP + RALLY,CHOP DAY,CHOP (PRE-10),MOMENTUM RALLY"
-    pad676_session_tape_align_enabled: bool = True
-    pad676_block_put_into_index_rally_enabled: bool = True
-    pad676_defer_put_after_ce_fade_enabled: bool = True
-    pad676_defer_put_after_ce_fade_seconds: int = 120
-    pad676_premium_mtf_opposing_block_enabled: bool = True
-    pad676_premium_mtf_opposing_min_momentum_pct: float = 0.45
+    # Midday PUT slide breakdown timing (enter on roll-off high, not bounce).
+    pe_slide_breakdown_timing_enabled: bool = True
+    pe_slide_breakdown_day_modes_csv: str = "CHOP + RALLY,CHOP DAY,CHOP (PRE-10),MOMENTUM RALLY"
+    pe_slide_breakdown_min_slide_fraction: float = 0.45
+    pe_slide_breakdown_min_pullback_pct_from_high: float = 0.22
+    pe_slide_breakdown_bounce_max_mom5_pct: float = 0.05
+    pe_slide_breakdown_min_bearish_mom5_pct: float = 0.03
+    pe_slide_breakdown_near_miss_waive_enabled: bool = True
     # Combined open setup (selector + pretrade + selective fade bypass).
     open_setup_guards_enabled: bool = True
     # When True, block PUT on bullish open / CALL on bearish open (not all PUTs).
