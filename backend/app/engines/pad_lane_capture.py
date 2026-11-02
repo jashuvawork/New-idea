@@ -1472,39 +1472,9 @@ def atm_armed_local_base_premium_fade_bypass(
     return True
 
 
-def open_caution_premium_fade_bypass(
-    alert: Optional[dict[str, Any]],
-    explosion_event: Any = None,
-    *,
-    when: Optional[datetime] = None,
-    snap: Optional[SymbolSnapshot] = None,
-    causal_rank_score: Optional[float] = None,
-    causal_grade: Optional[str] = None,
-) -> bool:
-    """09:20–09:45 local-base first lift — exec 1m premium dip is often noise, not a real fade."""
-    settings = get_settings()
-    if not bool(getattr(settings, "open_caution_premium_fade_fill_enabled", True)):
-        return False
-    from app.engines.open_index_lane import in_open_caution_window_at
-
-    ts = when
-    if ts is None:
-        ts = datetime.now(IST)
-    elif ts.tzinfo is None:
-        ts = ts.replace(tzinfo=IST)
-    else:
-        ts = ts.astimezone(IST)
-    if not in_open_caution_window_at(ts):
-        return False
-    if not isinstance(alert, dict):
-        return False
-    tier = str(
-        alert.get("tier") or getattr(explosion_event, "tier", "") or ""
-    ).upper()
-    if tier not in ("ELITE", "EXPLODING", "BUILDING", "WATCH"):
-        return False
+def _open_setup_first_lift_evidence(alert: dict[str, Any]) -> bool:
     moment = str(alert.get("momentType") or "").lower()
-    first_lift = bool(
+    return bool(
         alert.get("ictFirstLift")
         or alert.get("firstLift")
         or alert.get("firstLiftCapture")
@@ -1517,9 +1487,30 @@ def open_caution_premium_fade_bypass(
             "armed_base_launch",
             "ict_base_armed",
             "v_rip_session_low",
+            "v_rip_session_high",
         )
     )
-    if not first_lift:
+
+
+def _open_setup_premium_fade_bypass_core(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+    *,
+    when: Optional[datetime] = None,
+    snap: Optional[SymbolSnapshot] = None,
+    causal_rank_score: Optional[float] = None,
+    causal_grade: Optional[str] = None,
+    allowed_tiers: frozenset[str],
+) -> bool:
+    settings = get_settings()
+    if not isinstance(alert, dict):
+        return False
+    tier = str(
+        alert.get("tier") or getattr(explosion_event, "tier", "") or ""
+    ).upper()
+    if tier not in allowed_tiers:
+        return False
+    if not _open_setup_first_lift_evidence(alert):
         return False
     min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
     max_lb = float(
@@ -1577,6 +1568,103 @@ def open_caution_premium_fade_bypass(
     return True
 
 
+def open_caution_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+    *,
+    when: Optional[datetime] = None,
+    snap: Optional[SymbolSnapshot] = None,
+    causal_rank_score: Optional[float] = None,
+    causal_grade: Optional[str] = None,
+) -> bool:
+    """09:15–09:45 local-base first lift — exec premium dip is often noise, not a real fade."""
+    settings = get_settings()
+    if not bool(getattr(settings, "open_caution_premium_fade_fill_enabled", True)):
+        return False
+    from app.engines.open_index_lane import in_open_caution_window_at
+
+    ts = when
+    if ts is None:
+        ts = datetime.now(IST)
+    elif ts.tzinfo is None:
+        ts = ts.replace(tzinfo=IST)
+    else:
+        ts = ts.astimezone(IST)
+    if not in_open_caution_window_at(ts):
+        return False
+    return _open_setup_premium_fade_bypass_core(
+        alert,
+        explosion_event,
+        when=ts,
+        snap=snap,
+        causal_rank_score=causal_rank_score,
+        causal_grade=causal_grade,
+        allowed_tiers=frozenset({"ELITE", "EXPLODING", "BUILDING", "WATCH"}),
+    )
+
+
+def post_open_setup_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+    *,
+    when: Optional[datetime] = None,
+    snap: Optional[SymbolSnapshot] = None,
+    causal_rank_score: Optional[float] = None,
+    causal_grade: Optional[str] = None,
+) -> bool:
+    """09:45–post_open_setup_until — capture open rip continuation without exec_mtf 5m choke."""
+    settings = get_settings()
+    if not bool(getattr(settings, "post_open_setup_premium_fade_fill_enabled", True)):
+        return False
+    from app.engines.open_index_lane import in_post_open_setup_window_at
+
+    ts = when
+    if ts is None:
+        ts = datetime.now(IST)
+    elif ts.tzinfo is None:
+        ts = ts.replace(tzinfo=IST)
+    else:
+        ts = ts.astimezone(IST)
+    if not in_post_open_setup_window_at(ts):
+        return False
+    return _open_setup_premium_fade_bypass_core(
+        alert,
+        explosion_event,
+        when=ts,
+        snap=snap,
+        causal_rank_score=causal_rank_score,
+        causal_grade=causal_grade,
+        allowed_tiers=frozenset({"ELITE", "EXPLODING"}),
+    )
+
+
+def open_setup_premium_fade_bypass(
+    alert: Optional[dict[str, Any]],
+    explosion_event: Any = None,
+    *,
+    when: Optional[datetime] = None,
+    snap: Optional[SymbolSnapshot] = None,
+    causal_rank_score: Optional[float] = None,
+    causal_grade: Optional[str] = None,
+) -> bool:
+    """Open caution or post-open continuation waive for shallow premium MTF fades."""
+    return open_caution_premium_fade_bypass(
+        alert,
+        explosion_event,
+        when=when,
+        snap=snap,
+        causal_rank_score=causal_rank_score,
+        causal_grade=causal_grade,
+    ) or post_open_setup_premium_fade_bypass(
+        alert,
+        explosion_event,
+        when=when,
+        snap=snap,
+        causal_rank_score=causal_rank_score,
+        causal_grade=causal_grade,
+    )
+
+
 def local_base_premium_fade_bypass(
     alert: Optional[dict[str, Any]],
     explosion_event: Any = None,
@@ -1594,7 +1682,7 @@ def local_base_premium_fade_bypass(
         ts = raw if isinstance(raw, datetime) else None
 
     return (
-        open_caution_premium_fade_bypass(alert, explosion_event, when=ts, snap=snap)
+        open_setup_premium_fade_bypass(alert, explosion_event, when=ts, snap=snap)
         or symmetric_near_base_premium_fade_bypass(alert, explosion_event)
         or shallow_otm_local_base_premium_fade_bypass(alert, explosion_event)
         or atm_armed_local_base_premium_fade_bypass(alert, explosion_event)

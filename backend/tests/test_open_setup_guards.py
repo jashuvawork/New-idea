@@ -37,6 +37,24 @@ def _cand(symbol: str, side: Side, strike: float, *, spot: float | None = None, 
 
 
 @patch("app.engines.index_tick_helpers.resolve_index_session")
+def test_nifty_call_lane_on_bullish_open_allows_non_lane_when_aligned(mock_session):
+    mock_session.return_value = {"open": 22800.0, "last": 22950.0, "hi": 22950.0, "lo": 22800.0}
+    s = Settings(
+        open_setup_guards_enabled=True,
+        open_index_lane_enabled=False,
+        open_sensex_call_lane_enabled=True,
+        open_nifty_put_lane_enabled=False,
+        open_nifty_call_lane_on_aligned_open_enabled=True,
+        open_caution_non_lane_index_blocked=True,
+        open_caution_side_align_index_enabled=True,
+        open_caution_itm_band_enabled=False,
+    )
+    cand = _cand("NIFTY", Side.CALL, 22850.0, spot=22950.0)
+    ok, reason, _ = validate_open_setup_entry(cand, settings=s, when=OPEN)
+    assert ok, reason
+
+
+@patch("app.engines.index_tick_helpers.resolve_index_session")
 def test_put_blocked_on_bullish_open(mock_session):
     mock_session.return_value = {"open": 73000.0, "last": 73500.0, "hi": 73500.0, "lo": 73000.0}
     s = Settings(open_caution_side_align_index_enabled=True)

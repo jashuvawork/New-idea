@@ -58,7 +58,72 @@ def in_open_caution_window_at(when: datetime) -> bool:
     return earliest <= current < end
 
 
-def allowed_open_lane_sides(index: str, settings: Any) -> set[str] | None:
+def in_post_open_setup_window_at(when: datetime) -> bool:
+    """09:45–post_open_setup_until: continuation fills after open caution (not full-day waive)."""
+    settings = get_settings()
+    if not isinstance(when, datetime):
+        return False
+    local = when.astimezone(IST)
+    try:
+        current = int(local.hour) * 60 + int(local.minute)
+    except (TypeError, ValueError):
+        return False
+
+    def _clock_minutes(hour_attr: str, min_attr: str, default_h: int, default_m: int) -> int:
+        try:
+            h = int(getattr(settings, hour_attr, default_h))
+            m = int(getattr(settings, min_attr, default_m))
+            return h * 60 + m
+        except (TypeError, ValueError):
+            return default_h * 60 + default_m
+
+    start = _clock_minutes("open_caution_until_hour", "open_caution_until_minute", 9, 45)
+    end = _clock_minutes(
+        "post_open_setup_until_hour",
+        "post_open_setup_until_minute",
+        10,
+        30,
+    )
+    return start <= current < end
+
+
+def _index_open_side_aligned(
+    index: str,
+    side: str,
+    *,
+    symbol: str = "",
+    snap: Any = None,
+    settings: Any = None,
+) -> bool:
+    """CALL on bullish open / PUT on bearish open — mirrors open_caution_side_align (CE/PE)."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "open_index_lane_align_to_session_enabled", True)):
+        return False
+    from app.engines.index_tick_helpers import resolve_index_session
+
+    sym = symbol or index
+    ext = resolve_index_session(sym, snap)
+    session_open = float(ext.get("open") or 0)
+    spot = float(ext.get("last") or 0) or float(getattr(snap, "spot", 0) or 0)
+    if session_open <= 0 or spot <= 0:
+        return False
+    min_move = float(getattr(settings, "open_side_confirmation_min_index_move_pct", 0.10) or 0.10)
+    move_pct = (spot - session_open) / session_open * 100.0
+    side_u = _side_value(side)
+    if side_u == "CALL":
+        return move_pct >= min_move
+    if side_u == "PUT":
+        return move_pct <= -min_move
+    return False
+
+
+def allowed_open_lane_sides(
+    index: str,
+    settings: Any,
+    *,
+    symbol: str = "",
+    snap: Any = None,
+) -> set[str] | None:
     """Sides allowed in open caution for this index, or None when lane idle."""
     if index == "SENSEX":
         sides: set[str] = set()
@@ -69,10 +134,17 @@ def allowed_open_lane_sides(index: str, settings: Any) -> set[str] | None:
         return sides or None
     if index == "NIFTY":
         sides = set()
+        sym = symbol or "NIFTY"
         if bool(getattr(settings, "open_nifty_put_lane_enabled", False)):
             sides.add("PUT")
         if bool(getattr(settings, "open_nifty_call_lane_enabled", False)):
             sides.add("CALL")
+        if bool(getattr(settings, "open_nifty_call_lane_on_aligned_open_enabled", True)):
+            if _index_open_side_aligned(index, "CALL", symbol=sym, snap=snap, settings=settings):
+                sides.add("CALL")
+        if bool(getattr(settings, "open_nifty_put_lane_on_aligned_open_enabled", True)):
+            if _index_open_side_aligned(index, "PUT", symbol=sym, snap=snap, settings=settings):
+                sides.add("PUT")
         return sides or None
     return None
 
@@ -94,6 +166,16 @@ def open_index_lane_summary(settings: Any = None) -> dict[str, Any]:
         "sensexCallLane": bool(getattr(settings, "open_sensex_call_lane_enabled", True)),
         "sensexPutLane": bool(getattr(settings, "open_sensex_put_lane_enabled", True)),
         "niftyPutLane": bool(getattr(settings, "open_nifty_put_lane_enabled", False)),
+        "niftyCallLaneOnAlignedOpen": bool(
+            getattr(settings, "open_nifty_call_lane_on_aligned_open_enabled", True)
+        ),
+        "niftyPutLaneOnAlignedOpen": bool(
+            getattr(settings, "open_nifty_put_lane_on_aligned_open_enabled", True)
+        ),
+        "postOpenSetupUntilIst": (
+            f"{getattr(settings, 'post_open_setup_until_hour', 10):02d}:"
+            f"{getattr(settings, 'post_open_setup_until_minute', 30):02d}"
+        ),
         "requireFirstLift": bool(getattr(settings, "open_index_lane_require_first_lift", True)),
         "minEliteScore": float(getattr(settings, "open_index_lane_min_elite_score", 90.0) or 90.0),
         "maxLocalBasePct": float(
@@ -221,7 +303,8 @@ def validate_open_index_lane(
     if not index:
         return True, "ok", {}
 
-    allowed_sides = allowed_open_lane_sides(index, settings)
+    snap = getattr(candidate, "snap", None)
+    allowed_sides = allowed_open_lane_sides(index, settings, symbol=sym, snap=snap)
     if not allowed_sides:
         return True, "ok", {}
 

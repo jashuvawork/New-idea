@@ -19,12 +19,22 @@ from zoneinfo import ZoneInfo
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def _active_open_lanes(settings: Any) -> list[tuple[str, str]]:
+def _active_open_lanes(
+    settings: Any,
+    *,
+    candidate: Any = None,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+) -> list[tuple[str, str]]:
     from app.engines.open_index_lane import allowed_open_lane_sides
 
     lanes: list[tuple[str, str]] = []
     for index in ("SENSEX", "NIFTY"):
-        sides = allowed_open_lane_sides(index, settings)
+        snap = None
+        if candidate is not None and _index_bucket(str(getattr(candidate, "symbol", "") or "")) == index:
+            snap = getattr(candidate, "snap", None)
+        if snap is None and snapshots:
+            snap = snapshots.get(index)
+        sides = allowed_open_lane_sides(index, settings, symbol=index, snap=snap)
         if not sides:
             continue
         for side in sorted(sides):
@@ -208,7 +218,7 @@ def validate_open_setup_entry(
     if not align_ok:
         return False, align_reason, meta
 
-    lanes = _active_open_lanes(settings)
+    lanes = _active_open_lanes(settings, candidate=candidate, snapshots=snapshots)
     if bool(getattr(settings, "open_caution_non_lane_index_blocked", True)) and lanes:
         allowed = any(index == idx and side == req for idx, req in lanes)
         if not allowed:

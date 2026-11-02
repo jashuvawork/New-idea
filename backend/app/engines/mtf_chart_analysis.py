@@ -263,6 +263,7 @@ def validate_mtf_scalp(
     vertical_rip_bypass: bool = False,
     first_lift_bypass: bool = False,
     pad_lane_bypass: bool = False,
+    open_setup_fade_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
@@ -276,7 +277,13 @@ def validate_mtf_scalp(
     if not settings.execution_mtf_enabled or not index_mtf:
         return True, "ok", {}
 
-    if premium_led_bypass or vertical_rip_bypass or first_lift_bypass or pad_lane_bypass:
+    if (
+        premium_led_bypass
+        or vertical_rip_bypass
+        or first_lift_bypass
+        or pad_lane_bypass
+        or open_setup_fade_bypass
+    ):
         meta = {
             "index": mtf_summary(index_mtf, side),
             "passed": True,
@@ -284,6 +291,7 @@ def validate_mtf_scalp(
             "verticalRipBypass": vertical_rip_bypass,
             "firstLiftBypass": first_lift_bypass,
             "padLaneBypass": pad_lane_bypass,
+            "openSetupFadeBypass": open_setup_fade_bypass,
             # open-gap ELITE also arrives via premium_led_bypass from execution monitor
             "openGapEliteBypass": bool(premium_led_bypass or vertical_rip_bypass),
         }
@@ -294,6 +302,7 @@ def validate_mtf_scalp(
             and settings.execution_chart_premium_check_enabled
             and not pad_lane_bypass
             and not first_lift_bypass
+            and not open_setup_fade_bypass
         ):
             for req in ("1m", "5m"):
                 pt = premium_mtf.get(req)
@@ -301,12 +310,18 @@ def validate_mtf_scalp(
                     meta["passed"] = False
                     return False, f"exec_mtf_premium_{req}_fading", meta
         if premium_mtf and settings.execution_chart_premium_check_enabled and (
-            pad_lane_bypass or first_lift_bypass
+            pad_lane_bypass or first_lift_bypass or open_setup_fade_bypass
         ):
-            shallow_floor = float(
-                getattr(settings, "pad_lane_premium_fade_fill_max_drawdown_pct", -1.2)
-                or -1.2
-            )
+            if open_setup_fade_bypass:
+                shallow_floor = float(
+                    getattr(settings, "open_caution_premium_fade_max_drawdown_pct", -2.8)
+                    or -2.8
+                )
+            else:
+                shallow_floor = float(
+                    getattr(settings, "pad_lane_premium_fade_fill_max_drawdown_pct", -1.2)
+                    or -1.2
+                )
             for req in ("1m", "5m"):
                 pt = premium_mtf.get(req)
                 if (

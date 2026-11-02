@@ -3140,6 +3140,14 @@ class Settings(BaseSettings):
     open_caution_premium_fade_max_local_base_pct: float = 28.0
     open_caution_premium_fade_min_rank_score: float = 90.0
     open_caution_premium_fade_allow_grade_s: bool = True
+    # 09:45–10:30 (default): open-rip continuation — same shallow MTF fade floor as open caution.
+    post_open_setup_until_hour: int = 10
+    post_open_setup_until_minute: int = 30
+    post_open_setup_premium_fade_fill_enabled: bool = True
+    # NIFTY lane opens for index-aligned side during 09:15–09:45 (bullish CE / bearish PE).
+    open_nifty_call_lane_on_aligned_open_enabled: bool = True
+    open_nifty_put_lane_on_aligned_open_enabled: bool = True
+    open_index_lane_align_to_session_enabled: bool = True
     # Combined open setup (selector + pretrade + selective fade bypass).
     open_setup_guards_enabled: bool = True
     # When True, block PUT on bullish open / CALL on bearish open (not all PUTs).
