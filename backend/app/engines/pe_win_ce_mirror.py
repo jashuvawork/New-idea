@@ -1418,6 +1418,15 @@ def pe_win_ce_mirror_premium_fade_bypass(
     if side_u != "CALL":
         return False
     ev = evidence or {}
+    if bool(getattr(settings, "ce_rally_at_base_waive_mtf_premium_fade", True)):
+        from app.engines.ce_rally_lift_timing import ce_at_armed_base_capture_ok
+
+        at_base, _ = ce_at_armed_base_capture_ok(
+            type("C", (), {"alert": dict(ev), "side": Side.CALL})(),
+            settings=settings,
+        )
+        if at_base:
+            return True
     from app.engines.index_session_dominant_trend import index_trend_premium_fade_aligned
 
     if index_trend_premium_fade_aligned(

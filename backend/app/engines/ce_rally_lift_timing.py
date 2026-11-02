@@ -1,19 +1,15 @@
-"""Midday CALL rally lift timing — enter on lift off low/base, not cold chase (CE/PE book infra).
+"""Midday CALL rally lift timing — prefer capture at armed base; allow continuation fills.
 
-Symmetric to pe_slide_breakdown_timing: positive readiness on the bullish leg; at-base
-capture allowed inside a tight local-base band; blocks late chase when timing is COLD.
+Symmetric infra to pe_slide_breakdown_timing: rally-ready detection and at-base band for
+near_miss / premium-fade waivers. Does not block late continuation entries (e.g. 15:22).
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Mapping, Optional
-from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.models.schemas import Side, SymbolSnapshot
-
-IST = ZoneInfo("Asia/Kolkata")
 
 _DEFAULT_DAY_MODES = frozenset({
     "CHOP + RALLY",
@@ -154,64 +150,15 @@ def ce_rally_lift_ready(
     return True, "ce_rally_lift_ready", meta
 
 
-def ce_rally_lift_call_entry_blocked(
-    candidate: Any,
-    *,
-    day_mode: str = "",
-    settings: Any = None,
-    when: Optional[datetime] = None,
-    timing_meta: Optional[Mapping[str, Any]] = None,
-) -> tuple[bool, str, dict[str, Any]]:
-    """Pretrade: allow CALL at armed base OR rally-ready; else block midday chase."""
-    settings = settings or get_settings()
-    if _side_val(getattr(candidate, "side", "")) != "CALL":
-        return False, "", {}
-    if not ce_rally_lift_active(day_mode=day_mode, settings=settings):
-        return False, "", {}
-
-    when = when or datetime.now(IST)
-    from app.engines.open_index_lane import in_open_caution_window_at
-
-    if in_open_caution_window_at(when.astimezone(IST)):
-        return False, "", {}
-
-    sym = str(getattr(candidate, "symbol", "") or "")
-    snap = getattr(candidate, "snap", None)
-    if snap is None:
-        return False, "", {}
-
-    at_base, base_meta = ce_at_armed_base_capture_ok(
-        candidate, settings=settings, timing_meta=timing_meta,
-    )
-    if at_base:
-        return False, "", base_meta
-
-    chase_max = float(
-        getattr(settings, "ce_rally_chase_max_local_base_pct", 10.0) or 10.0
-    )
-    local_pct = _local_base_pct(candidate, timing_meta)
-    if local_pct > chase_max:
-        meta = {**base_meta, "localBasePct": local_pct, "chaseMaxPct": chase_max}
-        return True, "ce_chase_past_local_base", meta
-
-    ready, reason, meta = ce_rally_lift_ready(sym, snap, settings=settings)
-    if ready:
-        return False, "", meta
-    return True, reason, meta
-
-
 def ce_cold_timing_chase_blocked(
     candidate: Any,
     timing_meta: Optional[Mapping[str, Any]] = None,
     *,
     settings: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
-    """
-    Block armed-base / first-lift bypass when timing is COLD and premium is already
-    extended off local base (Nov 2 CALL 23050 @ 14% off base).
-    """
+    """Legacy hook (disabled by default): optional cold-timing chase block — not used in prod."""
     settings = settings or get_settings()
-    if not bool(getattr(settings, "ce_cold_timing_chase_block_enabled", True)):
+    if not bool(getattr(settings, "ce_cold_timing_chase_block_enabled", False)):
         return False, "", {}
     if _side_val(getattr(candidate, "side", "")) != "CALL":
         return False, "", {}

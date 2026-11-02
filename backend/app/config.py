@@ -3163,10 +3163,11 @@ class Settings(BaseSettings):
     ce_rally_lift_min_lift_pct_from_low: float = 0.22
     ce_rally_lift_dump_trap_max_mom5_pct: float = -0.05
     ce_rally_lift_min_bullish_mom5_pct: float = 0.03
-    ce_rally_at_base_max_local_base_pct: float = 8.0
+    ce_rally_at_base_max_local_base_pct: float = 22.0
     ce_rally_chase_max_local_base_pct: float = 10.0
     ce_rally_lift_near_miss_waive_enabled: bool = True
-    ce_cold_timing_chase_block_enabled: bool = True
+    ce_rally_at_base_waive_mtf_premium_fade: bool = True
+    ce_cold_timing_chase_block_enabled: bool = False
     ce_cold_timing_max_local_base_pct: float = 10.0
     # Combined open setup (selector + pretrade + selective fade bypass).
     open_setup_guards_enabled: bool = True

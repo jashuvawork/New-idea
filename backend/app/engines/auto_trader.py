@@ -1060,14 +1060,6 @@ async def _open_from_candidate(
             if isinstance(getattr(candidate, "alert", None), dict)
             else {}
         )
-        from app.engines.ce_rally_lift_timing import ce_cold_timing_chase_blocked
-
-        cold_chase, cold_chase_reason, _cold_chase_meta = ce_cold_timing_chase_blocked(
-            candidate, timing_meta, settings=settings,
-        )
-        if cold_chase:
-            return False, cold_chase_reason
-
         if (
             timing_blocked
             and not (
