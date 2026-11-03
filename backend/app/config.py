@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     shadow_trade_all_signals: bool = True
     # Live: skip INR force-stops / scratch exits — let open trades hit structural SL.
     live_hold_to_structural_sl: bool = True
-    # Live and paper: flatten all open legs at power_hour_end (15:45 IST, broker last print).
+    # Live and paper: flatten all open legs at power_hour_end (default 15:45 IST, broker last print).
     live_session_close_force_exit_enabled: bool = True
     # Open-trade MTM: reject WS/REST spike glitches vs entry, heatmap, and tick median.
     open_trade_ltp_sanity_enabled: bool = True

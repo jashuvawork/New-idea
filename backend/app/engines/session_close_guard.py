@@ -1,4 +1,4 @@
-"""Force-flat open live / live-parity legs at the 15:45 IST broker last print."""
+"""Force-flat open auto-trader legs at power_hour_end (default 15:45 IST broker last print)."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _minutes_now() -> int:
 
 
 def live_session_close_force_exit_applies(settings: Settings | None = None) -> bool:
-    """True when auto-trader must flatten at calendar close (live or paper-live parity)."""
+    """True when auto-trader must flatten at power_hour_end (live, paper, or paper-live parity)."""
     settings = settings or get_settings()
     if not bool(getattr(settings, "live_session_close_force_exit_enabled", True)):
         return False
@@ -33,7 +33,8 @@ def live_session_close_force_exit_applies(settings: Settings | None = None) -> b
         return False
     is_live = bool(getattr(settings, "enable_live_trading", False))
     parity = bool(getattr(settings, "paper_live_parity_enabled", True))
-    if not is_live and not parity:
+    paper = bool(getattr(settings, "paper_trading", False))
+    if not is_live and not parity and not paper:
         return False
     now = datetime.now(IST)
     if now.weekday() >= 5:
