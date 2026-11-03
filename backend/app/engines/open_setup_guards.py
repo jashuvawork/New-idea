@@ -1,4 +1,4 @@
-"""09:20–09:45 open book: index lanes + cash-open side align + ITM depth (CE/PE symmetric)."""
+"""09:15–09:45 open book: index lanes + cash-open side align + ITM depth (CE/PE symmetric)."""
 
 from __future__ import annotations
 
@@ -194,7 +194,7 @@ def validate_open_setup_entry(
     when: Optional[datetime] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
-    Open caution guards before SELECT / pretrade. Idle outside 09:20–09:45.
+    Open caution guards before SELECT / pretrade. Idle outside 09:15–09:45.
     """
     settings = settings or get_settings()
     when = resolve_lane_when(candidate, when)
