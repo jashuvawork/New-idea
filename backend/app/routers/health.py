@@ -3,7 +3,7 @@
 from fastapi import APIRouter
 
 from app.config import audit_week_local_base_overrides, get_settings
-from app.engines.capital_allocator import get_lot_sizes_meta
+from app.engines.capital_allocator import get_lot_sizes_meta, resolve_daily_loss_stop_inr
 from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.engines.sep917_legacy_profile import sep917_legacy_profile_summary as _sep917_legacy_profile_summary
 from app.engines.open_index_lane import open_index_lane_summary
@@ -117,7 +117,8 @@ async def deployment_status():
             "constituentStockBreadthOverrideEnabled": settings.constituent_stock_breadth_override_enabled,
             "indexPinPutBlockEnabled": settings.index_pin_put_block_enabled,
             "indexMomentumEnabled": settings.index_momentum_enabled,
-            "dailyLossStopInr": settings.daily_loss_stop_inr,
+            "dailyLossStopCapitalPct": settings.daily_loss_stop_capital_pct,
+            "dailyLossStopInr": resolve_daily_loss_stop_inr(),
             "dailyMaxTradesChop": settings.daily_max_trades_chop,
             "primaryWindowStartIst": f"{settings.primary_window_start_hour:02d}:{settings.primary_window_start_minute:02d}",
             "sureShotModeEnabled": settings.sure_shot_mode_enabled,

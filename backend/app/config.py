@@ -3207,9 +3207,10 @@ class Settings(BaseSettings):
     neutral_breadth_explosion_min_score: float = 55.0
     sensex_rank_bonus: float = 10.0
     nifty_rank_penalty_chop: float = 5.0
-    # Daily risk budget = 10% of the ~200k sizing capital. This is a CEILING that halts
-    # new entries, not a target — selectivity + per-trade caps keep us far below it.
-    daily_loss_stop_inr: float = 20_000.0
+    # Daily loss stop: pct of sizing capital (default 20% of ₹2L → ₹40k). Fixed INR used
+    # only when daily_loss_stop_capital_pct <= 0. Halts new entries, not a loss target.
+    daily_loss_stop_capital_pct: float = 0.20
+    daily_loss_stop_inr: float = 0.0
     daily_max_trades_chop: int = 20
     daily_max_trades_pre10_chop: int = 5
     pre10_chop_min_rank_score: float = 60.0

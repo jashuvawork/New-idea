@@ -948,6 +948,26 @@ def _capital_base_for_stages() -> float:
     return settings.max_sizing_capital_inr or settings.fallback_capital_inr
 
 
+def resolve_daily_loss_stop_inr(
+    capital_base: float | None = None,
+    settings: Any | None = None,
+) -> float:
+    """Session loss ceiling for new entries — pct of capital book when pct > 0."""
+    settings = settings or get_settings()
+    pct = float(getattr(settings, "daily_loss_stop_capital_pct", 0) or 0)
+    if pct > 0:
+        if capital_base is not None:
+            base = float(capital_base)
+        else:
+            base = float(
+                getattr(settings, "max_sizing_capital_inr", 0)
+                or getattr(settings, "fallback_capital_inr", 0)
+                or _capital_base_for_stages()
+            )
+        return max(0.0, round(base * pct, 2))
+    return float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
+
+
 def _resolve_daily_target_inr(capital_base: float) -> float:
     from app.engines.daily_18pct_strategy import resolve_daily_target_inr
     return resolve_daily_target_inr(capital_base)
@@ -1105,7 +1125,7 @@ def update_daily_profit_gate(
         stages=stages,
     )
 
-    loss_stop = float(getattr(settings, "daily_loss_stop_inr", 0) or 0)
+    loss_stop = resolve_daily_loss_stop_inr(capital_base)
     if loss_stop > 0 and session_pnl <= -abs(loss_stop):
         if snapshots:
             from app.engines.bad_day_routing import expiry_daily_loss_stop_bypass_active
