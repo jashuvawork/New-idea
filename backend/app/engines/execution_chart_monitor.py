@@ -428,17 +428,37 @@ async def monitor_trade_chart_before_execution(
     )
 
     _snap_when = getattr(snap, "timestamp", None) if snap is not None else None
+    alert_map = alert if isinstance(alert, dict) else None
+    _causal_rank = None
+    _causal_grade = None
+    if alert_map:
+        try:
+            _causal_rank = float(
+                alert_map.get("causalRankScore")
+                or alert_map.get("rankScore")
+                or 0
+            ) or None
+        except (TypeError, ValueError):
+            _causal_rank = None
+        _causal_grade = str(
+            alert_map.get("causalGrade") or alert_map.get("grade") or ""
+        ).upper() or None
+
     open_caution_fade_bypass = open_caution_premium_fade_bypass(
-        alert if isinstance(alert, dict) else None,
+        alert_map,
         explosion_event,
         when=_snap_when,
         snap=snap,
+        causal_rank_score=_causal_rank,
+        causal_grade=_causal_grade,
     )
     post_open_fade_bypass = post_open_setup_premium_fade_bypass(
-        alert if isinstance(alert, dict) else None,
+        alert_map,
         explosion_event,
         when=_snap_when,
         snap=snap,
+        causal_rank_score=_causal_rank,
+        causal_grade=_causal_grade,
     )
     open_setup_fade_bypass = open_caution_fade_bypass or post_open_fade_bypass
     atm_armed_fade_bypass = local_base_premium_fade_bypass(

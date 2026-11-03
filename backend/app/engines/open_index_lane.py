@@ -57,7 +57,7 @@ def in_open_caution_window_at(when: datetime) -> bool:
         except (TypeError, ValueError):
             return default_h * 60 + default_m
 
-    earliest = _clock_minutes("open_setup_start_hour", "open_setup_start_minute", 9, 15)
+    earliest = _clock_minutes("open_setup_start_hour", "open_setup_start_minute", 9, 20)
     end = _clock_minutes("open_caution_until_hour", "open_caution_until_minute", 9, 45)
     return earliest <= current < end
 

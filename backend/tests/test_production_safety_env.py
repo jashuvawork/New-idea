@@ -21,9 +21,9 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["TOP_FTV_A_ENABLED"] == "true"
     assert env["TOP_FTV_A_MAX_CAPITAL_PCT"] == "0.90"
     assert env["TOP_FTV_A_EXCEPTIONAL_MAX_MOVE_PCT"] == "40"
-    # 10%/day budget — aligned with emergency_stop_inr and the worst-day pause (both ₹20k)
-    # so a full-capital ELITE base runner rides its natural SL instead of a stale ₹6k halt.
-    assert env["DAILY_LOSS_STOP_INR"] == "20000"
+    # 20% of sizing capital (₹2L → ₹40k daily loss stop for new entries).
+    assert env["DAILY_LOSS_STOP_CAPITAL_PCT"] == "0.20"
+    assert env["DAILY_LOSS_STOP_INR"] == "0"
     assert env["FALLBACK_CAPITAL_INR"] == "200000"
     assert env["MAX_SIZING_CAPITAL_INR"] == "200000"
     assert env["UNIFIED_PROFIT_LADDER_ENABLED"] == "true"

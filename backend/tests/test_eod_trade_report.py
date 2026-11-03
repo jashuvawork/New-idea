@@ -230,8 +230,14 @@ def test_portfolio_limit_same_side_cap_blocks_third_same_side():
 def test_portfolio_limit_halts_at_daily_loss_stop():
     cands = [_pos(10, 11, "CALL", -6000), _pos(11, 12, "PUT", -6000),
              _pos(12, 13, "CALL", 9000)]
-    s = SimpleNamespace(daily_loss_stop_inr=10_000.0, eod_report_max_concurrent=1,
-                        eod_report_same_side_cap=2)
+    s = SimpleNamespace(
+        daily_loss_stop_capital_pct=0.0,
+        daily_loss_stop_inr=10_000.0,
+        fallback_capital_inr=200_000.0,
+        max_sizing_capital_inr=200_000.0,
+        eod_report_max_concurrent=1,
+        eod_report_same_side_cap=2,
+    )
     taken = apply_portfolio_limits(cands, settings=s)
     # After two -6000 legs (cum -12000 <= -10000) the day halts; the later winner is skipped.
     assert len(taken) == 2

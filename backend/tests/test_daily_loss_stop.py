@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import patch
 
-from app.engines.capital_allocator import update_daily_profit_gate
+from app.engines.capital_allocator import resolve_daily_loss_stop_inr, update_daily_profit_gate
 from app.models.schemas import AutoTraderState, PaperTrade, Side, StrategyType
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -12,6 +12,14 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 class DailyLossStopTests(unittest.TestCase):
+    def test_loss_stop_pct_of_capital(self):
+        with patch("app.engines.capital_allocator.get_settings") as mock_settings:
+            mock_settings.return_value.daily_loss_stop_capital_pct = 0.20
+            mock_settings.return_value.daily_loss_stop_inr = 0
+            mock_settings.return_value.fallback_capital_inr = 200_000
+            mock_settings.return_value.max_sizing_capital_inr = 200_000
+            self.assertEqual(resolve_daily_loss_stop_inr(), 40_000.0)
+
     def test_loss_stop_blocks_entries(self):
         state = AutoTraderState()
         state.closedPaperTrades = [
@@ -28,6 +36,7 @@ class DailyLossStopTests(unittest.TestCase):
             ),
         ]
         with patch("app.engines.capital_allocator.get_settings") as mock_settings:
+            mock_settings.return_value.daily_loss_stop_capital_pct = 0.0
             mock_settings.return_value.daily_loss_stop_inr = 30_000
             mock_settings.return_value.daily_profit_target_inr = 44_000
             mock_settings.return_value.daily_profit_trail_inr = 5_000

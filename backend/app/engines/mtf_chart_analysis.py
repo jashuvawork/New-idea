@@ -253,6 +253,51 @@ async def fetch_mtf_charts(
     return reads
 
 
+def premium_mtf_htf_opposes_side(
+    side: Side,
+    premium_mtf: Optional[dict[str, TimeframeChartRead]],
+    *,
+    settings: Any = None,
+) -> bool:
+    """True when ≥N of premium 1h/4h oppose entry side (option roll-off vs index rip)."""
+    settings = settings or get_settings()
+    if not premium_mtf:
+        return False
+    side_val = side.value
+    min_strength = float(
+        getattr(settings, "execution_premium_htf_oppose_min_trend_strength", 18.0) or 18.0
+    )
+    need = int(getattr(settings, "execution_premium_htf_oppose_min_count", 2) or 2)
+    oppose = 0
+    for label in ("1h", "4h"):
+        pt = premium_mtf.get(label)
+        if not pt:
+            continue
+        if side_val == "CALL" and pt.direction == "BEARISH" and float(pt.trendStrength or 0) >= min_strength:
+            oppose += 1
+        elif side_val == "PUT" and pt.direction == "BULLISH" and float(pt.trendStrength or 0) >= min_strength:
+            oppose += 1
+    return oppose >= max(1, need)
+
+
+def _premium_htf_oppose_allows_entry(
+    side: Side,
+    premium_mtf: Optional[dict[str, TimeframeChartRead]],
+    settings: Any,
+    *,
+    vertical_rip_bypass: bool = False,
+    first_lift_bypass: bool = False,
+    premium_led_bypass: bool = False,
+) -> tuple[bool, str]:
+    if not bool(getattr(settings, "execution_premium_htf_oppose_block_enabled", True)):
+        return True, "ok"
+    if vertical_rip_bypass or first_lift_bypass or premium_led_bypass:
+        return True, "ok"
+    if premium_mtf_htf_opposes_side(side, premium_mtf, settings=settings):
+        return False, "exec_mtf_premium_htf_opposes"
+    return True, "ok"
+
+
 def validate_mtf_scalp(
     side: Side,
     index_mtf: dict[str, TimeframeChartRead],
@@ -332,6 +377,17 @@ def validate_mtf_scalp(
                 ):
                     meta["passed"] = False
                     return False, f"exec_mtf_premium_{req}_fading", meta
+        htf_ok, htf_reason = _premium_htf_oppose_allows_entry(
+            side,
+            premium_mtf,
+            settings,
+            vertical_rip_bypass=vertical_rip_bypass,
+            first_lift_bypass=first_lift_bypass,
+            premium_led_bypass=premium_led_bypass,
+        )
+        if not htf_ok:
+            meta["passed"] = False
+            return False, htf_reason, meta
         return True, "ok", meta
 
     side_val = side.value
@@ -394,5 +450,16 @@ def validate_mtf_scalp(
             if pt and pt.direction == "BEARISH" and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct:
                 meta["passed"] = False
                 return False, f"exec_mtf_premium_{req}_fading", meta
+    htf_ok, htf_reason = _premium_htf_oppose_allows_entry(
+        side,
+        premium_mtf,
+        settings,
+        vertical_rip_bypass=False,
+        first_lift_bypass=False,
+        premium_led_bypass=False,
+    )
+    if not htf_ok:
+        meta["passed"] = False
+        return False, htf_reason, meta
     meta["passed"] = True
     return True, "ok", meta

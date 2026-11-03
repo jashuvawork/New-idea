@@ -322,3 +322,22 @@ def test_premium_fade_bypass_on_call_win_continuation(_mock_cont):
         symbol="NIFTY",
         settings=Settings(),
     ) is True
+
+
+@patch("app.engines.pe_win_ce_mirror.session_win_side_continuation_ok", return_value=(True, "call_win_rally_continuation", {}))
+@patch(
+    "app.engines.premium_vertical_chase_guard.session_extended_premium_chase_context",
+    return_value=(True, {"premiumInr": 180.0}),
+)
+def test_premium_fade_bypass_denied_on_extended_session_ce(_mock_ext, _mock_cont):
+    snap = _rally_snap("NIFTY")
+    settings = Settings()
+    settings.pe_win_ce_mirror_block_fade_waiver_extended_session = True
+    assert pe_win_ce_mirror_premium_fade_bypass(
+        side=Side.CALL,
+        state=SimpleNamespace(),
+        snap=snap,
+        symbol="NIFTY",
+        evidence={"premium": 180.0, "sessionPeakPremium": 195.0, "sessionLowPremium": 12.0},
+        settings=settings,
+    ) is False

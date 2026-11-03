@@ -862,6 +862,18 @@ def double_dip_vbase_readiness(
     )
     if not prem_ok:
         return False, prem_reason
+    now = datetime.now(IST)
+    start_raw = str(getattr(s, "double_dip_vbase_afternoon_start_ist", "12:00") or "12:00")
+    try:
+        start_h, start_m = (int(start_raw[:2]), int(start_raw[3:5]))
+    except (TypeError, ValueError):
+        start_h, start_m = 12, 0
+    if (now.hour, now.minute) >= (start_h, start_m):
+        aft_max = float(
+            getattr(s, "double_dip_vbase_afternoon_max_premium_inr", 145.0) or 145.0
+        )
+        if premium > aft_max + 1e-6:
+            return False, "double_dip_vbase_afternoon_premium_too_high"
 
     move = _base_move(ict, row)
     lo = float(getattr(s, "double_dip_vbase_min_move_pct", 2.0) or 2.0)

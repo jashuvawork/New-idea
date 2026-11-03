@@ -926,6 +926,16 @@ class Settings(BaseSettings):
     premium_vertical_chase_max_drawdown_from_high_pct: float = 8.0
     premium_vertical_chase_min_momentum5_pct: float = 35.0
     premium_vertical_chase_min_session_range_position: float = 0.78
+    # Nov 3 23550 CE — near_base_v bypass at ₹180/session-top after open rip.
+    premium_extended_session_chase_block_enabled: bool = True
+    premium_extended_session_afternoon_only: bool = True
+    premium_extended_session_min_range_position: float = 0.82
+    premium_extended_session_max_premium_inr: float = 145.0
+    premium_extended_session_open_end_ist: str = "09:45"
+    execution_premium_htf_oppose_block_enabled: bool = True
+    execution_premium_htf_oppose_min_trend_strength: float = 18.0
+    execution_premium_htf_oppose_min_count: int = 2
+    pe_win_ce_mirror_block_fade_waiver_extended_session: bool = True
     live_entry_moment_waiver_enabled: bool = True
     live_entry_moment_min_live: float = 86.0
     live_entry_moment_min_radar: float = 92.0
@@ -2771,6 +2781,8 @@ class Settings(BaseSettings):
     # Double-dip V-base — session low → bounce → retest low → second lift.
     double_dip_vbase_capture_enabled: bool = True
     double_dip_vbase_max_premium_inr: float = 220.0
+    double_dip_vbase_afternoon_max_premium_inr: float = 145.0
+    double_dip_vbase_afternoon_start_ist: str = "12:00"
     double_dip_vbase_min_move_pct: float = 2.0
     double_dip_vbase_max_move_pct: float = 20.0
     double_dip_vbase_min_first_bounce_pct: float = 8.0
@@ -3100,14 +3112,15 @@ class Settings(BaseSettings):
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5
 
-    # Open setup book: 09:15–09:45 IST only (lanes, open guards, first-lift capture). Idle after 09:45.
+    # Open setup book: 09:20–09:45 IST entries (lanes, open guards, first-lift). Idle after 09:45.
+    # Radar/explosion detect may start at explosion_entry_earliest (default 09:15).
     open_setup_start_hour: int = 9
-    open_setup_start_minute: int = 15
+    open_setup_start_minute: int = 20
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
-    # First explosion order aligns with open setup start (not extended past 09:45).
+    # First order clock — aligns with open setup start (default 09:20 IST).
     entry_earliest_hour: int = 9
-    entry_earliest_minute: int = 15
+    entry_earliest_minute: int = 20
     # Macro side check 09:25–09:45. Idle before 09:25 and after 09:45.
     # The cash-candle hold covers 09:15–09:45. First order at 09:15 with open-setup guards.
     open_side_confirmation_enabled: bool = True
@@ -3206,9 +3219,10 @@ class Settings(BaseSettings):
     neutral_breadth_explosion_min_score: float = 55.0
     sensex_rank_bonus: float = 10.0
     nifty_rank_penalty_chop: float = 5.0
-    # Daily risk budget = 10% of the ~200k sizing capital. This is a CEILING that halts
-    # new entries, not a target — selectivity + per-trade caps keep us far below it.
-    daily_loss_stop_inr: float = 20_000.0
+    # Daily loss stop: pct of sizing capital (default 20% of ₹2L → ₹40k). Fixed INR used
+    # only when daily_loss_stop_capital_pct <= 0. Halts new entries, not a loss target.
+    daily_loss_stop_capital_pct: float = 0.20
+    daily_loss_stop_inr: float = 0.0
     daily_max_trades_chop: int = 20
     daily_max_trades_pre10_chop: int = 5
     pre10_chop_min_rank_score: float = 60.0

@@ -1972,6 +1972,8 @@ async def _open_from_candidate(
         if client:
             from app.engines.execution_chart_monitor import monitor_trade_chart_before_execution
 
+            from app.engines.entry_context import alert_for_execution_chart
+
             chart_ok, chart_reason, chart_meta = await monitor_trade_chart_before_execution(
                 client,
                 symbol,
@@ -1982,11 +1984,7 @@ async def _open_from_candidate(
                 instrument_key=instrument_key,
                 mode=candidate.mode or "",
                 explosion_event=candidate.explosion_event,
-                alert=(
-                    candidate.alert
-                    if isinstance(getattr(candidate, "alert", None), dict)
-                    else None
-                ),
+                alert=alert_for_execution_chart(candidate),
                 state=state,
             )
             if not chart_ok:

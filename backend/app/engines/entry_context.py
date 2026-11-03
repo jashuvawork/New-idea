@@ -8,6 +8,25 @@ from app.engines.spot_direction import chart_summary_dict
 from app.models.schemas import Side, SymbolSnapshot
 
 
+def alert_for_execution_chart(candidate: Any) -> Optional[dict[str, Any]]:
+    """Merge causal rank from pretrade into alert for exec-chart bypass stamps."""
+    raw = getattr(candidate, "alert", None)
+    if not isinstance(raw, dict):
+        return None
+    out = dict(raw)
+    pretrade = getattr(candidate, "pretrade_meta", None)
+    pretrade = pretrade if isinstance(pretrade, dict) else {}
+    causal = pretrade.get("causalRanking") or {}
+    if isinstance(causal, dict):
+        rank = causal.get("rankScore")
+        if rank is not None:
+            out.setdefault("causalRankScore", rank)
+        grade = causal.get("grade")
+        if grade:
+            out.setdefault("causalGrade", grade)
+    return out
+
+
 def snapshot_chart_context(snap: Optional[SymbolSnapshot]) -> dict[str, Any]:
     """Compact chart + breadth + MTF read for entryContext (audit / milestone review)."""
     if not snap:

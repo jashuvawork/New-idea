@@ -117,6 +117,52 @@ def test_allows_at_structural_base_despite_hot_mom():
     ) or str(bypass).startswith("near_base_") or str(bypass).startswith("top_moment_")
 
 
+def test_blocks_near_base_bypass_at_pm_session_top_nov3_shape():
+    """Nov 3 23550 CE — near_base_v must not waive chase at ₹180 / session top."""
+    settings = _symmetric_settings()
+    settings.premium_extended_session_chase_block_enabled = True
+    settings.premium_extended_session_max_premium_inr = 145.0
+    settings.premium_extended_session_min_range_position = 0.82
+    chart = PremiumChart(
+        direction="BULLISH",
+        momentum5Pct=95.0,
+        drawdownFromHighPct=0.0,
+    )
+    cand = _candidate(
+        side=Side.CALL,
+        alert={
+            "explosionScore": 100.0,
+            "premium": 180.25,
+            "sessionPeakPremium": 195.0,
+            "sessionLowPremium": 12.0,
+            "tier": "ELITE",
+        },
+        pretrade={
+            "causalRanking": {
+                "localBaseMovePct": 12.0,
+                "ictBaseArmed": True,
+                "momentType": "double_dip_vbase",
+            },
+        },
+    )
+    with patch(
+        "app.engines.premium_vertical_chase_guard.get_settings",
+        return_value=settings,
+    ), patch(
+        "app.engines.premium_vertical_chase_guard._is_afternoon_extended_window",
+        return_value=True,
+    ), patch(
+        "app.engines.premium_vertical_chase_guard._at_structural_base_bypass",
+        return_value=(True, "near_base_v"),
+    ):
+        blocked, reason, meta = premium_vertical_chase_blocks_entry(
+            cand, None, premium_chart=chart, settings=settings,
+        )
+    assert blocked is True
+    assert reason == "premium_extended_session_near_base_chase"
+    assert meta.get("premiumChaseBypassRejected")
+
+
 def test_live_entry_wire_blocks_chase():
     settings = _symmetric_settings()
     settings.live_execution_trade_score_enabled = True
