@@ -31,3 +31,9 @@ def test_post_market_from_1545(mock_settings):
 
 def test_session_close_default_is_1545():
     assert Settings().power_hour_end_minute == 45
+
+
+def test_live_force_close_default_is_1535():
+    s = Settings()
+    assert s.live_session_close_force_exit_hour == 15
+    assert s.live_session_close_force_exit_minute == 35
