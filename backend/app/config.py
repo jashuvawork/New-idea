@@ -926,6 +926,16 @@ class Settings(BaseSettings):
     premium_vertical_chase_max_drawdown_from_high_pct: float = 8.0
     premium_vertical_chase_min_momentum5_pct: float = 35.0
     premium_vertical_chase_min_session_range_position: float = 0.78
+    # Nov 3 23550 CE — near_base_v bypass at ₹180/session-top after open rip.
+    premium_extended_session_chase_block_enabled: bool = True
+    premium_extended_session_afternoon_only: bool = True
+    premium_extended_session_min_range_position: float = 0.82
+    premium_extended_session_max_premium_inr: float = 145.0
+    premium_extended_session_open_end_ist: str = "09:45"
+    execution_premium_htf_oppose_block_enabled: bool = True
+    execution_premium_htf_oppose_min_trend_strength: float = 18.0
+    execution_premium_htf_oppose_min_count: int = 2
+    pe_win_ce_mirror_block_fade_waiver_extended_session: bool = True
     live_entry_moment_waiver_enabled: bool = True
     live_entry_moment_min_live: float = 86.0
     live_entry_moment_min_radar: float = 92.0
@@ -2771,6 +2781,8 @@ class Settings(BaseSettings):
     # Double-dip V-base — session low → bounce → retest low → second lift.
     double_dip_vbase_capture_enabled: bool = True
     double_dip_vbase_max_premium_inr: float = 220.0
+    double_dip_vbase_afternoon_max_premium_inr: float = 145.0
+    double_dip_vbase_afternoon_start_ist: str = "12:00"
     double_dip_vbase_min_move_pct: float = 2.0
     double_dip_vbase_max_move_pct: float = 20.0
     double_dip_vbase_min_first_bounce_pct: float = 8.0

@@ -1414,6 +1414,17 @@ def pe_win_ce_mirror_premium_fade_bypass(
         side_u, state, snap, sym, settings=settings,
     )
     if cont_ok:
+        if bool(
+            getattr(settings, "pe_win_ce_mirror_block_fade_waiver_extended_session", True)
+        ):
+            from app.engines.premium_vertical_chase_guard import (
+                session_extended_premium_chase_context,
+            )
+
+            ev = dict(evidence or {})
+            extended, _ = session_extended_premium_chase_context(ev, settings=settings)
+            if extended:
+                return False
         return True
     if side_u != "CALL":
         return False

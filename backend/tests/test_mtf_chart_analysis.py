@@ -94,3 +94,75 @@ def test_pad_lane_bypass_allows_shallow_premium_5m_fade_on_put():
         )
     assert blocked is True
     assert reason == "ok"
+
+
+def test_pad_lane_bypass_blocked_when_premium_htf_opposes_call():
+    from app.config import Settings
+    from app.models.schemas import TimeframeChartRead
+    from unittest.mock import patch
+
+    candles = _rising_candles(steps=300)
+    price = candles[-1][4]
+    reads = _reads_from_1m(candles, price)
+    premium_reads = {
+        "1m": TimeframeChartRead(
+            label="1m", price=180.0, direction="BULLISH", momentumPct=50.0, trendStrength=100.0,
+        ),
+        "5m": TimeframeChartRead(
+            label="5m", price=180.0, direction="BULLISH", momentumPct=40.0, trendStrength=100.0,
+        ),
+        "1h": TimeframeChartRead(
+            label="1h", price=180.0, direction="BEARISH", momentumPct=-1.0, trendStrength=100.0,
+        ),
+        "4h": TimeframeChartRead(
+            label="4h", price=180.0, direction="BEARISH", momentumPct=-1.0, trendStrength=64.0,
+        ),
+    }
+    settings = Settings()
+    settings.execution_premium_htf_oppose_block_enabled = True
+    with patch("app.engines.mtf_chart_analysis.get_settings", return_value=settings):
+        passed, reason, _ = validate_mtf_scalp(
+            Side.CALL,
+            reads,
+            premium_reads,
+            trade_score=65,
+            pad_lane_bypass=True,
+        )
+    assert passed is False
+    assert reason == "exec_mtf_premium_htf_opposes"
+
+
+def test_pad_lane_bypass_blocked_when_premium_htf_opposes_put():
+    from app.config import Settings
+    from app.models.schemas import TimeframeChartRead
+    from unittest.mock import patch
+
+    candles = _declining_candles(steps=300)
+    price = candles[-1][4]
+    reads = _reads_from_1m(candles, price)
+    premium_reads = {
+        "1m": TimeframeChartRead(
+            label="1m", price=30.0, direction="NEUTRAL", momentumPct=-0.4, trendStrength=100.0,
+        ),
+        "5m": TimeframeChartRead(
+            label="5m", price=30.0, direction="NEUTRAL", momentumPct=-0.3, trendStrength=100.0,
+        ),
+        "1h": TimeframeChartRead(
+            label="1h", price=30.0, direction="BULLISH", momentumPct=1.0, trendStrength=100.0,
+        ),
+        "4h": TimeframeChartRead(
+            label="4h", price=30.0, direction="BULLISH", momentumPct=1.0, trendStrength=64.0,
+        ),
+    }
+    settings = Settings()
+    settings.execution_premium_htf_oppose_block_enabled = True
+    with patch("app.engines.mtf_chart_analysis.get_settings", return_value=settings):
+        passed, reason, _ = validate_mtf_scalp(
+            Side.PUT,
+            reads,
+            premium_reads,
+            trade_score=65,
+            pad_lane_bypass=True,
+        )
+    assert passed is False
+    assert reason == "exec_mtf_premium_htf_opposes"
