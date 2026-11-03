@@ -1,4 +1,4 @@
-"""Force-flat open auto-trader legs before broker close (live 15:35 IST; paper 15:45 IST)."""
+"""Force-flat open auto-trader legs at live_session_close (default 15:35 IST)."""
 
 from __future__ import annotations
 
@@ -14,20 +14,11 @@ from app.services.upstox import get_market_phase
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def _uses_live_session_close_cutoff(settings: Settings) -> bool:
-    """Live broker legs and paper-live parity use the earlier live cutoff."""
-    if bool(getattr(settings, "enable_live_trading", False)):
-        return True
-    return bool(getattr(settings, "paper_live_parity_enabled", False))
-
-
 def _session_close_minute(settings: Settings) -> int:
-    if _uses_live_session_close_cutoff(settings):
-        return (
-            int(getattr(settings, "live_session_close_force_exit_hour", 15)) * 60
-            + int(getattr(settings, "live_session_close_force_exit_minute", 35))
-        )
-    return int(settings.power_hour_end_hour) * 60 + int(settings.power_hour_end_minute)
+    return (
+        int(getattr(settings, "live_session_close_force_exit_hour", 15)) * 60
+        + int(getattr(settings, "live_session_close_force_exit_minute", 35))
+    )
 
 
 def _minutes_now() -> int:

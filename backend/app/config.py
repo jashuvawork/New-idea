@@ -70,8 +70,8 @@ class Settings(BaseSettings):
     shadow_trade_all_signals: bool = True
     # Live: skip INR force-stops / scratch exits — let open trades hit structural SL.
     live_hold_to_structural_sl: bool = True
-    # Force-flat open legs: live / paper-live parity at live_session_close_* (default 15:35 IST);
-    # paper-only at power_hour_end (default 15:45 IST, broker last print).
+    # Force-flat open legs (live + paper) at live_session_close_* (default 15:35 IST).
+    # power_hour_end (15:45) is broker last-print / market phase only — not hold time.
     live_session_close_force_exit_enabled: bool = True
     live_session_close_force_exit_hour: int = 15
     live_session_close_force_exit_minute: int = 35
