@@ -179,6 +179,46 @@ def test_paper_without_parity_not_before_1535():
         restore_replay_minutes(token)
 
 
+def test_applies_when_market_closed_same_session_orphan():
+    settings = MagicMock()
+    settings.live_session_close_force_exit_enabled = True
+    settings.auto_trading_enabled = True
+    settings.enable_live_trading = False
+    settings.paper_live_parity_enabled = False
+    settings.paper_trading = True
+    _live_close_attrs(settings)
+    trade = _trade()
+    trade.sessionDate = "2026-09-24"
+    token = install_replay_minutes(lambda: 19 * 60 + 0)
+    try:
+        with patch("app.engines.session_close_guard.get_market_phase", return_value="CLOSED"):
+            with patch("app.engines.session_close_guard.datetime") as mock_dt:
+                mock_dt.now.return_value = datetime(2026, 9, 24, 19, 0, tzinfo=IST)
+                assert live_session_close_force_exit_applies(settings, trade=trade) is True
+    finally:
+        restore_replay_minutes(token)
+
+
+def test_skips_when_market_closed_prior_session_trade():
+    settings = MagicMock()
+    settings.live_session_close_force_exit_enabled = True
+    settings.auto_trading_enabled = True
+    settings.enable_live_trading = False
+    settings.paper_live_parity_enabled = False
+    settings.paper_trading = True
+    _live_close_attrs(settings)
+    trade = _trade()
+    trade.sessionDate = "2026-09-23"
+    token = install_replay_minutes(lambda: 19 * 60 + 0)
+    try:
+        with patch("app.engines.session_close_guard.get_market_phase", return_value="CLOSED"):
+            with patch("app.engines.session_close_guard.datetime") as mock_dt:
+                mock_dt.now.return_value = datetime(2026, 9, 24, 19, 0, tzinfo=IST)
+                assert live_session_close_force_exit_applies(settings, trade=trade) is False
+    finally:
+        restore_replay_minutes(token)
+
+
 def test_skips_when_parity_off_not_live_and_not_paper():
     settings = MagicMock()
     settings.live_session_close_force_exit_enabled = True
