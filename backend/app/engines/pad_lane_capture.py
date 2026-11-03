@@ -869,9 +869,13 @@ def double_dip_vbase_readiness(
     except (TypeError, ValueError):
         start_h, start_m = 12, 0
     if (now.hour, now.minute) >= (start_h, start_m):
-        aft_max = float(
-            getattr(s, "double_dip_vbase_afternoon_max_premium_inr", 145.0) or 145.0
+        from app.engines.symbol_premium_bands import best_trade_deep_chase_min_premium
+
+        sym = str(getattr(snap, "symbol", "") or row.get("symbol") or "")
+        mult = float(
+            getattr(s, "double_dip_vbase_afternoon_premium_chase_mult", 1.15) or 1.15
         )
+        aft_max = best_trade_deep_chase_min_premium(sym, s) * mult
         if premium > aft_max + 1e-6:
             return False, "double_dip_vbase_afternoon_premium_too_high"
 

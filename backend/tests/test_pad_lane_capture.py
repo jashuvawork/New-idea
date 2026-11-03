@@ -239,7 +239,8 @@ def test_double_dip_vbase_rejects_first_touch_only(mock_settings):
 def test_double_dip_vbase_rejects_afternoon_deep_premium(mock_dt, mock_settings):
     reset_detector_state_for_tests()
     settings = Settings()
-    settings.double_dip_vbase_afternoon_max_premium_inr = 145.0
+    settings.best_trade_deep_itm_min_premium_inr = 120.0
+    settings.double_dip_vbase_afternoon_premium_chase_mult = 1.15
     mock_settings.return_value = settings
     mock_dt.now.return_value = datetime(2026, 11, 3, 13, 48, tzinfo=IST)
     key = _open_key("NIFTY", 23550.0, Side.CALL)

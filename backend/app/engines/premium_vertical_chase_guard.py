@@ -144,6 +144,12 @@ def session_extended_premium_chase_context(
     if not _is_afternoon_extended_window(settings, when=when):
         return False, meta
 
+    symbol = str(
+        evidence.get("symbol")
+        or evidence.get("index")
+        or ""
+    ).upper()
+
     merged = dict(metrics or {})
     if premium_chart is not None:
         merged.setdefault("premiumMomentum5Pct", float(premium_chart.momentum5Pct or 0))
@@ -169,8 +175,20 @@ def session_extended_premium_chase_context(
     if range_pos <= 0 and peak > low > 0 and prem > 0:
         range_pos = (prem - low) / (peak - low)
 
-    max_inr = float(
-        getattr(settings, "premium_extended_session_max_premium_inr", 145.0) or 145.0
+    from app.engines.symbol_premium_bands import (
+        _scaled_setting,
+        best_trade_deep_chase_min_premium,
+    )
+
+    # NIFTY-anchored config, scaled per symbol (SENSEX/BANKNIFTY ~3×) — not a fixed LTP.
+    premium_ceiling = max(
+        _scaled_setting(
+            settings,
+            symbol,
+            "premium_extended_session_max_premium_inr",
+            145.0,
+        ),
+        best_trade_deep_chase_min_premium(symbol, settings),
     )
     min_range = float(
         getattr(settings, "premium_extended_session_min_range_position", 0.82) or 0.82
@@ -181,15 +199,18 @@ def session_extended_premium_chase_context(
             "premiumInr": round(prem, 2),
             "sessionPeakPremium": peak,
             "sessionLowPremium": low,
+            "premiumCeilingInr": round(premium_ceiling, 2),
+            "symbol": symbol or None,
         }
     )
     if prem <= 0:
         return False, meta
-    if prem + 1e-6 < max_inr and range_pos + 1e-6 < min_range:
+    # Require tape proof of session-top (range position), not a bare ₹ threshold alone.
+    if range_pos + 1e-6 < min_range:
         return False, meta
-    if prem + 1e-6 >= max_inr and range_pos + 1e-6 >= min_range:
-        return True, meta
-    if prem + 1e-6 >= max_inr and range_pos <= 0:
+    if peak <= low or range_pos <= 0:
+        return False, meta
+    if prem + 1e-6 >= premium_ceiling:
         return True, meta
     return False, meta
 

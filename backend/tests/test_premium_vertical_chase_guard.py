@@ -131,6 +131,7 @@ def test_blocks_near_base_bypass_at_pm_session_top_nov3_shape():
     cand = _candidate(
         side=Side.CALL,
         alert={
+            "symbol": "NIFTY",
             "explosionScore": 100.0,
             "premium": 180.25,
             "sessionPeakPremium": 195.0,
