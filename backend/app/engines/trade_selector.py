@@ -1911,9 +1911,15 @@ def find_best_entry(
         from app.engines.side_regime import side_regime_rank_delta
 
         c.score += side_regime_rank_delta(c.symbol, c.side)
-        from app.engines.open_setup_guards import open_caution_deep_itm_rank_bonus
+        from app.engines.open_setup_guards import (
+            open_aligned_side_rank_bonus,
+            open_caution_deep_itm_rank_bonus,
+            open_counter_trend_side_rank_penalty,
+        )
 
         c.score += open_caution_deep_itm_rank_bonus(c, snapshots, settings=settings)
+        c.score += open_aligned_side_rank_bonus(c, snapshots, settings=settings)
+        c.score -= open_counter_trend_side_rank_penalty(c, snapshots, settings=settings)
         # Flat-base coil predictor: surface a ripe coil (predicted side) before it fires.
         from app.engines.coil_breakout_predictor import coil_prediction_rank_delta
 

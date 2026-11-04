@@ -270,6 +270,29 @@ def _lane_quality_ok(candidate: Any, settings: Any) -> tuple[bool, str, dict[str
             or alert.get("firstLift")
             or alert.get("firstLiftCapture")
         )
+        if not first_lift and bool(
+            getattr(settings, "open_index_lane_open_rip_first_lift_waiver_enabled", True)
+        ):
+            from app.engines.pad_lane_capture import _open_setup_first_lift_evidence
+
+            tier_u = str(
+                alert.get("tier") or getattr(candidate, "tier", "") or ""
+            ).upper()
+            local_pad = float(
+                alert.get("ictBaseRelativeMovePct")
+                or alert.get("localBaseMovePct")
+                or alert.get("offLowMovePct")
+                or 0.0
+            )
+            max_local = float(
+                getattr(settings, "open_index_lane_max_local_base_pct", 15.0) or 15.0
+            )
+            if tier_u in {"ELITE", "EXPLODING"} and (
+                _open_setup_first_lift_evidence(alert)
+                or 2.0 <= local_pad <= max_local + 1e-6
+            ):
+                first_lift = True
+                meta["firstLiftOpenRipWaiver"] = True
         meta["firstLift"] = first_lift
         if not first_lift:
             return False, "open_index_lane_no_first_lift", meta

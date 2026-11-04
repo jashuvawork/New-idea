@@ -2106,6 +2106,52 @@ def _armed_base_launch_active(ict: Any, candidate: Any) -> bool:
     return False
 
 
+def _fake_explosion_trap_open_book_conflict_waived(
+    candidate: Any,
+    snap: SymbolSnapshot,
+    *,
+    settings: Any,
+    local_pad: float,
+    tier: str,
+) -> bool:
+    """Allow aligned open-book ELITE/EXPLODING through chop conflict (not flat-extension FOMO)."""
+    if not bool(
+        getattr(settings, "fake_explosion_trap_open_book_conflict_bypass_enabled", True)
+    ):
+        return False
+    from app.engines.open_index_lane import (
+        _index_bucket,
+        _index_open_side_aligned,
+        _side_value,
+        in_open_caution_window_at,
+        in_post_open_setup_window_at,
+        resolve_lane_when,
+    )
+
+    when = resolve_lane_when(candidate, None)
+    if not (
+        in_open_caution_window_at(when) or in_post_open_setup_window_at(when)
+    ):
+        return False
+    sym = str(getattr(candidate, "symbol", "") or "")
+    index = _index_bucket(sym)
+    side = _side_value(getattr(candidate, "side", ""))
+    if not index or not _index_open_side_aligned(
+        index, side, symbol=sym, snap=snap, settings=settings,
+    ):
+        return False
+    tier_u = str(tier or "").upper()
+    if tier_u not in {"ELITE", "EXPLODING"}:
+        return False
+    max_lb = float(
+        getattr(settings, "fake_explosion_trap_open_book_max_local_base_pct", 22.0)
+        or 22.0
+    )
+    if local_pad > max_lb + 1e-6:
+        return False
+    return True
+
+
 def detect_fake_explosion_trap(
     candidate: Any,
     snap: SymbolSnapshot,
@@ -2467,6 +2513,21 @@ def detect_fake_explosion_trap(
             ):
                 hard_block = True
                 reason = "fake_explosion_trap_conflict"
+
+    if (
+        hard_block
+        and reason == "fake_explosion_trap_conflict"
+        and _fake_explosion_trap_open_book_conflict_waived(
+            candidate,
+            snap,
+            settings=settings,
+            local_pad=local_pad,
+            tier=tier,
+        )
+    ):
+        hard_block = False
+        reason = "ok"
+        meta["openBookFakeTrapWaiver"] = True
 
     if hard_block:
         meta.update({
