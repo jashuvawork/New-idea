@@ -8,8 +8,11 @@ from typing import Any, Optional
 from app.config import get_settings
 from app.engines.open_index_lane import (
     _index_bucket,
+    _index_open_side_aligned,
     _side_value,
+    allowed_open_lane_sides,
     in_open_caution_window_at,
+    in_post_open_setup_window_at,
     resolve_lane_when,
     validate_open_index_lane,
 )
@@ -166,6 +169,12 @@ def open_setup_guard_summary(settings: Any = None) -> dict[str, Any]:
         "nonLaneIndexBlocked": bool(
             getattr(settings, "open_caution_non_lane_index_blocked", True)
         ),
+        "alignedSideLaneWaiver": bool(
+            getattr(settings, "open_caution_aligned_side_lane_waiver_enabled", True)
+        ),
+        "openAlignedSideRankBonus": float(
+            getattr(settings, "open_aligned_side_rank_bonus", 40.0) or 40.0
+        ),
         "itmBandEnabled": bool(getattr(settings, "open_caution_itm_band_enabled", True)),
         "sensexCallMaxItmPoints": float(
             getattr(settings, "open_caution_sensex_call_max_itm_points", 800.0) or 800.0
@@ -220,10 +229,27 @@ def validate_open_setup_entry(
     if not align_ok:
         return False, align_reason, meta
 
-    lanes = _active_open_lanes(settings, candidate=candidate, snapshots=snapshots)
-    if bool(getattr(settings, "open_caution_non_lane_index_blocked", True)) and lanes:
-        allowed = any(index == idx and side == req for idx, req in lanes)
-        if not allowed:
+    if bool(getattr(settings, "open_caution_non_lane_index_blocked", True)) and index:
+        per_index_sides = allowed_open_lane_sides(
+            index,
+            settings,
+            symbol=sym,
+            snap=snap,
+            snapshots=snapshots,
+        )
+        in_lane = per_index_sides is not None and side in per_index_sides
+        if (
+            not in_lane
+            and bool(
+                getattr(settings, "open_caution_aligned_side_lane_waiver_enabled", True)
+            )
+            and _index_open_side_aligned(
+                index, side, symbol=sym, snap=snap, settings=settings,
+            )
+        ):
+            in_lane = True
+            meta["openAlignedSideLaneWaiver"] = True
+        if per_index_sides is not None and not in_lane:
             return False, "open_caution_non_lane_index", meta
 
     lane_ok, lane_reason, lane_meta = validate_open_index_lane(
@@ -251,6 +277,76 @@ def validate_open_setup_entry(
 
     meta["openSetupGuardPassed"] = True
     return True, "ok", meta
+
+
+def _open_book_side_align_ok(
+    candidate: Any,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+    *,
+    settings: Any = None,
+    when: Optional[datetime] = None,
+) -> bool:
+    """True during open/post-open windows when index tape aligns with candidate side."""
+    settings = settings or get_settings()
+    when = resolve_lane_when(candidate, when)
+    if not (
+        in_open_caution_window_at(when) or in_post_open_setup_window_at(when)
+    ):
+        return False
+    index, side = _candidate_lane_tuple(candidate)
+    if not index:
+        return False
+    sym = str(getattr(candidate, "symbol", "") or "")
+    snap = getattr(candidate, "snap", None)
+    if snap is None and snapshots:
+        snap = snapshots.get(sym.upper())
+    return _index_open_side_aligned(
+        index, side, symbol=sym, snap=snap, settings=settings,
+    )
+
+
+def open_aligned_side_rank_bonus(
+    candidate: Any,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+    *,
+    settings: Any = None,
+    when: Optional[datetime] = None,
+) -> float:
+    """Prefer session-aligned CE/PE during 09:15–post_open_setup (CE on bullish open, etc.)."""
+    settings = settings or get_settings()
+    if not _open_book_side_align_ok(
+        candidate, snapshots, settings=settings, when=when,
+    ):
+        return 0.0
+    bonus = float(getattr(settings, "open_aligned_side_rank_bonus", 40.0) or 0.0)
+    return bonus if bonus > 0 else 0.0
+
+
+def open_counter_trend_side_rank_penalty(
+    candidate: Any,
+    snapshots: Optional[dict[str, SymbolSnapshot]] = None,
+    *,
+    settings: Any = None,
+    when: Optional[datetime] = None,
+) -> float:
+    """09:45–10:30: deprioritize PUT on bullish tape / CALL on bearish (side align would pass)."""
+    settings = settings or get_settings()
+    when = resolve_lane_when(candidate, when)
+    if not in_post_open_setup_window_at(when):
+        return 0.0
+    index, side = _candidate_lane_tuple(candidate)
+    if not index:
+        return 0.0
+    sym = str(getattr(candidate, "symbol", "") or "")
+    snap = getattr(candidate, "snap", None)
+    if snap is None and snapshots:
+        snap = snapshots.get(sym.upper())
+    if _index_open_side_aligned(
+        index, side, symbol=sym, snap=snap, settings=settings,
+    ):
+        return 0.0
+    penalty = float(getattr(settings, "open_counter_trend_side_rank_penalty", 45.0) or 0.0)
+    return penalty if penalty > 0 else 0.0
 
 
 def open_caution_deep_itm_rank_bonus(

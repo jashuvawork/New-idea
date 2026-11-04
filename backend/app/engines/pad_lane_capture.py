@@ -1493,6 +1493,10 @@ def _open_setup_first_lift_evidence(alert: dict[str, Any]) -> bool:
         or alert.get("ictArmedBaseLaunch")
         or alert.get("armedBaseLaunch")
         or alert.get("ictFlatThenVertical")
+        or alert.get("verticalRip")
+        or alert.get("openFirstLift")
+        or alert.get("openRip")
+        or alert.get("explosionLift")
         or moment
         in (
             "first_lift_local_base",
@@ -1500,6 +1504,9 @@ def _open_setup_first_lift_evidence(alert: dict[str, Any]) -> bool:
             "ict_base_armed",
             "v_rip_session_low",
             "v_rip_session_high",
+            "open_first_lift",
+            "open_rip",
+            "explosion_lift",
         )
     )
 

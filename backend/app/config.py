@@ -1870,6 +1870,9 @@ class Settings(BaseSettings):
     # session~30%, live premium mom≈0, OTM inside OR after small win → never-green −₹18k.
     # Market harvests FOMO; system must not treat post-extension spikes as ELITE full-size.
     fake_explosion_trap_enabled: bool = True
+    # 09:15–post_open_setup: aligned open-book CE/PE may waive chop conflict (not afternoon FOMO blocks).
+    fake_explosion_trap_open_book_conflict_bypass_enabled: bool = True
+    fake_explosion_trap_open_book_max_local_base_pct: float = 22.0
     fake_explosion_trap_min_session_move_pct: float = 28.0
     # Chase / extension threshold for trap flags (defaults to early-window max 55%).
     # Must stay ABOVE base-window entries — 28% wrongly blocked Jul15 ATM ELITE winners.
@@ -3146,6 +3149,8 @@ class Settings(BaseSettings):
     open_sensex_put_lane_enabled: bool = True
     open_nifty_put_lane_enabled: bool = False
     open_index_lane_require_first_lift: bool = True
+    # EXPLODING/ELITE open rip may stamp before ictFirstLift — still allow index-lane quality.
+    open_index_lane_open_rip_first_lift_waiver_enabled: bool = True
     open_index_lane_min_elite_score: float = 90.0
     open_index_lane_max_local_base_pct: float = 15.0
     open_index_lane_allowed_setups_csv: str = "FTV,V"
@@ -3197,6 +3202,10 @@ class Settings(BaseSettings):
     open_caution_side_align_index_enabled: bool = True
     open_caution_block_puts_enabled: bool = False
     open_caution_non_lane_index_blocked: bool = True
+    # Expiry lanes may CE only the nearest index; aligned CALL/PUT on the other index still trades.
+    open_caution_aligned_side_lane_waiver_enabled: bool = True
+    open_aligned_side_rank_bonus: float = 40.0
+    open_counter_trend_side_rank_penalty: float = 45.0
     open_caution_itm_band_enabled: bool = True
     open_caution_sensex_call_max_itm_points: float = 800.0
     open_caution_sensex_put_max_itm_points: float = 800.0
