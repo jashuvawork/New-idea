@@ -134,6 +134,10 @@ def test_live_exit_books_broker_average_not_trigger_mark():
         patch.object(auto_trader.trade_store, "record_trade_mark"),
         patch("app.services.trade_store.record_trade_report"),
         patch("app.engines.snapshot_lag_analyzer.build_trade_close_report", return_value={}),
+        patch(
+            "app.engines.session_close_guard.live_session_close_force_exit_applies",
+            return_value=False,
+        ),
     ):
         asyncio.run(_run())
 

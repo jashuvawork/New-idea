@@ -143,8 +143,9 @@ def test_opposite_side_blocked_after_put_loss(mock_settings):
     assert "opposite_side_cooldown" in reason
 
 
+@patch("app.engines.whipsaw_guards.collect_session_trades", return_value=[])
 @patch("app.engines.whipsaw_guards.get_settings", return_value=_settings())
-def test_blocks_scalp_in_bearish_sideways(mock_settings):
+def test_blocks_scalp_in_bearish_sideways(mock_settings, _no_session_trades):
     state = AutoTraderState()
     snap = _snap()
     snap.explosiveRunnerWatchlist = [{"side": "PUT", "premiumVelocityPct": 0.5, "score": 50}]
