@@ -137,6 +137,8 @@ async def deployment_status():
             "useUpstoxCapital": settings.use_upstox_capital_for_sizing,
             "minOptionPremiumInr": settings.min_option_premium_inr,
             "maxOptionPremiumInr": settings.max_option_premium_inr,
+            "sensexMinOptionPremiumInr": settings.sensex_min_option_premium_inr,
+            "sensexMaxOptionPremiumInr": settings.sensex_max_option_premium_inr,
             "enhancedMode": True,
             "shadowTradeAllSignals": settings.shadow_trade_all_signals,
             "backgroundMonitor": settings.background_market_monitor_enabled,

@@ -3451,6 +3451,9 @@ class Settings(BaseSettings):
     max_option_premium_inr: float = 350.0
     explosion_max_premium_inr: float = 350.0
     explosion_ict_max_premium_inr: float = 350.0
+    # SENSEX ITM LTPs on expiry often ₹300–650 — keep NIFTY cap separate.
+    sensex_min_option_premium_inr: float = 18.0
+    sensex_max_option_premium_inr: float = 650.0
 
     # Jun 25 profile — hold winners longer for 2.5+ profit factor
     enhanced_micro_target_points: float = 4.0

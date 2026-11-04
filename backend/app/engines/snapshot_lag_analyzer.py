@@ -80,7 +80,13 @@ def _analyze_explosion_gaps(
         if score < effective_min:
             blockers.append(f"score_{score:.1f}<{effective_min:.0f}")
         prem = alert.get("premium")
-        if not premium_in_band(prem, mode="explosion"):
+        if not premium_in_band(
+            prem,
+            mode="explosion",
+            peak_move_pct=peak_move,
+            snap=snap,
+            symbol=symbol,
+        ):
             blockers.append("premium_out_of_band")
 
         capture = is_premium_capture_alert(alert, chart)
