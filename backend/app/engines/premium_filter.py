@@ -5,22 +5,39 @@ from typing import Any
 from app.config import get_settings
 
 
-def premium_in_band(
-    premium: float | None,
+def _symbol_from_context(snap: Any = None, symbol: str | None = None) -> str:
+    if symbol:
+        return str(symbol).strip().upper()
+    if snap is not None:
+        return str(getattr(snap, "symbol", "") or "").strip().upper()
+    return ""
+
+
+def resolve_premium_band_limits(
     *,
     mode: str = "default",
     peak_move_pct: float = 0.0,
     snap: Any = None,
-) -> bool:
-    """True when option LTP is within configured tradeable band."""
-    if premium is None or premium <= 0:
-        return False
-    settings = get_settings()
-    max_prem = settings.max_option_premium_inr
-    if mode == "explosion" and settings.explosion_max_premium_inr > 0:
-        max_prem = max(max_prem, settings.explosion_max_premium_inr)
-    min_prem = settings.min_option_premium_inr
-    # Same-day expiry: soften floor so ~₹15–20 near-base rips clear (Aug4 24550 PE).
+    symbol: str | None = None,
+    settings: Any = None,
+) -> tuple[float, float]:
+    """Return (min_premium_inr, max_premium_inr) for symbol and mode."""
+    settings = settings or get_settings()
+    sym = _symbol_from_context(snap, symbol)
+    if sym == "SENSEX":
+        min_prem = float(getattr(settings, "sensex_min_option_premium_inr", 18.0) or 18.0)
+        max_prem = float(getattr(settings, "sensex_max_option_premium_inr", 650.0) or 650.0)
+        sensex_fixed_cap = True
+    else:
+        min_prem = float(getattr(settings, "min_option_premium_inr", 18.0) or 18.0)
+        max_prem = float(getattr(settings, "max_option_premium_inr", 350.0) or 350.0)
+        sensex_fixed_cap = False
+        if mode == "explosion" and float(getattr(settings, "explosion_max_premium_inr", 0) or 0) > 0:
+            max_prem = max(
+                max_prem,
+                float(getattr(settings, "explosion_max_premium_inr", 0) or 0),
+            )
+
     if snap is not None and mode == "explosion":
         try:
             from app.engines.expiry_day_guards import is_symbol_expiry_day
@@ -32,6 +49,7 @@ def premium_in_band(
                 min_prem = min(min_prem, expiry_floor)
         except Exception:
             pass
+
     if mode == "explosion":
         cheap_min = float(getattr(settings, "explosion_cheap_rip_min_premium_inr", 12.0) or 12.0)
         cheap_peak = float(getattr(settings, "explosion_cheap_rip_min_peak_pct", 28.0) or 28.0)
@@ -57,12 +75,35 @@ def premium_in_band(
                 )
         except Exception:
             pass
-        if peak_move_pct >= cheap_peak and premium >= cheap_min:
+        if peak_move_pct >= cheap_peak:
             min_prem = min(min_prem, cheap_min)
-        # Mid-rip ATM/ITM (180→450+) stays tradeable for max-TP capture.
-        ict_ceil = float(getattr(settings, "explosion_ict_max_premium_inr", 0) or 0)
-        if ict_ceil > max_prem and peak_move_pct >= 28.0:
-            max_prem = max(max_prem, ict_ceil)
+        if not sensex_fixed_cap:
+            ict_ceil = float(getattr(settings, "explosion_ict_max_premium_inr", 0) or 0)
+            if ict_ceil > max_prem and peak_move_pct >= 28.0:
+                max_prem = max(max_prem, ict_ceil)
+
+    return min_prem, max_prem
+
+
+def premium_in_band(
+    premium: float | None,
+    *,
+    mode: str = "default",
+    peak_move_pct: float = 0.0,
+    snap: Any = None,
+    symbol: str | None = None,
+    settings: Any = None,
+) -> bool:
+    """True when option LTP is within configured tradeable band."""
+    if premium is None or premium <= 0:
+        return False
+    min_prem, max_prem = resolve_premium_band_limits(
+        mode=mode,
+        peak_move_pct=peak_move_pct,
+        snap=snap,
+        symbol=symbol,
+        settings=settings,
+    )
     return min_prem <= premium <= max_prem
 
 
@@ -71,15 +112,24 @@ def premium_band_label() -> str:
     return f"₹{settings.min_option_premium_inr:.0f}–₹{settings.max_option_premium_inr:.0f}"
 
 
-def premium_reject_reason(premium: float | None, *, mode: str = "default") -> str:
+def premium_reject_reason(
+    premium: float | None,
+    *,
+    mode: str = "default",
+    peak_move_pct: float = 0.0,
+    snap: Any = None,
+    symbol: str | None = None,
+) -> str:
     if premium is None or premium <= 0:
         return "missing_premium"
-    settings = get_settings()
-    max_prem = settings.max_option_premium_inr
-    if mode == "explosion" and settings.explosion_max_premium_inr > 0:
-        max_prem = max(max_prem, settings.explosion_max_premium_inr)
-    if premium < settings.min_option_premium_inr:
-        return f"premium_below_{settings.min_option_premium_inr:.0f}"
+    min_prem, max_prem = resolve_premium_band_limits(
+        mode=mode,
+        peak_move_pct=peak_move_pct,
+        snap=snap,
+        symbol=symbol,
+    )
+    if premium < min_prem:
+        return f"premium_below_{min_prem:.0f}"
     if premium > max_prem:
         return f"premium_above_{max_prem:.0f}"
     return "passed"
