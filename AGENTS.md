@@ -21,9 +21,9 @@ Reference: `backend/app/engines/index_rally_side_flip.py` (`_call_rally_bypass` 
 
 ## Open setup book (frozen unless user asks)
 
-Do **not** change the **09:15–09:45 open caution + index lanes + post-open (09:45–10:30) continuation** defaults unless the user explicitly requests an open-book change. Pin lives in `backend/app/engines/open_setup_policy.py` (`OPEN_BOOK_FROZEN_DEFAULTS`, `POST_OPEN_BOOK_FROZEN_DEFAULTS`, `OPEN_SETUP_POLICY_ID`); `/api/deployment/status` exposes `flags.openSetupPolicy` with `aligned`, `drift`, and `readyForLiveOpenBook`. **Same gates for paper and live** — only execution adapter differs; keep `paper_live_parity_enabled=true` on paper until live is armed.
+Do **not** change the **09:15–09:45 open book** (caution, lanes, ITM, fade) unless the user explicitly requests it. **Post-open** means the **normal CE/PE book 09:45–15:45** (not the config `post_open_setup_until` 10:30 rip-fade helper). Pin for open lives in `backend/app/engines/open_setup_policy.py`; `/api/deployment/status` → `flags.openSetupPolicy`. **Same entry stack for paper and live** after confirm; keep `paper_live_parity_enabled=true` on paper until live is armed.
 
-**After a confirmed good open session:** set `OPEN_SETUP_POLICY_CONFIRMED_SESSION=YYYY-MM-DD` (IST session date) in prod env, verify `readyForLiveOpenBook=true`, then enable live. Intentional book changes: bump `OPEN_SETUP_POLICY_ID` and update frozen defaults + tests.
+**After a confirmed good session (open + normal day):** set `OPEN_SETUP_POLICY_CONFIRMED_SESSION=YYYY-MM-DD` (IST), verify `readyForLiveSessionBooks=true`, then enable live. Intentional open-book changes: bump `OPEN_SETUP_POLICY_ID` and frozen defaults + tests.
 
 ## #676 pad policy (frozen unless user asks)
 

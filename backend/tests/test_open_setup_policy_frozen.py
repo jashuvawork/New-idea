@@ -27,7 +27,8 @@ def test_open_setup_policy_status_snapshot():
     snap = status["snapshot"]
     assert snap["windowsIst"]["openSetupStart"] == "09:15"
     assert snap["windowsIst"]["openCautionUntil"] == "09:45"
-    assert snap["windowsIst"]["postOpenSetupUntil"] == "10:30"
+    assert snap["sessionBooksIst"]["normalBookPostOpen"] == "09:45–15:45"
+    assert snap["windowsIst"]["openRipFadeBypassUntil"] == "10:30"
     assert snap["frozenFields"] == OPEN_SETUP_FROZEN_DEFAULTS
 
 
