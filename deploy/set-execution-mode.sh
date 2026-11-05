@@ -59,6 +59,8 @@ PIN_KEYS=(
   LIVE_MILESTONE_REQUIRED
   LIVE_HOLD_TO_STRUCTURAL_SL
   USE_UPSTOX_CAPITAL_FOR_SIZING
+  LIVE_MATCH_PAPER_BOOK
+  PAPER_SLIPPAGE_ENABLED
 )
 
 MODE=""
@@ -138,7 +140,8 @@ if [ "$MODE" = "live" ]; then
   echo "Arming live execution on the paper book..."
   _set_env_key ENABLE_LIVE_TRADING true
   _set_env_key PAPER_TRADING false
-  _set_env_key PAPER_SLIPPAGE_ENABLED false
+  # Keep slippage on for lot-sizing parity with paper; broker fill price is still real.
+  _set_env_key LIVE_MATCH_PAPER_BOOK true
   _set_env_key PAPER_SIMULATE_BROKER_ORDERS false
 else
   echo "Returning to paper execution..."

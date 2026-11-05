@@ -8,6 +8,7 @@ from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.engines.sep917_legacy_profile import sep917_legacy_profile_summary as _sep917_legacy_profile_summary
 from app.engines.open_index_lane import open_index_lane_summary
 from app.engines.open_setup_guards import open_setup_guard_summary
+from app.engines.live_paper_parity import live_paper_parity_status
 from app.engines.open_setup_policy import open_setup_policy_status
 from app.engines.structural_guard_settings import structural_guard_summary
 from app.services import trade_store
@@ -105,6 +106,7 @@ async def deployment_status():
             "openIndexLane": open_index_lane_summary(settings),
             "openSetupGuards": open_setup_guard_summary(settings),
             "openSetupPolicy": open_setup_policy_status(settings),
+            "livePaperParity": live_paper_parity_status(settings),
             "aggressiveMinExplosionScore": settings.aggressive_min_explosion_score,
             "explosionConfirmedMinScore": settings.explosion_confirmed_min_score,
             "explosionTargetStandard": settings.explosion_target_standard,

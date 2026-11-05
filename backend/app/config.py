@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     # Safety
     enable_live_trading: bool = False
     paper_trading: bool = True
+    # When true, live uses the same entry slippage lot-sizing and gate flags as paper.
+    live_match_paper_book: bool = True
     auto_trading_enabled: bool = True
     shadow_trade_all_signals: bool = True
     # Live: skip INR force-stops / scratch exits — let open trades hit structural SL.
