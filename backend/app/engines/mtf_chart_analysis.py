@@ -253,6 +253,27 @@ async def fetch_mtf_charts(
     return reads
 
 
+def index_mtf_anchor_aligned(
+    side: Side,
+    index_mtf: Optional[dict[str, TimeframeChartRead]],
+) -> bool:
+    """True when live index 1m + 5m both align with CE/PE (spot rip vs lagging premium HTF)."""
+    if not index_mtf:
+        return False
+    side_val = side.value
+
+    def _aligned(r: TimeframeChartRead) -> bool:
+        if side_val == "CALL":
+            return r.direction != "BEARISH" and r.momentumPct >= -0.03
+        return r.direction != "BULLISH" and r.momentumPct <= 0.03
+
+    for label in ("1m", "5m"):
+        tf = index_mtf.get(label)
+        if tf is None or not _aligned(tf):
+            return False
+    return True
+
+
 def premium_mtf_htf_opposes_side(
     side: Side,
     premium_mtf: Optional[dict[str, TimeframeChartRead]],
@@ -288,10 +309,16 @@ def _premium_htf_oppose_allows_entry(
     vertical_rip_bypass: bool = False,
     first_lift_bypass: bool = False,
     premium_led_bypass: bool = False,
+    index_anchor_htf_bypass: bool = False,
 ) -> tuple[bool, str]:
     if not bool(getattr(settings, "execution_premium_htf_oppose_block_enabled", True)):
         return True, "ok"
-    if vertical_rip_bypass or first_lift_bypass or premium_led_bypass:
+    if (
+        vertical_rip_bypass
+        or first_lift_bypass
+        or premium_led_bypass
+        or index_anchor_htf_bypass
+    ):
         return True, "ok"
     if premium_mtf_htf_opposes_side(side, premium_mtf, settings=settings):
         return False, "exec_mtf_premium_htf_opposes"
@@ -309,6 +336,7 @@ def validate_mtf_scalp(
     first_lift_bypass: bool = False,
     pad_lane_bypass: bool = False,
     open_setup_fade_bypass: bool = False,
+    index_anchor_htf_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
@@ -384,6 +412,7 @@ def validate_mtf_scalp(
             vertical_rip_bypass=vertical_rip_bypass,
             first_lift_bypass=first_lift_bypass,
             premium_led_bypass=premium_led_bypass,
+            index_anchor_htf_bypass=index_anchor_htf_bypass,
         )
         if not htf_ok:
             meta["passed"] = False
@@ -457,6 +486,7 @@ def validate_mtf_scalp(
         vertical_rip_bypass=False,
         first_lift_bypass=False,
         premium_led_bypass=False,
+        index_anchor_htf_bypass=index_anchor_htf_bypass,
     )
     if not htf_ok:
         meta["passed"] = False

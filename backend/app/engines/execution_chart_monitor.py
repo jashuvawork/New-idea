@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -247,6 +248,7 @@ def validate_execution_charts(
     building_rip_bypass: bool = False,
     open_caution_bypass: bool = False,
     open_setup_fade_bypass: bool = False,
+    index_anchor_htf_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
@@ -311,6 +313,7 @@ def validate_execution_charts(
             first_lift_bypass=first_lift_bypass,
             pad_lane_bypass=pad_lane_bypass,
             open_setup_fade_bypass=open_setup_fade_bypass,
+            index_anchor_htf_bypass=index_anchor_htf_bypass,
             scalp_mode=scalp_mode,
         )
         if not passed:
@@ -616,6 +619,30 @@ async def monitor_trade_chart_before_execution(
     index_mtf_reads = meta.pop("_indexMtfReads", None)
     premium_mtf_reads = meta.pop("_premiumMtfReads", None)
 
+    index_anchor_htf_bypass = False
+    if bool(
+        getattr(settings, "execution_premium_htf_oppose_index_anchor_bypass_enabled", True)
+    ) and index_mtf_reads:
+        from app.engines.mtf_chart_analysis import index_mtf_anchor_aligned
+        from app.engines.premium_vertical_chase_guard import (
+            index_lift_waives_extended_session_top_block,
+        )
+
+        if index_mtf_anchor_aligned(side, index_mtf_reads):
+            waived, _wmeta = index_lift_waives_extended_session_top_block(
+                SimpleNamespace(
+                    symbol=symbol,
+                    side=side,
+                    strike=strike,
+                    snap=snap,
+                    alert=alert if isinstance(alert, dict) else None,
+                    tier=str(getattr(explosion_event, "tier", "") or ""),
+                ),
+                snap,
+                settings=settings,
+            )
+            index_anchor_htf_bypass = waived
+
     passed, reason, mtf_meta = validate_execution_charts(
         side,
         index_chart,
@@ -638,6 +665,7 @@ async def monitor_trade_chart_before_execution(
         building_rip_bypass=building_rip_fade_bypass,
         open_caution_bypass=open_setup_fade_bypass,
         open_setup_fade_bypass=open_setup_fade_bypass,
+        index_anchor_htf_bypass=index_anchor_htf_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
@@ -651,6 +679,7 @@ async def monitor_trade_chart_before_execution(
     meta["openCautionFadeBypass"] = open_caution_fade_bypass
     meta["postOpenSetupFadeBypass"] = post_open_fade_bypass
     meta["openSetupFadeBypass"] = open_setup_fade_bypass
+    meta["indexAnchorHtfBypass"] = index_anchor_htf_bypass
     meta["peWinCeMirrorFadeBypass"] = pe_win_mirror_bypass
     meta["indexTroughBypass"] = index_trough_bypass
 

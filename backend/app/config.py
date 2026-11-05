@@ -935,9 +935,13 @@ class Settings(BaseSettings):
     premium_extended_session_min_range_position: float = 0.82
     premium_extended_session_max_premium_inr: float = 145.0
     premium_extended_session_open_end_ist: str = "09:45"
+    # Nov 5 SENSEX 79000 CE — index rip + fresh pad; allow near-base fill through PM session-top veto.
+    premium_extended_session_index_lift_waiver_enabled: bool = True
+    premium_extended_session_index_lift_max_local_pad_pct: float = 22.0
     execution_premium_htf_oppose_block_enabled: bool = True
     execution_premium_htf_oppose_min_trend_strength: float = 18.0
     execution_premium_htf_oppose_min_count: int = 2
+    execution_premium_htf_oppose_index_anchor_bypass_enabled: bool = True
     pe_win_ce_mirror_block_fade_waiver_extended_session: bool = True
     live_entry_moment_waiver_enabled: bool = True
     live_entry_moment_min_live: float = 86.0
