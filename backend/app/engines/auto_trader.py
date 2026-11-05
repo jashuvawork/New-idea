@@ -1162,10 +1162,10 @@ async def _open_from_candidate(
     use_parity = _uses_paper_live_parity(settings)
     tier = candidate.tier if candidate.mode == "explosion" else None
 
-    # Entry fill: parity paper applies MARKET-entry slippage; legacy paper optional; live uses signal LTP
-    if use_parity or (
-        settings.paper_slippage_enabled and not is_live and not use_parity
-    ):
+    from app.engines.live_paper_parity import paper_book_entry_fill_slippage_applies
+
+    # Entry fill: paper slippage for lot sizing on live too when live_match_paper_book.
+    if use_parity or paper_book_entry_fill_slippage_applies(settings):
         fill_premium, slip_meta = apply_entry_fill(
             signal_premium, candidate.strategy_type, tier=tier,
         )

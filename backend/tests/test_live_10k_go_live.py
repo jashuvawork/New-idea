@@ -99,6 +99,8 @@ def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
     assert values["FTV_ALLOCATION_MAX_POSITIONS"] == "3"
     assert values["ENABLE_LIVE_TRADING"] == "true"
     assert values["PAPER_TRADING"] == "false"
+    assert values.get("LIVE_MATCH_PAPER_BOOK") == "true"
+    assert values.get("PAPER_SLIPPAGE_ENABLED") == "true"
     assert "10000" not in text
 
 
