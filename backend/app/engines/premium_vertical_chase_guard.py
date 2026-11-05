@@ -194,12 +194,80 @@ def session_extended_premium_chase_context(
     return False, meta
 
 
+def index_lift_waives_extended_session_top_block(
+    candidate: Any,
+    snap: Optional[SymbolSnapshot],
+    *,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Afternoon index-confirmed pad lift — do not veto near-base waiver at session-range top."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(
+        getattr(settings, "premium_extended_session_index_lift_waiver_enabled", True)
+    ):
+        return False, meta
+    if snap is None:
+        snap = getattr(candidate, "snap", None)
+    if snap is None:
+        return False, meta
+
+    evidence = _candidate_evidence(candidate)
+    alert = getattr(candidate, "alert", None)
+    alert_map = alert if isinstance(alert, dict) else evidence
+    side_raw = evidence.get("side") or getattr(getattr(candidate, "side", None), "value", None) or getattr(candidate, "side", "")
+    from app.models.schemas import Side
+
+    try:
+        side = Side(str(side_raw).upper()) if side_raw else Side.CALL
+    except (TypeError, ValueError):
+        side = Side.CALL
+
+    from app.engines.index_confirmed_local_base import index_confirmed_local_base
+
+    index_ok = index_confirmed_local_base(side, snap, alert_map, settings=settings)
+    if not index_ok:
+        from app.engines.index_tick_helpers import evaluate_index_tick_helpers
+
+        idx = evaluate_index_tick_helpers(
+            snap=snap, side=side, alert=alert_map if isinstance(alert_map, dict) else None,
+        )
+        index_ok = bool(idx.confirming or idx.tick_spike)
+        if index_ok:
+            meta["indexTickConfirmWaiver"] = True
+
+    if not index_ok:
+        return False, meta
+
+    tier = str(evidence.get("tier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False, meta
+
+    lb = float(
+        evidence.get("localBaseMovePct")
+        or evidence.get("ictBaseRelativeMovePct")
+        or evidence.get("offLowMovePct")
+        or 0
+    )
+    max_lb = float(
+        getattr(settings, "premium_extended_session_index_lift_max_local_pad_pct", 22.0)
+        or 22.0
+    )
+    if lb <= 0 or lb > max_lb + 1e-6:
+        return False, meta
+
+    meta["indexLiftExtendedSessionWaiver"] = True
+    meta["localBaseMovePct"] = round(lb, 2)
+    return True, meta
+
+
 def _near_base_bypass_reason_disallowed_at_session_top(
     bypass_reason: str,
     candidate: Any,
     metrics: Mapping[str, Any],
     *,
     premium_chart: Optional[PremiumChart] = None,
+    snap: Optional[SymbolSnapshot] = None,
     settings: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     settings = settings or get_settings()
@@ -225,6 +293,14 @@ def _near_base_bypass_reason_disallowed_at_session_top(
     )
     if not hit:
         return False, "", meta
+
+    waived, wmeta = index_lift_waives_extended_session_top_block(
+        candidate, snap, settings=settings,
+    )
+    meta.update(wmeta)
+    if waived:
+        return False, "", meta
+
     return True, "premium_extended_session_near_base_chase", meta
 
 
@@ -311,6 +387,7 @@ def premium_vertical_chase_blocks_entry(
             candidate,
             metrics,
             premium_chart=premium_chart,
+            snap=snap,
             settings=settings,
         )
         meta.update(dis_meta)

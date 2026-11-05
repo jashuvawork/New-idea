@@ -19,6 +19,12 @@ PREORDER_PREMIUM_FADING_REASONS = frozenset({
     "exec_mtf_premium_5m_fading",
 })
 
+PREORDER_EXEC_CHASE_REASONS = frozenset({
+    "premium_extended_session_near_base_chase",
+    "exec_mtf_premium_htf_opposes",
+    "premium_vertical_chase_at_high",
+})
+
 _suppressed_until: dict[tuple[str, str, str, float, str, str], datetime] = {}
 _session_date: str | None = None
 
@@ -55,7 +61,7 @@ def suppress_after_preorder_rejection(
     now: datetime | None = None,
 ) -> bool:
     """Suppress only typed premium-fade failures known to happen before submission."""
-    if reason not in PREORDER_PREMIUM_FADING_REASONS:
+    if reason not in PREORDER_PREMIUM_FADING_REASONS and reason not in PREORDER_EXEC_CHASE_REASONS:
         return False
     current = now or datetime.now(IST)
     _roll_session(current)
