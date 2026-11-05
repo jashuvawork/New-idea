@@ -13,6 +13,7 @@ from app.engines.mtf_chart_analysis import (
 from app.engines.premium_vertical_chase_guard import (
     index_lift_waives_extended_session_top_block,
     premium_vertical_chase_blocks_entry,
+    session_extended_premium_chase_context,
 )
 from app.models.schemas import PremiumChart, Side, SymbolSnapshot
 
@@ -52,6 +53,40 @@ def test_htf_oppose_waived_with_index_anchor_bypass():
         index_anchor_htf_bypass=True,
     )
     assert ok and reason == "ok"
+
+
+@patch("app.engines.index_confirmed_local_base.index_confirmed_local_base", return_value=True)
+def test_afternoon_145_inr_cap_bypassed_on_index_lift(mock_iclb):
+    """79000 CE @ ₹285 — ₹145 afternoon LTP rule must not fire when index confirms lift."""
+    settings = _symmetric_settings()
+    evidence = {
+        "premium": 285.0,
+        "sessionPeakPremium": 290.0,
+        "sessionLowPremium": 180.0,
+        "tier": "ELITE",
+        "localBaseMovePct": 12.0,
+        "side": "CALL",
+    }
+    cand = SimpleNamespace(
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=79000.0,
+        snap=SimpleNamespace(spot=79200.0),
+        alert=evidence,
+        pretrade_meta={"causalRanking": {"localBaseMovePct": 12.0}},
+    )
+    with patch(
+        "app.engines.premium_vertical_chase_guard._is_afternoon_extended_window",
+        return_value=True,
+    ):
+        active, meta = session_extended_premium_chase_context(
+            evidence,
+            settings=settings,
+            candidate=cand,
+            snap=cand.snap,
+        )
+    assert active is False
+    assert meta.get("indexLiftBypasses145InrCap") or meta.get("indexLiftExtendedSessionWaiver")
 
 
 @patch("app.engines.index_confirmed_local_base.index_confirmed_local_base", return_value=True)

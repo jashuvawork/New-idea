@@ -933,6 +933,7 @@ class Settings(BaseSettings):
     premium_extended_session_chase_block_enabled: bool = True
     premium_extended_session_afternoon_only: bool = True
     premium_extended_session_min_range_position: float = 0.82
+    # Afternoon chase context when LTP ≥ this (and high in session range); waived on index-confirmed lift (#906).
     premium_extended_session_max_premium_inr: float = 145.0
     premium_extended_session_open_end_ist: str = "09:45"
     # Nov 5 SENSEX 79000 CE — index rip + fresh pad; allow near-base fill through PM session-top veto.

@@ -853,12 +853,15 @@ def double_dip_vbase_readiness(
         return False, "double_dip_vbase_chart_missing"
 
     premium = float(getattr(event, "premium", 0) or row.get("premium") or 0)
+    symbol = str(getattr(snap, "symbol", "") or row.get("symbol") or "")
+    side = _side_from_row(event, row)
+    strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
     prem_ok, prem_reason = _pad_premium_band_ok(
         premium,
         settings=s,
         max_premium_setting="double_dip_vbase_max_premium_inr",
         reason_prefix="double_dip_vbase",
-        symbol=str(getattr(snap, "symbol", "") or row.get("symbol") or ""),
+        symbol=symbol,
     )
     if not prem_ok:
         return False, prem_reason
@@ -873,7 +876,26 @@ def double_dip_vbase_readiness(
             getattr(s, "double_dip_vbase_afternoon_max_premium_inr", 145.0) or 145.0
         )
         if premium > aft_max + 1e-6:
-            return False, "double_dip_vbase_afternoon_premium_too_high"
+            from types import SimpleNamespace
+
+            from app.engines.premium_vertical_chase_guard import (
+                index_lift_waives_extended_session_top_block,
+            )
+
+            lift_cand = SimpleNamespace(
+                symbol=symbol,
+                side=side,
+                strike=strike,
+                snap=snap,
+                alert=row,
+                tier=str(row.get("tier") or ""),
+                pretrade_meta={},
+            )
+            waived, _ = index_lift_waives_extended_session_top_block(
+                lift_cand, snap, settings=s,
+            )
+            if not waived:
+                return False, "double_dip_vbase_afternoon_premium_too_high"
 
     move = _base_move(ict, row)
     lo = float(getattr(s, "double_dip_vbase_min_move_pct", 2.0) or 2.0)
@@ -894,9 +916,6 @@ def double_dip_vbase_readiness(
     if not _structured(ict, row, s):
         return False, "double_dip_vbase_structure_missing"
 
-    side = _side_from_row(event, row)
-    symbol = str(getattr(snap, "symbol", "") or row.get("symbol") or "")
-    strike = float(getattr(event, "strike", 0) or row.get("strike") or 0)
     shape_ok, shape_reason, metrics = _double_dip_vbase_shape(
         symbol=symbol,
         strike=strike,

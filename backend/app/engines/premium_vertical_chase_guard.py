@@ -132,6 +132,8 @@ def session_extended_premium_chase_context(
     premium_chart: Optional[PremiumChart] = None,
     settings: Any = None,
     when: Optional[datetime] = None,
+    candidate: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
 ) -> tuple[bool, dict[str, Any]]:
     """
     Premium at session-range top after open window — not a true near-base entry
@@ -185,13 +187,25 @@ def session_extended_premium_chase_context(
     )
     if prem <= 0:
         return False, meta
+
+    active = False
     if prem + 1e-6 < max_inr and range_pos + 1e-6 < min_range:
-        return False, meta
-    if prem + 1e-6 >= max_inr and range_pos + 1e-6 >= min_range:
-        return True, meta
-    if prem + 1e-6 >= max_inr and range_pos <= 0:
-        return True, meta
-    return False, meta
+        active = False
+    elif prem + 1e-6 >= max_inr and range_pos + 1e-6 >= min_range:
+        active = True
+    elif prem + 1e-6 >= max_inr and range_pos <= 0:
+        active = True
+
+    if active and candidate is not None:
+        waived, wmeta = index_lift_waives_extended_session_top_block(
+            candidate, snap, settings=settings,
+        )
+        meta.update(wmeta)
+        if waived:
+            meta["indexLiftBypasses145InrCap"] = True
+            return False, meta
+
+    return active, meta
 
 
 def index_lift_waives_extended_session_top_block(
@@ -290,6 +304,8 @@ def _near_base_bypass_reason_disallowed_at_session_top(
         metrics=metrics,
         premium_chart=premium_chart,
         settings=settings,
+        candidate=candidate,
+        snap=snap,
     )
     if not hit:
         return False, "", meta
