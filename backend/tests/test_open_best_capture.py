@@ -171,24 +171,28 @@ def test_fake_trap_open_book_waives_conflict_on_aligned_exploding():
     with patch("app.engines.index_tick_helpers.resolve_index_session") as mock_sess:
         mock_sess.return_value = {"open": 77000.0, "last": 77300.0}
         with patch(
-            "app.engines.explosion_entry_guards._session_peak_move",
-            return_value=12.0,
+            "app.engines.open_index_lane.open_setup_guard_when",
+            return_value=OPEN,
         ):
             with patch(
-                "app.engines.explosion_entry_guards._worst_or_expiry_chop_day",
-                return_value=False,
+                "app.engines.explosion_entry_guards._session_peak_move",
+                return_value=12.0,
             ):
                 with patch(
-                    "app.engines.explosion_entry_guards._post_small_win",
-                    return_value=(False, {}),
+                    "app.engines.explosion_entry_guards._worst_or_expiry_chop_day",
+                    return_value=False,
                 ):
                     with patch(
-                        "app.engines.explosion_entry_guards._post_session_win",
-                        return_value=(True, {"postSessionWin": True}),
+                        "app.engines.explosion_entry_guards._post_small_win",
+                        return_value=(False, {}),
                     ):
-                        block, reason, meta = detect_fake_explosion_trap(
-                            cand, snap, state=SimpleNamespace(),
-                        )
+                        with patch(
+                            "app.engines.explosion_entry_guards._post_session_win",
+                            return_value=(True, {"postSessionWin": True}),
+                        ):
+                            block, reason, meta = detect_fake_explosion_trap(
+                                cand, snap, state=SimpleNamespace(),
+                            )
     assert not block or meta.get("openBookFakeTrapWaiver") is True
     if block:
         assert reason != "fake_explosion_trap_conflict"
