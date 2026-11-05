@@ -59,6 +59,34 @@ def test_mega_runner_unified_ladder_arms_at_14pct_gain(mock_ms, mock_s):
     assert floor == pytest.approx(47.67 * 0.75, rel=0.01)
 
 
+def test_mega_projected_defers_unified_peak_keep_below_stage_one():
+    from app.models.schemas import PaperTrade, Side, StrategyType
+
+    s = _settings()
+    entry = 308.98
+    trade = PaperTrade(
+        id="nov5",
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=79000.0,
+        entryPremium=entry,
+        currentPremium=entry + 49.0,
+        lots=29,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 1409.0,
+            "stageSize": 75.0,
+            "exitPlan": {"projectedMaxTp": 1409.0, "stageSize": 75.0},
+        },
+    )
+    assert profit_ladder_floor(trade, 65.52, settings=s) is None
+    floor, layer = profit_ladder_floor(trade, 76.0, settings=s)
+    assert layer == "peak_keep"
+
+
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.moment_stage_trail.get_settings")
