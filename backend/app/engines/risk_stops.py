@@ -17,7 +17,7 @@ def live_hold_to_structural_sl(settings=None) -> bool:
         return False
     if not _strict_bool(getattr(s, "auto_trading_enabled", True), True):
         return False
-    return _strict_bool(getattr(s, "live_hold_to_structural_sl", True), True)
+    return _strict_bool(getattr(s, "live_hold_to_structural_sl", False), False)
 
 
 def effective_emergency_stop_inr(
