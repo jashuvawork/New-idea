@@ -154,6 +154,7 @@ class Settings(BaseSettings):
     live_pause_after_session_losses: int = 1
     # Ignored. October 1 paper kept the top-signal session lift.
     live_disable_session_lift: bool = False
+    # Deprecated — no code path (paper book exits only). Kept for env/template stale-key scrub.
     live_early_fail_exit_enabled: bool = False
     live_early_fail_min_hold_seconds: int = 45
     live_early_fail_max_hold_seconds: int = 240

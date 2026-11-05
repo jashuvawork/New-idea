@@ -113,6 +113,7 @@ def live_paper_parity_status(settings: Any = None) -> dict[str, Any]:
         "note": (
             "Gates (selector, pretrade, open setup, live_entry_score, chart) do not branch on "
             "enable_live_trading. Live-only code = broker orders, adoption, capital refresh. "
+            "Removed legacy overlay: live_best_trades_only, live_early_fail exits. "
             "Chop-live entry blocks apply on chop days only."
         ),
     }
