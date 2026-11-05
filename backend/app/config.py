@@ -3226,6 +3226,9 @@ class Settings(BaseSettings):
     selector_expiry_otm_prefilter_enabled: bool = True
     # Expiry SENSEX/BANKNIFTY OTM block — waive for stamped open first-lift at the pad.
     best_trade_expiry_otm_open_first_lift_waive_enabled: bool = True
+    # After EOD confirms open (09:15–09:45) + normal post-open (09:45–15:45), set session date YYYY-MM-DD IST.
+    # HUD ``openSetupPolicy.readyForLiveSessionBooks`` requires this + frozen open defaults aligned.
+    open_setup_policy_confirmed_session: str = ""
     primary_window_start_hour: int = 10
     primary_window_start_minute: int = 0
 
