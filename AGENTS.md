@@ -21,7 +21,7 @@ Reference: `backend/app/engines/index_rally_side_flip.py` (`_call_rally_bypass` 
 
 ## Open setup book (frozen unless user asks)
 
-Do **not** change the **09:15–09:45 open book** (caution, lanes, ITM, fade) unless the user explicitly requests it. **Post-open** means the **normal CE/PE book 09:45–15:45** (not the config `post_open_setup_until` 10:30 rip-fade helper). Pin for open lives in `backend/app/engines/open_setup_policy.py`; `/api/deployment/status` → `flags.openSetupPolicy`. **Same entry stack for paper and live** after confirm; keep `paper_live_parity_enabled=true` on paper until live is armed.
+Do **not** change the **09:15–09:45 open book** (caution, lanes, ITM, fade) unless the user explicitly requests it. **Post-open** means the **normal CE/PE book 09:45–15:45** (not the config `post_open_setup_until` 10:30 rip-fade helper). Pin for open lives in `backend/app/engines/open_setup_policy.py`; `/api/deployment/status` → `flags.openSetupPolicy`. **Same entry stack for paper and live** after confirm. Arming live via `deploy/set-execution-mode.sh --live` keeps the paper/Oct1 gate set and pins `LIVE_HOLD_TO_STRUCTURAL_SL=false`, `USE_UPSTOX_CAPITAL_FOR_SIZING=false` — real broker orders only, not a second live gate book. Chop-live entry guards apply on chop days only (not every live day).
 
 **After a confirmed good session (open + normal day):** set `OPEN_SETUP_POLICY_CONFIRMED_SESSION=YYYY-MM-DD` (IST), verify `readyForLiveSessionBooks=true`, then enable live. Intentional open-book changes: bump `OPEN_SETUP_POLICY_ID` and frozen defaults + tests.
 
