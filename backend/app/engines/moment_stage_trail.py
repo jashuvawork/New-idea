@@ -139,6 +139,32 @@ def defer_modest_peak_keep_for_max_profit_stage_runner(
     return True
 
 
+def defer_unified_peak_keep_for_mega_projected_runner(
+    trade: PaperTrade,
+    best: float,
+    *,
+    settings: Settings | None = None,
+) -> bool:
+    """Hold off unified ladder peak_keep until stage 1 completes on mega projected legs."""
+    s = settings or get_settings()
+    ctx = trade.entryContext or {}
+    plan = ctx.get("exitPlan") or {}
+    if not bool(ctx.get("maxProfitCapture")) or not trade_uses_moment_stage_ladder(trade):
+        return False
+    projected = _safe_float(ctx.get("projectedMaxTp") or plan.get("projectedMaxTp"))
+    stage = _safe_float(ctx.get("stageSize") or plan.get("stageSize"))
+    best = _safe_float(best)
+    if projected <= 0 or stage <= 0 or best <= 0:
+        return False
+    min_proj = _cfg_float(
+        s, "stage_runner_defer_unified_peak_keep_min_projected_tp", 1200.0
+    )
+    if projected + 1e-6 < min_proj:
+        return False
+    frac = _cfg_float(s, "stage_runner_defer_peak_keep_complete_frac", 1.0)
+    return best + 1e-6 < stage * max(0.0, min(1.0, frac))
+
+
 def moment_stage_near_complete(
     trade: PaperTrade,
     best: float,
@@ -754,6 +780,8 @@ def profit_ladder_floor(
         floor_premium = anchor + excess * keep
         floor_pts, layer = floor_premium - entry, "multiple"
     elif gain_pct + 1e-6 >= gain_arm_pct:
+        if defer_unified_peak_keep_for_mega_projected_runner(trade, best, settings=s):
+            return None
         floor_pts, layer = max(best * keep, be_floor), "peak_keep"
     elif (
         getattr(s, "unified_profit_ladder_breakeven_enabled", False) is True

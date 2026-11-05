@@ -46,9 +46,17 @@ def exit_near_best_hold_active(
         return False
     v3 = float(live_velocity_3s or 0)
     ctx = trade.entryContext or {}
+    plan = ctx.get("exitPlan") or {}
     runner = bool(
         ctx.get("eliteRunnerExitBundle")
         or (ctx.get("maxProfitCapture") and ctx.get("vBaseFtvRunner"))
+        or (
+            ctx.get("maxProfitCapture")
+            and (
+                ctx.get("momentStageLadder")
+                or plan.get("momentStageLadder")
+            )
+        )
     )
     min_v = _cfg_float(
         settings,
@@ -1151,6 +1159,28 @@ def _profit_floor_exit_ready(
     min_after = _cfg_float(
         settings, "unified_profit_ladder_fall_min_seconds_after_peak", 45.0
     )
+    ctx = trade.entryContext or {}
+    plan = ctx.get("exitPlan") or {}
+    projected = float(ctx.get("projectedMaxTp") or plan.get("projectedMaxTp") or 0)
+    stage = float(ctx.get("stageSize") or plan.get("stageSize") or 0)
+    if (
+        bool(ctx.get("maxProfitCapture"))
+        and projected
+        + 1e-6
+        >= _cfg_float(
+            settings, "stage_runner_defer_unified_peak_keep_min_projected_tp", 1200.0
+        )
+        and stage > 0
+    ):
+        from app.engines.moment_stage_trail import _local_observed_best
+
+        if _local_observed_best(trade, 0) + 1e-6 < stage:
+            min_after = max(
+                min_after,
+                _cfg_float(
+                    settings, "stage_runner_pre_stage_fall_min_seconds_after_peak", 120.0
+                ),
+            )
     if min_after <= 0:
         return True
     since_peak = _seconds_since_peak(trade)

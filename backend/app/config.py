@@ -1667,6 +1667,11 @@ class Settings(BaseSettings):
     # NIFTY PUT 22700 exited at +10pt with projected 703. Cheap Oct12 runners (projected
     # ~258) still use modest peak-keep via unified ladder / ftv_runner_pct_trail.
     stage_runner_defer_pct_keep_min_projected_tp: float = 400.0
+    # Unified 75% peak-keep waits until stage 1 completes when projected TP ≥ this (Nov5 ~1409).
+    stage_runner_defer_unified_peak_keep_min_projected_tp: float = 1200.0
+    stage_runner_defer_peak_keep_complete_frac: float = 1.0
+    # Before stage 1 completes on mega projected legs, require longer after peak before fall-sell.
+    stage_runner_pre_stage_fall_min_seconds_after_peak: float = 120.0
     # Below this best-pts, defer 75% keep on mega projected runners (Oct21 +21pt);
     # Sep2 +31pt at 11.7% still arms once best ≥ this.
     stage_runner_defer_pct_keep_min_best_points: float = 28.0
