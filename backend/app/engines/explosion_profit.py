@@ -3017,10 +3017,13 @@ def evaluate_explosion_exit(
         and best + 1e-6
         >= _cfg_float(settings, "tp_rung_ladder_mega_disable_between_fade_min_best_points", 55.0)
     )
+    from app.engines.moment_stage_trail import defer_unified_peak_keep_for_mega_projected_runner
+
     if (
         (not tp_rung_armed or tp_rung_mega_peak_keep)
         and pct_keep_floor is not None
         and best >= min_pct_best
+        and not defer_unified_peak_keep_for_mega_projected_runner(trade, best, settings=settings)
         and pct_ready
         and (falling_under_pct or hold >= stage_min_hold)
         and _profit_floor_touch_sell(pnl_pts, pct_keep_floor, v3, settings)

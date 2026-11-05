@@ -701,6 +701,8 @@ def ftv_runner_pct_floor(
     best = _safe_float(best)
     if defer_modest_peak_keep_for_max_profit_stage_runner(trade, best, settings=s):
         return None
+    if defer_unified_peak_keep_for_mega_projected_runner(trade, best, settings=s):
+        return None
     if entry <= 0 or best <= 0:
         return None
     arm_pct = _cfg_float(s, "ftv_runner_pct_trail_arm_pct", 25.0)
