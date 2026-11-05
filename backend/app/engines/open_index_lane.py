@@ -5,7 +5,9 @@ lane (like legacy SENSEX CALL); same-week next index gets the **PE** lane (like 
 NIFTY PUT). Roles flip through the week — NIFTY CE + SENSEX PE when NIFTY is #1.
 
 Legacy flags still apply when expiry lanes are off or snapshots are missing.
-Replay uses ``resolve_lane_when`` (snap timestamp, not wall clock).
+
+Open-caution **gates** use ``open_setup_guard_when`` (decision clock). ``resolve_lane_when``
+keeps snap timestamps for replay helpers that pass explicit ``when=``.
 """
 
 from __future__ import annotations
@@ -335,11 +337,30 @@ def _lane_quality_ok(candidate: Any, settings: Any) -> tuple[bool, str, dict[str
     return True, "ok", meta
 
 
+def open_setup_guard_when(
+    candidate: Any = None,
+    when: Optional[datetime] = None,
+) -> datetime:
+    """Decision clock for 09:15–09:45 open-caution guards (every session day).
+
+    Live pretrade must not treat a stale ``candidate.snap.timestamp`` as still
+    inside open caution after 09:45 (#676 never extended open caution past that).
+    EOD replay passes explicit ``when=`` or patches ``datetime.now``.
+    """
+    if when is not None and isinstance(when, datetime):
+        ts = when
+    else:
+        ts = datetime.now(IST)
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=IST)
+    return ts.astimezone(IST)
+
+
 def resolve_lane_when(
     candidate: Any,
     when: Optional[datetime] = None,
 ) -> datetime:
-    """Replay/live clock: prefer explicit when, then candidate.snap.timestamp, then now."""
+    """Replay helper: explicit when, else snap timestamp, else now (not for open gates)."""
     if when is not None and isinstance(when, datetime):
         ts = when
     else:
@@ -364,7 +385,7 @@ def open_index_lane_qualified(
     ok, reason, meta = validate_open_index_lane(
         candidate,
         settings=settings,
-        when=resolve_lane_when(candidate, when),
+        when=open_setup_guard_when(candidate, when),
         snapshots=snapshots,
     )
     if not ok:
@@ -388,7 +409,7 @@ def validate_open_index_lane(
     if not bool(getattr(settings, "open_index_lane_enabled", True)):
         return True, "ok", {}
 
-    when = resolve_lane_when(candidate, when)
+    when = open_setup_guard_when(candidate, when)
     if not in_open_caution_window_at(when):
         return True, "ok", {}
 

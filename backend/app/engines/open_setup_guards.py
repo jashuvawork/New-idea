@@ -13,7 +13,7 @@ from app.engines.open_index_lane import (
     allowed_open_lane_sides,
     in_open_caution_window_at,
     in_post_open_setup_window_at,
-    resolve_lane_when,
+    open_setup_guard_when,
     validate_open_index_lane,
 )
 from app.models.schemas import SymbolSnapshot
@@ -129,10 +129,14 @@ def open_caution_side_align_ok(
     snap: Any,
     *,
     settings: Any = None,
+    when: Optional[datetime] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Block PUT on bullish open / CALL on bearish open; allow either when tape is flat."""
     settings = settings or get_settings()
     meta: dict[str, Any] = {"openSideAlign": True}
+    when = open_setup_guard_when(None, when)
+    if not in_open_caution_window_at(when):
+        return True, "ok", meta
     if bool(getattr(settings, "open_caution_block_puts_enabled", False)) and _side_value(side) == "PUT":
         nifty_put_lane = bool(getattr(settings, "open_nifty_put_lane_enabled", False))
         if not (nifty_put_lane and _index_bucket(symbol) == "NIFTY"):
@@ -206,7 +210,7 @@ def validate_open_setup_entry(
     Open caution guards before SELECT / pretrade. Idle outside 09:15–09:45.
     """
     settings = settings or get_settings()
-    when = resolve_lane_when(candidate, when)
+    when = open_setup_guard_when(candidate, when)
     meta: dict[str, Any] = {"openSetupGuard": True}
     if not in_open_caution_window_at(when):
         return True, "ok", {}
@@ -223,7 +227,7 @@ def validate_open_setup_entry(
     if snap is None and snapshots:
         snap = snapshots.get(sym.upper())
     align_ok, align_reason, align_meta = open_caution_side_align_ok(
-        sym, side, snap, settings=settings,
+        sym, side, snap, settings=settings, when=when,
     )
     meta.update(align_meta)
     if not align_ok:
@@ -288,7 +292,7 @@ def _open_book_side_align_ok(
 ) -> bool:
     """True during open/post-open windows when index tape aligns with candidate side."""
     settings = settings or get_settings()
-    when = resolve_lane_when(candidate, when)
+    when = open_setup_guard_when(candidate, when)
     if not (
         in_open_caution_window_at(when) or in_post_open_setup_window_at(when)
     ):
@@ -331,7 +335,7 @@ def open_counter_trend_side_rank_penalty(
 ) -> float:
     """09:45–10:30: deprioritize PUT on bullish tape / CALL on bearish (side align would pass)."""
     settings = settings or get_settings()
-    when = resolve_lane_when(candidate, when)
+    when = open_setup_guard_when(candidate, when)
     if not in_post_open_setup_window_at(when):
         return 0.0
     index, side = _candidate_lane_tuple(candidate)
@@ -358,7 +362,7 @@ def open_caution_deep_itm_rank_bonus(
 ) -> float:
     """Prefer deeper ITM (73000 over 73400) during open caution."""
     settings = settings or get_settings()
-    when = resolve_lane_when(candidate, when)
+    when = open_setup_guard_when(candidate, when)
     if not in_open_caution_window_at(when):
         return 0.0
     if not bool(getattr(settings, "open_caution_deep_itm_rank_bonus_enabled", True)):

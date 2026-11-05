@@ -59,7 +59,9 @@ def test_put_blocked_on_bullish_open(mock_session):
     mock_session.return_value = {"open": 73000.0, "last": 73500.0, "hi": 73500.0, "lo": 73000.0}
     s = Settings(open_caution_side_align_index_enabled=True)
     snap = SimpleNamespace(spot=73500.0)
-    ok, reason, _ = open_caution_side_align_ok("SENSEX", "PUT", snap, settings=s)
+    ok, reason, _ = open_caution_side_align_ok(
+        "SENSEX", "PUT", snap, settings=s, when=OPEN,
+    )
     assert not ok
     assert reason == "open_caution_put_on_bullish_open"
 
@@ -69,7 +71,9 @@ def test_call_blocked_on_bearish_open(mock_session):
     mock_session.return_value = {"open": 73500.0, "last": 73000.0, "hi": 73500.0, "lo": 73000.0}
     s = Settings(open_caution_side_align_index_enabled=True)
     snap = SimpleNamespace(spot=73000.0)
-    ok, reason, _ = open_caution_side_align_ok("SENSEX", "CALL", snap, settings=s)
+    ok, reason, _ = open_caution_side_align_ok(
+        "SENSEX", "CALL", snap, settings=s, when=OPEN,
+    )
     assert not ok
     assert reason == "open_caution_call_on_bearish_open"
 

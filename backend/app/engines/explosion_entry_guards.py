@@ -2124,14 +2124,11 @@ def _fake_explosion_trap_open_book_conflict_waived(
         _index_open_side_aligned,
         _side_value,
         in_open_caution_window_at,
-        in_post_open_setup_window_at,
-        resolve_lane_when,
+        open_setup_guard_when,
     )
 
-    when = resolve_lane_when(candidate, None)
-    if not (
-        in_open_caution_window_at(when) or in_post_open_setup_window_at(when)
-    ):
+    when = open_setup_guard_when(candidate, None)
+    if not in_open_caution_window_at(when):
         return False
     sym = str(getattr(candidate, "symbol", "") or "")
     index = _index_bucket(sym)
