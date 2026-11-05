@@ -3180,8 +3180,10 @@ async def _open_from_candidate(
         chop_second_same_side_leg_blocked,
     )
 
-    if candidate.mode == "explosion" and (
-        is_live or chop_live_guard_day_active(state, snap, snapshots)
+    # Same chop-live entry bar as paper — only when the day is chop-classified, not
+    # because enable_live_trading is true (live = paper book + real broker orders).
+    if candidate.mode == "explosion" and chop_live_guard_day_active(
+        state, snap, snapshots,
     ):
         chop_blocked, chop_reason, chop_meta = chop_live_entry_blocked(
             candidate,

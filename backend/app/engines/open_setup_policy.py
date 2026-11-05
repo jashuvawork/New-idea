@@ -186,10 +186,21 @@ def open_setup_policy_status(settings: Any = None) -> dict[str, Any]:
             "sharedEntryGates": list(OPEN_SETUP_SHARED_ENTRY_PATHS),
             "liveUsesSameOpenBook": _open_setup_modules_paper_free(),
             "liveUsesSameNormalBook": True,
+            "liveMatchesPaperBook": {
+                "chopLiveEntryOnlyOnChopDays": True,
+                "liveHoldToStructuralSl": bool(
+                    getattr(settings, "live_hold_to_structural_sl", False)
+                ),
+                "useUpstoxCapitalForSizing": bool(
+                    getattr(settings, "use_upstox_capital_for_sizing", False)
+                ),
+            },
             "paperLiveParityEnabled": paper_parity,
             "note": (
-                "After confirmedSession: enable_live_trading uses the same open book (09:15–09:45) "
-                "and normal post-open book (09:45–15:45) as paper — real broker orders only."
+                "enable_live_trading = paper book + broker orders. "
+                "Chop-live entries only on chop days; size from FALLBACK/MAX_SIZING unless "
+                "USE_UPSTOX_CAPITAL_FOR_SIZING=true; same exits as paper unless "
+                "LIVE_HOLD_TO_STRUCTURAL_SL=true."
             ),
         },
         "snapshot": open_setup_policy_snapshot(settings),
