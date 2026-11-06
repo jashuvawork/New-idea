@@ -1685,7 +1685,11 @@ def elite_entry_allowed(
             alert=alert_d,
         )
         if fresh_base_reentry:
-            assessment = {**assessment, "sameStrikePostWinFreshBase": True}
+            assessment = {
+                **assessment,
+                "sameStrikePostWinFreshBase": True,
+                "sameStrikePostWinFreshBaseMeta": dict(_fresh_meta),
+            }
     if state is not None and not fresh_base_reentry and bool(
         getattr(settings, "adjacent_strike_post_peak_keep_continuation_enabled", True)
     ):
@@ -1723,6 +1727,7 @@ def elite_entry_allowed(
             }
 
     continuation_waive = fresh_base_reentry or adjacent_continuation
+    from app.engines.session_mode_feedback import post_win_fresh_base_pad_in_capture_band
 
     if not elite_base_setup_allowed(
         setup,
@@ -1762,6 +1767,18 @@ def elite_entry_allowed(
             )
             expl = _number(evidence.get("explosionScore"))
             if expl + 1e-9 >= floor:
+                score = max(score, min_score)
+            else:
+                return False, f"elite_score_below_{min_score:g}", assessment
+        elif fresh_base_reentry:
+            fb_meta = assessment.get("sameStrikePostWinFreshBaseMeta") or {}
+            pad_ok = post_win_fresh_base_pad_in_capture_band(fb_meta, settings=settings)
+            floor = float(
+                getattr(settings, "post_win_fresh_base_elite_explosion_score_floor", 42.0)
+                or 42.0
+            )
+            expl = _number(evidence.get("explosionScore"))
+            if pad_ok and expl + 1e-9 >= floor:
                 score = max(score, min_score)
             else:
                 return False, f"elite_score_below_{min_score:g}", assessment
@@ -1825,7 +1842,20 @@ def elite_entry_allowed(
     ):
         v_rip_shallow_blocked = False
         v_rip_shallow_reason = ""
-    if v_rip_shallow_blocked and not adjacent_continuation:
+    if (
+        v_rip_shallow_blocked
+        and not adjacent_continuation
+        and not (
+            fresh_base_reentry
+            and bool(
+                getattr(settings, "post_win_fresh_base_waive_v_rip_shallow_enabled", True)
+            )
+            and post_win_fresh_base_pad_in_capture_band(
+                assessment.get("sameStrikePostWinFreshBaseMeta") or {},
+                settings=settings,
+            )
+        )
+    ):
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, v_rip_shallow_reason, assessment
 
@@ -1845,7 +1875,14 @@ def elite_entry_allowed(
     shallow_blocked, shallow_reason = elite_shallow_lift_blocked(
         evidence, assessment, settings=settings,
     )
-    if shallow_blocked and not adjacent_continuation:
+    if shallow_blocked and not adjacent_continuation and not (
+        fresh_base_reentry
+        and bool(getattr(settings, "post_win_fresh_base_waive_v_rip_shallow_enabled", True))
+        and post_win_fresh_base_pad_in_capture_band(
+            assessment.get("sameStrikePostWinFreshBaseMeta") or {},
+            settings=settings,
+        )
+    ):
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, shallow_reason, assessment
 
