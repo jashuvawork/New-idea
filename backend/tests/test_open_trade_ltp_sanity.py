@@ -117,6 +117,22 @@ def test_reconcile_max_ltp_clamps_phantom_peak(mock_gs):
 
 
 @patch("app.engines.ltp_sanity.get_settings")
+def test_reconcile_max_ltp_prunes_entry_ltp_multiple_captures(mock_gs):
+    mock_gs.return_value = _settings()
+    trade = _trade()
+    trade.currentPremium = 219.0
+    trade.entryContext["lastSanitizedLtp"] = 219.0
+    trade.entryContext["entryLtpMultipleCaptures"] = [
+        {"n": 2, "thresholdLtp": 293.64, "at": "x", "peakLtp": 400.0},
+    ]
+
+    reconcile_max_ltp(trade)
+
+    assert trade.maxLtp <= 219.0
+    assert "entryLtpMultipleCaptures" not in trade.entryContext
+
+
+@patch("app.engines.ltp_sanity.get_settings")
 @patch("app.engines.auto_trader.get_settings")
 @patch("app.engines.auto_trader._risk_engine")
 def test_process_open_trades_ignores_spike_mark(mock_risk, mock_at_settings, mock_gs):

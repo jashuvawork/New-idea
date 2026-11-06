@@ -178,6 +178,10 @@ class Settings(BaseSettings):
     tick_wake_debounce_ms: int = 15
     tick_fast_exit_enabled: bool = True
     trade_mark_persist_seconds: float = 2.0
+    # First-touch IST timestamps when sanitized LTP crosses N× entry (N = 2, 3, …) on an open leg.
+    # Stored on the trade as entryContext.entryLtpMultipleCaptures for closed-trade / HUD review.
+    trade_entry_multiple_capture_enabled: bool = True
+    trade_entry_multiple_capture_max_n: int = 20
     entry_scan_interval_ms: int = 1000
     expiry_entry_scan_interval_ms: int = 500
     # Runner velocity compares consecutive snapshots only while the feed is fresh.
