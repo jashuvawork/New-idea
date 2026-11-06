@@ -3212,6 +3212,11 @@ class Settings(BaseSettings):
     open_setup_guards_enabled: bool = True
     # When True, block PUT on bullish open / CALL on bearish open (not all PUTs).
     open_caution_side_align_index_enabled: bool = True
+    # Open dump + V off session extreme: stamped pad lift may trade before cash open reclaims.
+    open_caution_structural_side_align_waiver_enabled: bool = True
+    open_caution_structural_waiver_rally_frac: float = 0.5
+    open_caution_structural_waiver_min_range_position: float = 0.30
+    open_caution_structural_waiver_near_extreme_pct: float = 0.15
     open_caution_block_puts_enabled: bool = False
     open_caution_non_lane_index_blocked: bool = True
     # Expiry lanes may CE only the nearest index; aligned CALL/PUT on the other index still trades.
