@@ -1303,7 +1303,14 @@ def _defer_explosion_trail_while_continuing(
         return False
     if not (stage_ladder or max_profit):
         return False
+    from app.engines.moment_stage_trail import defer_pre_stage_runner_trail_exits
+
     hot_min = _cfg_float(settings, "moment_stage_hot_hold_velocity_3s", 2.5)
+    if defer_pre_stage_runner_trail_exits(trade, best, settings=settings):
+        hot_min = min(
+            hot_min,
+            _cfg_float(settings, "stage_runner_pre_stage_hot_defer_min_velocity_3s", 1.0),
+        )
     if live_v < hot_min:
         return False
     if projected_max > 0:
@@ -2831,6 +2838,7 @@ def evaluate_explosion_exit(
 
     from app.engines.moment_stage_trail import (
         compose_trail_floor_with_stages,
+        defer_pre_stage_runner_trail_exits,
         effective_best_pnl,
         maybe_extend_projected_max,
         moment_stage_near_complete,
@@ -3043,7 +3051,10 @@ def evaluate_explosion_exit(
 
     # When stage ladder owns the trail, skip micro step / keep-ratio locks —
     # stage floors + projectedMaxTp are the profit path.
-    if not stage_armed:
+    pre_stage_runner_hold = defer_pre_stage_runner_trail_exits(
+        trade, best, settings=settings,
+    )
+    if not stage_armed and not pre_stage_runner_hold:
         if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
             # Hot continuing ICT/stage rips: defer green trail ticks so a 6pt
             # dip cannot cut a still-expanding move (392→500 case). Never defer
@@ -3199,6 +3210,8 @@ def evaluate_explosion_exit(
             trade, best=best, hold=hold, settings=settings,
         ):
             return None, pnl_inr
+        if pre_stage_runner_hold and pnl_pts > 0:
+            return None, pnl_inr
         # Prefer trail/giveback over blind time exit when runner peaked then faded
         if best >= exit_params.trail_arm_points:
             giveback = best - pnl_pts
@@ -3206,9 +3219,17 @@ def evaluate_explosion_exit(
                 settings.runner_micro_giveback_points,
                 best * settings.explosion_trail_keep_ratio * 0.5,
             )
-            if giveback >= min_give and pnl_pts > 0:
+            if (
+                giveback >= min_give
+                and pnl_pts > 0
+                and not pre_stage_runner_hold
+            ):
                 return "explosion_trail_sl", pnl_inr
-            if trail_floor is not None and pnl_pts <= trail_floor:
+            if (
+                trail_floor is not None
+                and pnl_pts <= trail_floor
+                and not pre_stage_runner_hold
+            ):
                 return "explosion_trail_sl", pnl_inr
             if (
                 pnl_pts > 0
