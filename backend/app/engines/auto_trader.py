@@ -453,6 +453,52 @@ def _trade_premium_velocity_points(snap: SymbolSnapshot, trade: PaperTrade) -> f
     return premium_velocity_pct_to_points(raw_pct, float(trade.entryPremium or 0))
 
 
+def _stamp_entry_ltp_multiple_captures(
+    ctx: dict[str, Any],
+    peak_before: float,
+    peak_after: float,
+    entry: float,
+    crossed_at: datetime,
+) -> None:
+    """Record first IST time peak sanitized LTP crosses each integer N× entry (N ≥ 2)."""
+    settings = get_settings()
+    if not bool(getattr(settings, "trade_entry_multiple_capture_enabled", True)):
+        return
+    if entry <= 0 or peak_after <= peak_before + 1e-9:
+        return
+    max_n = int(getattr(settings, "trade_entry_multiple_capture_max_n", 20) or 20)
+    max_n = max(2, min(max_n, 50))
+    key = "entryLtpMultipleCaptures"
+    raw = ctx.get(key)
+    existing: list[dict[str, Any]] = [dict(x) for x in raw] if isinstance(raw, list) else []
+    have = set()
+    for row in existing:
+        try:
+            have.add(int(row.get("n", 0)))
+        except (TypeError, ValueError):
+            continue
+    eps = 1e-6
+    for n in range(2, max_n + 1):
+        thr = n * entry
+        if thr > peak_after + eps:
+            break
+        if n in have:
+            continue
+        if peak_before + eps < thr <= peak_after + eps:
+            existing.append(
+                {
+                    "n": n,
+                    "thresholdLtp": round(thr, 2),
+                    "at": crossed_at.isoformat(),
+                    "peakLtp": round(peak_after, 2),
+                },
+            )
+            have.add(n)
+    if existing:
+        existing.sort(key=lambda r: int(r.get("n", 0)))
+        ctx[key] = existing
+
+
 def _record_observed_max_ltp(trade: PaperTrade, current_ltp: float) -> None:
     """Persist the highest raw market LTP independently of simulated fill marks."""
     def _finite_positive(value: Any) -> float:
@@ -470,25 +516,29 @@ def _record_observed_max_ltp(trade: PaperTrade, current_ltp: float) -> None:
         return
 
     ctx = dict(trade.entryContext or {})
-    previous = max(
+    peak_before = max(
         _finite_positive(trade.maxLtp),
         _finite_positive(ctx.get("maxLtp")),
         _finite_positive(trade.entryPremium),
     )
-    if current > previous:
-        previous = current
-        trade.maxLtpAt = datetime.now(IST)
+    crossed_at: Optional[datetime] = None
+    if current > peak_before:
+        crossed_at = datetime.now(IST)
+        trade.maxLtpAt = crossed_at
         ctx["maxLtpAt"] = trade.maxLtpAt.isoformat()
-    trade.maxLtp = round(previous, 2)
+    peak_after = max(peak_before, current)
+    trade.maxLtp = round(peak_after, 2)
     ctx["maxLtp"] = trade.maxLtp
     entry = _finite_positive(trade.entryPremium)
-    if entry > 0 and previous > entry:
-        best_pts = round(previous - entry, 2)
+    if crossed_at is not None:
+        _stamp_entry_ltp_multiple_captures(ctx, peak_before, peak_after, entry, crossed_at)
+    if entry > 0 and peak_after > entry:
+        best_pts = round(peak_after - entry, 2)
         if best_pts > _finite_positive(trade.bestPnlPoints):
             trade.bestPnlPoints = best_pts
-    giveback = max(0.0, previous - current)
+    giveback = max(0.0, peak_after - current)
     ctx["givebackFromMaxLtpPoints"] = round(giveback, 2)
-    ctx["givebackFromMaxLtpPct"] = round(giveback / previous * 100.0, 3)
+    ctx["givebackFromMaxLtpPct"] = round(giveback / peak_after * 100.0, 3) if peak_after > 0 else 0.0
     trade.entryContext = ctx
 
 

@@ -124,6 +124,72 @@ def test_observed_max_ltp_ignores_corrupt_persisted_peak():
     assert trade.maxLtp == 125.0
 
 
+@patch("app.engines.auto_trader.get_settings")
+@patch("app.engines.auto_trader.datetime")
+def test_entry_ltp_multiple_captures_first_cross_each_n(mock_dt, mock_get_settings):
+    """entryContext.entryLtpMultipleCaptures stores first IST time peak crosses N× entry."""
+    import app.engines.auto_trader as auto_trader
+
+    mock_get_settings.return_value = SimpleNamespace(
+        trade_entry_multiple_capture_enabled=True,
+        trade_entry_multiple_capture_max_n=20,
+    )
+    ts = datetime(2026, 11, 6, 10, 0, 0, tzinfo=IST)
+    mock_dt.now = MagicMock(return_value=ts)
+
+    trade = PaperTrade(
+        id="nx-cap",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24000,
+        entryPremium=100.0,
+        lots=1,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+    )
+    auto_trader._record_observed_max_ltp(trade, 250.0)
+
+    caps = trade.entryContext.get("entryLtpMultipleCaptures")
+    assert isinstance(caps, list) and len(caps) == 1
+    assert caps[0]["n"] == 2 and caps[0]["thresholdLtp"] == 200.0
+    assert caps[0]["at"] == ts.isoformat()
+
+    ts2 = datetime(2026, 11, 6, 10, 1, 0, tzinfo=IST)
+    mock_dt.now = MagicMock(return_value=ts2)
+    auto_trader._record_observed_max_ltp(trade, 310.0)
+    caps = trade.entryContext["entryLtpMultipleCaptures"]
+    assert len(caps) == 2
+    assert caps[1]["n"] == 3 and caps[1]["thresholdLtp"] == 300.0
+    assert caps[1]["at"] == ts2.isoformat()
+
+    # Pullback does not append duplicates
+    mock_dt.now = MagicMock(return_value=datetime(2026, 11, 6, 10, 5, 0, tzinfo=IST))
+    auto_trader._record_observed_max_ltp(trade, 200.0)
+    assert len(trade.entryContext["entryLtpMultipleCaptures"]) == 2
+
+
+@patch("app.engines.auto_trader.get_settings")
+def test_entry_ltp_multiple_captures_disabled(mock_get_settings):
+    import app.engines.auto_trader as auto_trader
+
+    mock_get_settings.return_value = SimpleNamespace(
+        trade_entry_multiple_capture_enabled=False,
+        trade_entry_multiple_capture_max_n=20,
+    )
+    trade = PaperTrade(
+        id="nx-off",
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=24000,
+        entryPremium=100.0,
+        lots=1,
+        openedAt=datetime.now(IST),
+        strategyType=StrategyType.EXPLOSIVE,
+    )
+    auto_trader._record_observed_max_ltp(trade, 250.0)
+    assert "entryLtpMultipleCaptures" not in trade.entryContext
+
+
 def test_every_websocket_tick_captures_open_trade_peak_before_exit_throttle():
     import app.engines.auto_trader as auto_trader
 

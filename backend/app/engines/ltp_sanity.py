@@ -183,6 +183,26 @@ def reconcile_max_ltp(trade: PaperTrade, *, settings: Settings | None = None) ->
     ctx["maxLtpRepaired"] = True
     best = round(max(0.0, trade.maxLtp - entry), 2)
     trade.bestPnlPoints = min(float(trade.bestPnlPoints or 0), best) if trade.bestPnlPoints else best
+    cap_m = trade.maxLtp
+    raw_mc = ctx.get("entryLtpMultipleCaptures")
+    if isinstance(raw_mc, list) and cap_m is not None and cap_m > 0:
+        kept: list[dict[str, Any]] = []
+        for row in raw_mc:
+            if not isinstance(row, dict):
+                continue
+            try:
+                thr = float(row.get("thresholdLtp", 0))
+            except (TypeError, ValueError):
+                continue
+            if thr <= cap_m + 1e-6:
+                kept.append(dict(row))
+        if kept:
+            ctx["entryLtpMultipleCaptures"] = sorted(
+                kept,
+                key=lambda r: int(r.get("n", 0)),
+            )
+        else:
+            ctx.pop("entryLtpMultipleCaptures", None)
     trade.entryContext = ctx
 
 
