@@ -164,10 +164,199 @@ def open_caution_side_align_ok(
     return True, "ok", meta
 
 
+_STRUCTURAL_WAIVER_CALL_MOMENTS = frozenset(
+    {
+        "v_rip_session_low",
+        "armed_base_launch",
+        "ict_base_armed",
+        "first_lift_local_base",
+    }
+)
+_STRUCTURAL_WAIVER_PUT_MOMENTS = frozenset(
+    {
+        "v_rip_session_high",
+        "armed_base_launch",
+        "ict_base_armed",
+        "first_lift_local_base",
+    }
+)
+
+
+def _structural_open_lift_moment_ok(alert: dict[str, Any], side: str) -> bool:
+    side_u = _side_value(side)
+    moment = str(alert.get("momentType") or "").lower()
+    allowed = (
+        _STRUCTURAL_WAIVER_CALL_MOMENTS
+        if side_u == "CALL"
+        else _STRUCTURAL_WAIVER_PUT_MOMENTS
+    )
+    if moment in allowed:
+        return True
+    if moment == "first_lift_local_base" and (
+        alert.get("ictFirstLift") or alert.get("firstLift")
+    ):
+        return True
+    if side_u == "CALL" and (
+        alert.get("ictArmedBaseLaunch") or alert.get("armedBaseLaunch")
+    ):
+        return True
+    if side_u == "PUT" and (
+        alert.get("ictArmedBaseLaunch") or alert.get("armedBaseLaunch")
+    ):
+        return True
+    return False
+
+
+def _open_structural_pad_band_ok(alert: dict[str, Any], settings: Any) -> tuple[bool, float]:
+    min_lb = float(getattr(settings, "shallow_otm_local_base_min_move_pct", 2.0) or 2.0)
+    max_lb = float(
+        getattr(settings, "open_caution_premium_fade_max_local_base_pct", 28.0) or 28.0
+    )
+    try:
+        lb = float(
+            alert.get("localBaseMovePct")
+            or alert.get("ictBaseRelativeMovePct")
+            or alert.get("offLowMovePct")
+            or 0
+        )
+    except (TypeError, ValueError):
+        lb = 0.0
+    return min_lb <= lb <= max_lb + 1e-6, lb
+
+
+def _open_structural_index_v_ok(
+    symbol: str,
+    side: str,
+    snap: Any,
+    *,
+    settings: Any,
+) -> tuple[bool, dict[str, Any]]:
+    from app.engines.index_rally_side_flip import _min_move_pts
+    from app.engines.index_tick_helpers import resolve_index_session
+
+    meta: dict[str, Any] = {"structuralIndexV": True}
+    ext = resolve_index_session(symbol, snap)
+    hi = float(ext.get("hi") or 0)
+    lo = float(ext.get("lo") or 0)
+    spot = float(ext.get("last") or 0) or float(getattr(snap, "spot", 0) or 0)
+    if hi <= 0 or lo <= 0 or spot <= 0:
+        meta["structuralWaiverReason"] = "missing_session_extremes"
+        return False, meta
+    hi, lo = max(hi, spot), min(lo, spot)
+    span = hi - lo
+    range_pos = (spot - lo) / span if span > 0 else 0.5
+    frac = float(
+        getattr(settings, "open_caution_structural_waiver_rally_frac", 0.5) or 0.5
+    )
+    min_range = float(
+        getattr(settings, "open_caution_structural_waiver_min_range_position", 0.30)
+        or 0.30
+    )
+    near_pct = float(
+        getattr(settings, "open_caution_structural_waiver_near_extreme_pct", 0.15) or 0.15
+    )
+    min_pts = _min_move_pts(symbol, settings) * frac
+    side_u = _side_value(side)
+    rally_pts = round(spot - lo, 1)
+    slide_pts = round(hi - spot, 1)
+    meta.update(
+        {
+            "sessionHigh": round(hi, 2),
+            "sessionLow": round(lo, 2),
+            "spot": round(spot, 2),
+            "rangePosition": round(range_pos, 3),
+            "rallyPoints": rally_pts,
+            "slidePoints": slide_pts,
+            "structuralMinMovePoints": round(min_pts, 1),
+        }
+    )
+    if side_u == "CALL":
+        near_extreme = lo > 0 and ((spot - lo) / lo * 100.0) <= near_pct + 1e-6
+        ok = rally_pts >= min_pts - 1e-6 and (
+            range_pos >= min_range - 1e-6 or near_extreme
+        )
+        if not ok:
+            meta["structuralWaiverReason"] = "call_v_not_confirmed"
+        return ok, meta
+    if side_u == "PUT":
+        near_extreme = hi > 0 and ((hi - spot) / hi * 100.0) <= near_pct + 1e-6
+        ok = slide_pts >= min_pts - 1e-6 and (
+            range_pos <= (1.0 - min_range) + 1e-6 or near_extreme
+        )
+        if not ok:
+            meta["structuralWaiverReason"] = "put_v_not_confirmed"
+        return ok, meta
+    meta["structuralWaiverReason"] = "unknown_side"
+    return False, meta
+
+
+def open_caution_structural_side_align_waiver(
+    candidate: Any,
+    align_reason: str,
+    *,
+    symbol: str = "",
+    side: str = "",
+    snap: Any = None,
+    settings: Any = None,
+    when: Optional[datetime] = None,
+) -> tuple[bool, dict[str, Any]]:
+    """
+    Waive open_caution_*_on_*_open when pad lift + index V off session extreme confirm.
+    CE/PE symmetric (CALL on bearish open / PUT on bullish open only).
+    """
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    when = open_setup_guard_when(candidate, when)
+    if not in_open_caution_window_at(when):
+        return False, meta
+    if not bool(
+        getattr(settings, "open_caution_structural_side_align_waiver_enabled", True)
+    ):
+        return False, meta
+    side_u = _side_value(side or getattr(candidate, "side", ""))
+    sym = str(symbol or getattr(candidate, "symbol", "") or "").upper()
+    if side_u == "CALL" and align_reason != "open_caution_call_on_bearish_open":
+        return False, meta
+    if side_u == "PUT" and align_reason != "open_caution_put_on_bullish_open":
+        return False, meta
+    alert = getattr(candidate, "alert", None)
+    if not isinstance(alert, dict):
+        meta["structuralWaiverReason"] = "no_alert"
+        return False, meta
+    tier = str(
+        alert.get("tier")
+        or getattr(getattr(candidate, "explosion_event", None), "tier", "")
+        or ""
+    ).upper()
+    if tier not in {"ELITE", "EXPLODING"}:
+        meta["structuralWaiverReason"] = "tier_not_elite"
+        return False, meta
+    if not _structural_open_lift_moment_ok(alert, side_u):
+        meta["structuralWaiverReason"] = "no_structural_lift_moment"
+        return False, meta
+    pad_ok, lb = _open_structural_pad_band_ok(alert, settings)
+    meta["localBaseMovePct"] = lb
+    if not pad_ok:
+        meta["structuralWaiverReason"] = "local_base_out_of_band"
+        return False, meta
+    if not open_caution_fade_bypass_rank_ok(alert, settings=settings):
+        meta["structuralWaiverReason"] = "rank_below_floor"
+        return False, meta
+    v_ok, v_meta = _open_structural_index_v_ok(sym, side_u, snap, settings=settings)
+    meta.update(v_meta)
+    if not v_ok:
+        return False, meta
+    meta["openStructuralSideAlignWaiver"] = True
+    return True, meta
+
+
 def open_setup_guard_summary(settings: Any = None) -> dict[str, Any]:
     settings = settings or get_settings()
     return {
         "sideAlignIndex": bool(getattr(settings, "open_caution_side_align_index_enabled", True)),
+        "structuralSideAlignWaiver": bool(
+            getattr(settings, "open_caution_structural_side_align_waiver_enabled", True)
+        ),
         "legacyBlockAllPuts": bool(getattr(settings, "open_caution_block_puts_enabled", False)),
         "blockPutsInOpen": bool(getattr(settings, "open_caution_block_puts_enabled", False)),
         "nonLaneIndexBlocked": bool(
@@ -231,7 +420,18 @@ def validate_open_setup_entry(
     )
     meta.update(align_meta)
     if not align_ok:
-        return False, align_reason, meta
+        waived, waiver_meta = open_caution_structural_side_align_waiver(
+            candidate,
+            align_reason,
+            symbol=sym,
+            side=side,
+            snap=snap,
+            settings=settings,
+            when=when,
+        )
+        meta.update(waiver_meta)
+        if not waived:
+            return False, align_reason, meta
 
     if bool(getattr(settings, "open_caution_non_lane_index_blocked", True)) and index:
         per_index_sides = allowed_open_lane_sides(
@@ -247,12 +447,18 @@ def validate_open_setup_entry(
             and bool(
                 getattr(settings, "open_caution_aligned_side_lane_waiver_enabled", True)
             )
-            and _index_open_side_aligned(
-                index, side, symbol=sym, snap=snap, settings=settings,
+            and (
+                _index_open_side_aligned(
+                    index, side, symbol=sym, snap=snap, settings=settings,
+                )
+                or meta.get("openStructuralSideAlignWaiver")
             )
         ):
             in_lane = True
-            meta["openAlignedSideLaneWaiver"] = True
+            if meta.get("openStructuralSideAlignWaiver"):
+                meta["openStructuralSideLaneWaiver"] = True
+            else:
+                meta["openAlignedSideLaneWaiver"] = True
         if per_index_sides is not None and not in_lane:
             return False, "open_caution_non_lane_index", meta
 

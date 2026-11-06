@@ -15,9 +15,9 @@ from typing import Any
 from app.config import get_settings
 
 # Bump when intentionally changing the saved open book (document in PR body).
-OPEN_SETUP_POLICY_ID = "2026-11-open-v1"
+OPEN_SETUP_POLICY_ID = "2026-11-open-v2"
 OPEN_SETUP_POLICY_NOTE = (
-    "Open book 09:15–09:45 (caution, lanes, side align, ITM). "
+    "Open book 09:15–09:45 (caution, lanes, side align, structural V waiver, ITM). "
     "Post-open = normal CE/PE book 09:45–15:45; open guards idle after 09:45. "
     "Config post_open_setup_until 10:30 = rip fade bypass only."
 )
@@ -42,6 +42,10 @@ OPEN_BOOK_FROZEN_DEFAULTS: dict[str, Any] = {
     "open_caution_min_explosion_score": 45,
     "open_caution_min_rank_score": 55.0,
     "open_caution_side_align_index_enabled": True,
+    "open_caution_structural_side_align_waiver_enabled": True,
+    "open_caution_structural_waiver_rally_frac": 0.5,
+    "open_caution_structural_waiver_min_range_position": 0.30,
+    "open_caution_structural_waiver_near_extreme_pct": 0.15,
     "open_caution_block_puts_enabled": False,
     "open_caution_non_lane_index_blocked": True,
     "open_caution_aligned_side_lane_waiver_enabled": True,
