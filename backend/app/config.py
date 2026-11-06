@@ -1672,6 +1672,9 @@ class Settings(BaseSettings):
     stage_runner_defer_pct_keep_min_projected_tp: float = 400.0
     # Unified 75% peak-keep waits until stage 1 completes when projected TP ≥ this (Nov5 ~1409).
     stage_runner_defer_unified_peak_keep_min_projected_tp: float = 1200.0
+    # Nov6 NIFTY 24650 CE: pre-stage-1 — defer micro trail + max-hold giveback trail_sl.
+    stage_runner_defer_pre_stage_trail_min_projected_tp: float = 500.0
+    stage_runner_pre_stage_hot_defer_min_velocity_3s: float = 1.0
     stage_runner_defer_peak_keep_complete_frac: float = 1.0
     # Before stage 1 completes on mega projected legs, require longer after peak before fall-sell.
     stage_runner_pre_stage_fall_min_seconds_after_peak: float = 120.0

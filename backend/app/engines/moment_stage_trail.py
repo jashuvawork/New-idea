@@ -139,6 +139,35 @@ def defer_modest_peak_keep_for_max_profit_stage_runner(
     return True
 
 
+def defer_pre_stage_runner_trail_exits(
+    trade: PaperTrade,
+    best: float,
+    *,
+    settings: Settings | None = None,
+) -> bool:
+    """Hold pre-stage-1 projected runners through micro trail and max-hold giveback exits."""
+    s = settings or get_settings()
+    if not trade_uses_moment_stage_ladder(trade):
+        return False
+    ctx = trade.entryContext or {}
+    plan = ctx.get("exitPlan") or {}
+    tier = str(ctx.get("explosionTier") or ctx.get("tier") or "").upper()
+    if tier not in {"ELITE", "EXPLODING"}:
+        return False
+    projected = _safe_float(ctx.get("projectedMaxTp") or plan.get("projectedMaxTp"))
+    stage = _safe_float(ctx.get("stageSize") or plan.get("stageSize"))
+    best = _safe_float(best)
+    if projected <= 0 or stage <= 0 or best <= 0:
+        return False
+    min_proj = _cfg_float(
+        s, "stage_runner_defer_pre_stage_trail_min_projected_tp", 500.0
+    )
+    if projected + 1e-6 < min_proj:
+        return False
+    frac = _cfg_float(s, "stage_runner_defer_peak_keep_complete_frac", 1.0)
+    return best + 1e-6 < stage * max(0.0, min(1.0, frac))
+
+
 def defer_unified_peak_keep_for_mega_projected_runner(
     trade: PaperTrade,
     best: float,
