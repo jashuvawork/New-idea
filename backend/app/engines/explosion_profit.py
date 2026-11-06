@@ -2871,6 +2871,10 @@ def evaluate_explosion_exit(
         if projected_max > 0:
             target = max(target, projected_max)
 
+    pre_stage_runner_hold = defer_pre_stage_runner_trail_exits(
+        trade, best, settings=settings,
+    )
+
     # High-conviction base rip → hold the runner (wider trail = lower keep floor).
     # Still exits on real reversal; just does not book at ~38% of peak (Jul22 SENSEX PE).
     from app.engines.explosion_confidence import trade_is_high_conviction
@@ -3019,6 +3023,7 @@ def evaluate_explosion_exit(
         and pct_keep_floor is not None
         and best >= min_pct_best
         and not defer_unified_peak_keep_for_mega_projected_runner(trade, best, settings=settings)
+        and not pre_stage_runner_hold
         and pct_ready
         and (falling_under_pct or hold >= stage_min_hold)
         and _profit_floor_touch_sell(pnl_pts, pct_keep_floor, v3, settings)
@@ -3051,9 +3056,6 @@ def evaluate_explosion_exit(
 
     # When stage ladder owns the trail, skip micro step / keep-ratio locks —
     # stage floors + projectedMaxTp are the profit path.
-    pre_stage_runner_hold = defer_pre_stage_runner_trail_exits(
-        trade, best, settings=settings,
-    )
     if not stage_armed and not pre_stage_runner_hold:
         if trail_floor is not None and pnl_pts <= trail_floor and best >= exit_params.trail_arm_points:
             # Hot continuing ICT/stage rips: defer green trail ticks so a 6pt
