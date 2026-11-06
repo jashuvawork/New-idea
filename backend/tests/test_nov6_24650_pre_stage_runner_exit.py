@@ -140,6 +140,25 @@ def test_pre_stage_runner_skips_max_hold_giveback_trail_sl(mock_ms, mock_ep):
 
 @patch("app.engines.explosion_profit.get_settings")
 @patch("app.engines.moment_stage_trail.get_settings")
+def test_pre_stage_runner_defers_pct_peak_keep_during_pullback(mock_ms, mock_ep):
+    mock_ep.return_value = _settings()
+    mock_ms.return_value = _settings()
+    trade = _nov6_trade(hold_seconds=600.0)
+    trade.currentPremium = trade.entryPremium + 14.0
+    trade.pnlPoints = 14.0
+    reason, _ = evaluate_explosion_exit(
+        trade,
+        trade.currentPremium,
+        "ELITE",
+        65,
+        params=_params(),
+        live_velocity_3s=0.4,
+    )
+    assert reason != "explosion_peak_keep_trail"
+
+
+@patch("app.engines.explosion_profit.get_settings")
+@patch("app.engines.moment_stage_trail.get_settings")
 def test_pre_stage_runner_micro_trail_deferred_on_mild_dip(mock_ms, mock_ep):
     mock_ep.return_value = _settings()
     mock_ms.return_value = _settings()
