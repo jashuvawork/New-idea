@@ -2021,6 +2021,16 @@ class Settings(BaseSettings):
     # A fading print, the opposite side, a second leg, or a lift already past the
     # pad stays blocked. Oct 21 SENSEX 74200 PUT sold near 315 and ran to 1029.
     same_strike_post_win_fresh_base_reentry_enabled: bool = True
+    post_win_new_local_base_max_pad_pct: float = 22.0
+    post_win_fresh_base_min_local_pad_pct: float = 8.0
+    # After an early same-strike win (midday chop base → second lift, Nov 6 24650 CE @13:00).
+    post_win_fresh_base_midday_min_age_seconds: float = 1800.0
+    post_win_fresh_base_midday_base_span_seconds: float = 90.0
+    post_win_fresh_base_midday_min_reacceleration_pct: float = 6.0
+    post_win_fresh_base_midday_base_cluster_tolerance_pct: float = 8.0
+    post_win_fresh_base_midday_consolidation_min_span_seconds: float = 90.0
+    post_win_fresh_base_waive_v_rip_shallow_enabled: bool = True
+    post_win_fresh_base_elite_explosion_score_floor: float = 42.0
     # One adjacent ITM leg after a profitable peak-keep exit on the parent strike (Oct 29:
     # 22700 CE ladder exit → 22650 CE continuation toward 330+). CE: parent = strike + step;
     # PE: parent = strike - step. Clears elite chase/score blocks when tape is still running.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
@@ -542,6 +542,49 @@ def _alert_premium_already_fading(
     return False
 
 
+def post_win_fresh_base_pad_in_capture_band(
+    meta: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """True when lift off the post-win base sits inside the allowed pad band."""
+    from app.config import get_settings
+
+    settings = settings or get_settings()
+    if not isinstance(meta, Mapping):
+        return False
+    try:
+        pad = float(meta.get("reaccelerationPct") or meta.get("localPadPct") or 0)
+    except (TypeError, ValueError):
+        pad = 0.0
+    min_pad = float(
+        getattr(settings, "post_win_fresh_base_min_local_pad_pct", 8.0) or 8.0
+    )
+    max_pad = float(
+        getattr(settings, "post_win_new_local_base_max_pad_pct", 22.0) or 22.0
+    )
+    return min_pad <= pad <= max_pad + 1e-6
+
+
+def stamp_post_win_fresh_base_lift_alert(
+    alert: dict[str, Any] | None,
+    meta: Mapping[str, Any] | None,
+) -> None:
+    """Mark first-lift-off-new-base for pad lane / elite shallow waivers."""
+    if not isinstance(alert, dict) or not isinstance(meta, Mapping):
+        return
+    try:
+        pad = float(meta.get("reaccelerationPct") or meta.get("localPadPct") or 0)
+    except (TypeError, ValueError):
+        pad = 0.0
+    alert.setdefault("momentType", "first_lift_local_base")
+    alert["firstLift"] = True
+    alert["ictFirstLift"] = True
+    if pad > 0:
+        alert["localBaseMovePct"] = pad
+        alert["localBasePct"] = pad
+
+
 def same_strike_post_win_fresh_base_reentry(
     state: AutoTraderState | None,
     *,
@@ -600,7 +643,46 @@ def same_strike_post_win_fresh_base_reentry(
         meta["reason"] = "premium_fading"
         return False, meta
 
-    from app.engines.explosion_detector import post_close_base_reacceleration
+    from app.engines.explosion_detector import (
+        post_close_base_reacceleration,
+        post_close_local_base_consolidation,
+    )
+
+    midday_min_age = float(
+        getattr(settings, "post_win_fresh_base_midday_min_age_seconds", 1800.0) or 1800.0
+    )
+    midday_mode = age >= midday_min_age - 1e-6
+    meta["postWinMiddayBaseMode"] = midday_mode
+
+    min_v3 = float(
+        getattr(settings, "explosion_post_peak_reentry_min_velocity_3s", 1.5) or 1.5
+    )
+    if midday_mode:
+        min_span = float(
+            getattr(settings, "post_win_fresh_base_midday_base_span_seconds", 90.0)
+            or 90.0
+        )
+        min_reaccel = float(
+            getattr(settings, "post_win_fresh_base_midday_min_reacceleration_pct", 6.0)
+            or 6.0
+        )
+        cluster_tol = float(
+            getattr(
+                settings,
+                "post_win_fresh_base_midday_base_cluster_tolerance_pct",
+                8.0,
+            )
+            or 8.0
+        )
+    else:
+        min_span = float(
+            getattr(settings, "explosion_post_peak_reentry_base_span_seconds", 6.0) or 6.0
+        )
+        min_reaccel = float(
+            getattr(settings, "explosion_post_peak_reentry_min_reacceleration_pct", 8.0)
+            or 8.0
+        )
+        cluster_tol = 5.0
 
     reset, reset_meta = post_close_base_reacceleration(
         symbol,
@@ -612,29 +694,42 @@ def same_strike_post_win_fresh_base_reentry(
         min_base_samples=int(
             getattr(settings, "explosion_post_peak_reentry_base_samples", 3) or 3
         ),
-        min_base_span_seconds=float(
-            getattr(settings, "explosion_post_peak_reentry_base_span_seconds", 6.0) or 6.0
-        ),
-        min_reacceleration_pct=float(
-            getattr(settings, "explosion_post_peak_reentry_min_reacceleration_pct", 8.0)
-            or 8.0
-        ),
-        min_velocity_3s=float(
-            getattr(settings, "explosion_post_peak_reentry_min_velocity_3s", 1.5) or 1.5
-        ),
+        min_base_span_seconds=min_span,
+        base_cluster_tolerance_pct=cluster_tol,
+        min_reacceleration_pct=min_reaccel,
+        min_velocity_3s=min_v3,
     )
     meta["postCloseBase"] = reset_meta
+
+    if not reset and midday_mode:
+        cons_ok, cons_meta = post_close_local_base_consolidation(
+            symbol,
+            strike,
+            side,
+            closed_at=closed_at,
+            current_premium=float(premium or 0),
+            min_consolidation_span_seconds=float(
+                getattr(
+                    settings,
+                    "post_win_fresh_base_midday_consolidation_min_span_seconds",
+                    90.0,
+                )
+                or 90.0
+            ),
+            base_cluster_tolerance_pct=cluster_tol,
+        )
+        meta["postCloseConsolidation"] = cons_meta
+        if cons_ok and float(velocity_3s or 0) >= min_v3 - 1e-6:
+            reset = True
+            reset_meta = dict(cons_meta)
+
     if not reset:
         meta["reason"] = "no_fresh_base"
         return False, meta
-    try:
-        reaccel = float(reset_meta.get("reaccelerationPct") or 0)
-    except (TypeError, ValueError):
-        reaccel = 0.0
-    max_pad = float(
-        getattr(settings, "post_win_new_local_base_max_pad_pct", 22.0) or 22.0
-    )
-    if reaccel > max_pad + 1e-6:
+    if float(velocity_3s or 0) < min_v3 - 1e-6:
+        meta["reason"] = "velocity_below_min"
+        return False, meta
+    if not post_win_fresh_base_pad_in_capture_band(reset_meta, settings=settings):
         meta["reason"] = "above_fresh_base_pad"
         return False, meta
     meta["sameStrikePostWinFreshBase"] = True

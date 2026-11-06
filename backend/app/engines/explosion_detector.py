@@ -1703,6 +1703,69 @@ def post_close_base_reacceleration(
     return proven, meta
 
 
+def post_close_local_base_consolidation(
+    symbol: str,
+    strike: float,
+    side: Side | str,
+    *,
+    closed_at: datetime,
+    current_premium: float,
+    exclude_recent_seconds: int = LOCAL_BASE_EXCLUDE_RECENT_SECONDS,
+    min_consolidation_span_seconds: float = 90.0,
+    base_cluster_tolerance_pct: float = 8.0,
+) -> tuple[bool, dict[str, float | int | bool]]:
+    """Midday post-win base: swing low after close + minimum chop span before the lift tail."""
+    side_val = side if isinstance(side, Side) else Side(str(side).upper())
+    samples = list(_local_base_hist.get(_open_key(symbol, strike, side_val)) or ())
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=IST)
+    post: list[tuple[datetime, float]] = []
+    for ts, premium in samples:
+        ts_ist = ts if ts.tzinfo else ts.replace(tzinfo=IST)
+        if ts_ist <= closed_at or float(premium or 0) <= 0:
+            continue
+        post.append((ts_ist, float(premium)))
+    meta: dict[str, float | int | bool] = {
+        "postCloseSamples": len(post),
+        "postCloseLocalPadFallback": False,
+    }
+    if len(post) < 4:
+        return False, meta
+
+    now_ts = post[-1][0]
+    hi_cut = now_ts - timedelta(seconds=int(exclude_recent_seconds))
+    base_vals = [p for ts, p in post if ts <= hi_cut]
+    if not base_vals:
+        return False, meta
+    base = min(base_vals)
+    tolerance = base * (1.0 + max(0.0, float(base_cluster_tolerance_pct)) / 100.0)
+    base_times = [ts for ts, p in post if ts <= hi_cut and p <= tolerance]
+    span = (
+        (max(base_times) - min(base_times)).total_seconds()
+        if len(base_times) >= 2
+        else 0.0
+    )
+    reacceleration = (
+        (float(current_premium or 0) - base) / base * 100.0
+        if base > 0
+        else 0.0
+    )
+    proven = bool(
+        span >= max(0.0, float(min_consolidation_span_seconds))
+        and base > 0
+    )
+    meta.update(
+        {
+            "basePremium": round(base, 2),
+            "consolidationSpanSeconds": round(span, 1),
+            "reaccelerationPct": round(reacceleration, 2),
+            "postCloseLocalPadFallback": proven,
+            "newBaseReacceleration": proven,
+        }
+    )
+    return proven, meta
+
+
 def local_base_relative_move_pct(
     symbol: str,
     strike: float,

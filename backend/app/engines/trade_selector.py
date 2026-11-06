@@ -393,6 +393,11 @@ def _explosion_candidates(
                 pad_lane_waive = True
                 alert["sameStrikePostWinFreshBase"] = True
                 alert["sameStrikePostWinFreshBaseMeta"] = dict(_fresh_meta)
+                from app.engines.session_mode_feedback import (
+                    stamp_post_win_fresh_base_lift_alert,
+                )
+
+                stamp_post_win_fresh_base_lift_alert(alert, _fresh_meta)
         if not pad_lane_waive and side_u in ("CALL", "PUT"):
             from app.engines.session_mode_feedback import (
                 adjacent_strike_post_peak_keep_continuation,
