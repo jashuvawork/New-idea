@@ -84,6 +84,14 @@ async def eod_trade_report(date: str):
     return await asyncio.to_thread(generate_eod_trade_report, date)
 
 
+@router.get("/eod-nx-exit-audit/{date}")
+async def eod_nx_exit_audit(date: str):
+    """Compare in-trade N× LTP captures vs premium tape after each exit (early-exit flags)."""
+    from app.engines.nx_exit_audit import generate_nx_exit_audit
+
+    return await asyncio.to_thread(generate_nx_exit_audit, date)
+
+
 @router.get("/eod-local-base-replay/{date}")
 async def eod_local_base_replay(date: str):
     """Replay EOD tape with production local-base gates (FTV/V/ELITE/EXPLODING + first-lift)."""
