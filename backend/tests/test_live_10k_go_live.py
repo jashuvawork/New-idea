@@ -104,6 +104,37 @@ def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
     assert "10000" not in text
 
 
+def test_live_deploy_refresh_preserves_intentional_capital_sleeve(tmp_path):
+    env_file = tmp_path / "env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "ENABLE_LIVE_TRADING=true",
+                "PAPER_TRADING=false",
+                "FALLBACK_CAPITAL_INR=50000",
+                "MAX_SIZING_CAPITAL_INR=50000",
+                "",
+            ]
+        )
+    )
+    subprocess.run(
+        ["bash", str(ROOT / "deploy/set-execution-mode.sh"), "--live"],
+        check=True,
+        env={
+            **os.environ,
+            "ENV_FILE": str(env_file),
+            "REPO_DIR": str(ROOT),
+            "SKIP_RESTART": "1",
+        },
+        cwd=ROOT,
+    )
+    text = env_file.read_text()
+    assert "FALLBACK_CAPITAL_INR=50000" in text
+    assert "MAX_SIZING_CAPITAL_INR=50000" in text
+    assert "ENABLE_LIVE_TRADING=true" in text
+    assert "PAPER_TRADING=false" in text
+
+
 def test_readiness_skips_milestone_when_not_required():
     nifty = SimpleNamespace(dataAvailable=True, marketPhase="LIVE_MARKET")
     fast_snapshot = AsyncMock(

@@ -92,6 +92,12 @@ if [ ! -f "$TEMPLATE" ]; then
   exit 1
 fi
 
+# Only keep a custom capital sleeve when live was already armed (deploy refresh), not stale overlays.
+WAS_LIVE_ARMED=0
+if [ -f "$ENV_FILE" ] && grep -q '^ENABLE_LIVE_TRADING=true' "$ENV_FILE" 2>/dev/null; then
+  WAS_LIVE_ARMED=1
+fi
+
 _set_env_key() {
   local key="$1"
   local val="$2"
@@ -127,6 +133,14 @@ fi
 
 echo "Pinning paper / Oct 1 gates from the production template..."
 for key in "${PIN_KEYS[@]}"; do
+  if [ "$MODE" = "live" ] && [ "$WAS_LIVE_ARMED" = "1" ] && { [ "$key" = "FALLBACK_CAPITAL_INR" ] || [ "$key" = "MAX_SIZING_CAPITAL_INR" ]; }; then
+    if [ "$DRY_RUN" -eq 0 ] && grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+      val="$(grep -E "^${key}=" "$ENV_FILE" | tail -1 | cut -d= -f2-)"
+      _set_env_key "$key" "$val"
+      echo "  preserve ${key}=${val} (live capital sleeve)"
+      continue
+    fi
+  fi
   val="$(_template_value "$key" || true)"
   if [ -z "$val" ]; then
     echo "  skip ${key} (not in template)"
@@ -174,6 +188,9 @@ if [ -d "$REPO_DIR" ] && command -v docker >/dev/null 2>&1; then
 fi
 
 CAPITAL_INR="$(_template_value FALLBACK_CAPITAL_INR || true)"
+if [ "$MODE" = "live" ] && [ "$WAS_LIVE_ARMED" = "1" ] && grep -q '^FALLBACK_CAPITAL_INR=' "$ENV_FILE" 2>/dev/null; then
+  CAPITAL_INR="$(grep '^FALLBACK_CAPITAL_INR=' "$ENV_FILE" | tail -1 | cut -d= -f2-)"
+fi
 if [ -n "$CAPITAL_INR" ]; then
   echo "Setting runtime capital ceiling to ₹${CAPITAL_INR}..."
   curl -sf -X POST "$CAPITAL_URL" \
