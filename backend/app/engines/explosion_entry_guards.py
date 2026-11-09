@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any, Mapping, Optional
 
 from app.config import get_settings
@@ -2149,6 +2150,108 @@ def _fake_explosion_trap_open_book_conflict_waived(
     return True
 
 
+_post_win_afternoon_trap_until: dict[tuple[str, str], datetime] = {}
+_post_win_afternoon_trap_session: str | None = None
+
+POST_WIN_AFTERNOON_TRAP_REASONS = frozenset({
+    "fake_explosion_trap_post_win_afternoon",
+    "fake_explosion_trap_chop_post_win_afternoon",
+})
+
+
+def _trap_latch_roll_session(now: datetime) -> None:
+    global _post_win_afternoon_trap_session
+    from zoneinfo import ZoneInfo
+
+    today = now.astimezone(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
+    if _post_win_afternoon_trap_session != today:
+        _post_win_afternoon_trap_until.clear()
+        _post_win_afternoon_trap_session = today
+
+
+def record_post_win_afternoon_trap_reject(
+    candidate: Any,
+    *,
+    reason: str = "",
+    now: datetime | None = None,
+) -> bool:
+    """Latch explosion re-entry on index+side after post-win afternoon hard reject."""
+    from zoneinfo import ZoneInfo
+
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "fake_explosion_trap_post_win_afternoon_latch_enabled", True)
+    ):
+        return False
+    reason_u = str(reason or "")
+    if reason_u not in POST_WIN_AFTERNOON_TRAP_REASONS and not reason_u.startswith(
+        "fake_explosion_trap_post_win_afternoon"
+    ):
+        return False
+    if str(getattr(candidate, "mode", "") or "").lower() != "explosion":
+        return False
+    current = now or datetime.now(ZoneInfo("Asia/Kolkata"))
+    _trap_latch_roll_session(current)
+    seconds = max(
+        0,
+        int(
+            getattr(settings, "fake_explosion_trap_post_win_afternoon_latch_seconds", 300)
+            or 0
+        ),
+    )
+    if seconds <= 0:
+        return False
+    side = getattr(candidate, "side", "")
+    side_value = side.value if hasattr(side, "value") else str(side).upper()
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    if side_value not in {"CALL", "PUT"} or not sym:
+        return False
+    _post_win_afternoon_trap_until[(sym, side_value)] = current + timedelta(seconds=seconds)
+    return True
+
+
+def post_win_afternoon_explosion_latched(
+    candidate: Any,
+    *,
+    now: datetime | None = None,
+) -> tuple[bool, dict[str, Any]]:
+    """True when a recent post-win afternoon trap reject blocks this index+side."""
+    from zoneinfo import ZoneInfo
+
+    settings = get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(
+        getattr(settings, "fake_explosion_trap_post_win_afternoon_latch_enabled", True)
+    ):
+        return False, meta
+    if str(getattr(candidate, "mode", "") or "").lower() != "explosion":
+        return False, meta
+    current = now or datetime.now(ZoneInfo("Asia/Kolkata"))
+    _trap_latch_roll_session(current)
+    side = getattr(candidate, "side", "")
+    side_value = side.value if hasattr(side, "value") else str(side).upper()
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    if side_value not in {"CALL", "PUT"} or not sym:
+        return False, meta
+    until = _post_win_afternoon_trap_until.get((sym, side_value))
+    if until is None:
+        return False, meta
+    if current < until:
+        meta["postWinAfternoonTrapLatch"] = True
+        meta["latchUntil"] = until.isoformat()
+        meta["symbol"] = sym
+        meta["side"] = side_value
+        return True, meta
+    _post_win_afternoon_trap_until.pop((sym, side_value), None)
+    return False, meta
+
+
+def reset_post_win_afternoon_trap_latch() -> None:
+    global _post_win_afternoon_trap_session
+    _post_win_afternoon_trap_until.clear()
+    _post_win_afternoon_trap_session = None
+
+
 def detect_fake_explosion_trap(
     candidate: Any,
     snap: SymbolSnapshot,
@@ -2169,6 +2272,17 @@ def detect_fake_explosion_trap(
         return False, "ok", meta
     if str(getattr(candidate, "mode", "") or "") != "explosion":
         return False, "ok", meta
+
+    latched, latch_meta = post_win_afternoon_explosion_latched(candidate)
+    if latched:
+        meta.update({
+            **latch_meta,
+            "fakeExplosionTrap": True,
+            "action": "block",
+            "psychologyEscalate": "FOMO",
+            "postWinAfternoonLatchBlock": True,
+        })
+        return True, "fake_explosion_trap_post_win_afternoon_latch", meta
 
     # Fake traps still apply on must-take / ELITE — FOMO stacks and flat
     # premium extensions are real losers even when the pad looks early.
@@ -2323,10 +2437,12 @@ def detect_fake_explosion_trap(
                 getattr(settings, "fake_explosion_trap_post_win_expiry_only", True)
             )
             expiry_fomo, expiry_reasons = expiry_post_win_afternoon_fomo_risk(state)
-            should_block = afternoon_event and (
-                (expiry_only and expiry_fomo)
-                or (not expiry_only)
-            )
+            # Expiry-only: any explosion retry after small win in expiry afternoon
+            # (do not require is_afternoon_capture_event — Nov09 25150 re-select hole).
+            if expiry_only:
+                should_block = bool(expiry_fomo)
+            else:
+                should_block = bool(afternoon_event)
             if should_block:
                 meta.update({
                     "fakeExplosionTrap": True,
@@ -2726,6 +2842,7 @@ def fake_explosion_trap_reject_reason(
         return stamped
     for flag, code in (
         ("postWinChopAfternoon", "fake_explosion_trap_chop_post_win_afternoon"),
+        ("postWinAfternoonLatchBlock", "fake_explosion_trap_post_win_afternoon_latch"),
         ("postWinAfternoonBlock", "fake_explosion_trap_post_win_afternoon"),
         ("postWinVelocityBlock", "fake_explosion_trap_post_win_cold_velocity"),
         ("postWinTopConfidenceBlock", "fake_explosion_trap_post_win_not_top_confidence"),

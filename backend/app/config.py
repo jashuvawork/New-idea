@@ -1919,6 +1919,9 @@ class Settings(BaseSettings):
     # must hard-block — soft 8-lot cap was bypassed to 38 lots. Do not re-enter FOMO.
     # Scoped to expiry session afternoons (SENSEX expiry day; NIFTY chain was next week).
     fake_explosion_trap_post_win_afternoon_block_enabled: bool = True
+    # After ORDER_REJECTED for post-win afternoon trap, block same index+side explosion retries.
+    fake_explosion_trap_post_win_afternoon_latch_enabled: bool = True
+    fake_explosion_trap_post_win_afternoon_latch_seconds: int = 300
     fake_explosion_trap_post_win_expiry_only: bool = True
     # Sep21 CHOP+RALLY: extend post-win afternoon hard-block beyond expiry-only sessions.
     fake_explosion_trap_chop_post_win_afternoon_enabled: bool = False

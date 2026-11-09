@@ -67,6 +67,7 @@ def _reset_all_engine_globals() -> None:
     from app.engines.preorder_rejection_suppression import (
         reset_preorder_rejection_suppressions,
     )
+    from app.engines.explosion_entry_guards import reset_post_win_afternoon_trap_latch
     from app.services.radar_health import reset_health_for_tests
     from app.services.radar_learning import reset_learning_state_for_tests
     from app.services.upstox_trade_manager import (
@@ -99,6 +100,7 @@ def _reset_all_engine_globals() -> None:
         reset_capital_for_tests,
         reset_realtime_detector_state,
         reset_preorder_rejection_suppressions,
+        reset_post_win_afternoon_trap_latch,
         reset_health_for_tests,
         reset_learning_state_for_tests,
         reset_upstox_trade_manager_cache_for_tests,

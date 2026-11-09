@@ -3505,6 +3505,9 @@ def reset_session_calibration() -> None:
     _calibration.reset()
     reset_symbol_cooldowns()
     reset_preorder_rejection_suppressions()
+    from app.engines.explosion_entry_guards import reset_post_win_afternoon_trap_latch
+
+    reset_post_win_afternoon_trap_latch()
     reset_session_guards()
     reset_session_profit_gate()
     from app.engines.chop_live_guards import reset_chop_live_adoption_cache
@@ -5158,6 +5161,13 @@ async def _process_locked(
                         allocation_row["status"] = "OPENED" if opened else "REJECTED"
                         allocation_row["reason"] = reason
                     if not opened:
+                        from app.engines.explosion_entry_guards import (
+                            record_post_win_afternoon_trap_reject,
+                        )
+
+                        record_post_win_afternoon_trap_reject(
+                            best, reason=reason,
+                        )
                         await _record_funnel_event_safe({
                             "event": "ORDER_REJECTED",
                             "key": radar_key,
