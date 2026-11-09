@@ -325,6 +325,23 @@ def _premium_htf_oppose_allows_entry(
     return True, "ok"
 
 
+def _premium_mtf_fade_threshold(
+    settings: Any,
+    *,
+    timeframe: str,
+    nifty_expiry_1m_relief: bool = False,
+) -> float:
+    base = float(
+        getattr(settings, "execution_chart_min_premium_momentum_pct", -0.15) or -0.15
+    )
+    if timeframe == "1m" and nifty_expiry_1m_relief:
+        floor = float(
+            getattr(settings, "nifty_expiry_day_mtf_1m_fade_floor_pct", -2.0) or -2.0
+        )
+        return min(base, floor)
+    return base
+
+
 def validate_mtf_scalp(
     side: Side,
     index_mtf: dict[str, TimeframeChartRead],
@@ -337,6 +354,7 @@ def validate_mtf_scalp(
     pad_lane_bypass: bool = False,
     open_setup_fade_bypass: bool = False,
     index_anchor_htf_bypass: bool = False,
+    nifty_expiry_1m_relief: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
@@ -379,7 +397,12 @@ def validate_mtf_scalp(
         ):
             for req in ("1m", "5m"):
                 pt = premium_mtf.get(req)
-                if pt and pt.direction == "BEARISH" and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct:
+                thresh = _premium_mtf_fade_threshold(
+                    settings,
+                    timeframe=req,
+                    nifty_expiry_1m_relief=nifty_expiry_1m_relief,
+                )
+                if pt and pt.direction == "BEARISH" and pt.momentumPct < thresh:
                     meta["passed"] = False
                     return False, f"exec_mtf_premium_{req}_fading", meta
         if premium_mtf and settings.execution_chart_premium_check_enabled and (
@@ -476,9 +499,16 @@ def validate_mtf_scalp(
     if premium_mtf and settings.execution_chart_premium_check_enabled:
         for req in ("1m", "5m"):
             pt = premium_mtf.get(req)
-            if pt and pt.direction == "BEARISH" and pt.momentumPct < settings.execution_chart_min_premium_momentum_pct:
+            thresh = _premium_mtf_fade_threshold(
+                settings,
+                timeframe=req,
+                nifty_expiry_1m_relief=nifty_expiry_1m_relief,
+            )
+            if pt and pt.direction == "BEARISH" and pt.momentumPct < thresh:
                 meta["passed"] = False
                 return False, f"exec_mtf_premium_{req}_fading", meta
+    if nifty_expiry_1m_relief:
+        meta["niftyExpiry1mFadeRelief"] = True
     htf_ok, htf_reason = _premium_htf_oppose_allows_entry(
         side,
         premium_mtf,

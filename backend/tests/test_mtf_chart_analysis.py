@@ -166,3 +166,71 @@ def test_pad_lane_bypass_blocked_when_premium_htf_opposes_put():
         )
     assert passed is False
     assert reason == "exec_mtf_premium_htf_opposes"
+
+
+def test_nifty_expiry_1m_relief_allows_shallow_premium_retest():
+    from app.config import Settings
+    from app.models.schemas import TimeframeChartRead
+    from unittest.mock import patch
+
+    candles = _rising_candles(steps=300)
+    price = candles[-1][4]
+    reads = _reads_from_1m(candles, price)
+    premium_reads = {
+        "1m": TimeframeChartRead(
+            label="1m", price=120.0, direction="BEARISH", momentumPct=-0.5,
+        ),
+        "5m": TimeframeChartRead(
+            label="5m", price=120.0, direction="BULLISH", momentumPct=2.0,
+        ),
+    }
+    settings = Settings()
+    with patch("app.engines.mtf_chart_analysis.get_settings", return_value=settings):
+        passed_strict, reason_strict, _ = validate_mtf_scalp(
+            Side.CALL,
+            reads,
+            premium_reads,
+            trade_score=65,
+        )
+        assert not passed_strict
+        assert reason_strict == "exec_mtf_premium_1m_fading"
+
+        passed, reason, meta = validate_mtf_scalp(
+            Side.CALL,
+            reads,
+            premium_reads,
+            trade_score=65,
+            nifty_expiry_1m_relief=True,
+        )
+        assert passed is True
+        assert reason == "ok"
+        assert meta.get("niftyExpiry1mFadeRelief") is True
+
+
+def test_nifty_expiry_1m_relief_still_blocks_deep_1m_dump():
+    from app.config import Settings
+    from app.models.schemas import TimeframeChartRead
+    from unittest.mock import patch
+
+    candles = _rising_candles(steps=300)
+    price = candles[-1][4]
+    reads = _reads_from_1m(candles, price)
+    premium_reads = {
+        "1m": TimeframeChartRead(
+            label="1m", price=120.0, direction="BEARISH", momentumPct=-3.0,
+        ),
+        "5m": TimeframeChartRead(
+            label="5m", price=120.0, direction="BULLISH", momentumPct=2.0,
+        ),
+    }
+    settings = Settings()
+    with patch("app.engines.mtf_chart_analysis.get_settings", return_value=settings):
+        passed, reason, _ = validate_mtf_scalp(
+            Side.CALL,
+            reads,
+            premium_reads,
+            trade_score=65,
+            nifty_expiry_1m_relief=True,
+        )
+    assert not passed
+    assert reason == "exec_mtf_premium_1m_fading"

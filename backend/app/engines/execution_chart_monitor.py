@@ -249,6 +249,7 @@ def validate_execution_charts(
     open_caution_bypass: bool = False,
     open_setup_fade_bypass: bool = False,
     index_anchor_htf_bypass: bool = False,
+    nifty_expiry_1m_relief: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
@@ -323,12 +324,55 @@ def validate_execution_charts(
             pad_lane_bypass=mtf_pad_lane_bypass,
             open_setup_fade_bypass=open_setup_fade_bypass,
             index_anchor_htf_bypass=index_anchor_htf_bypass,
+            nifty_expiry_1m_relief=nifty_expiry_1m_relief,
             scalp_mode=scalp_mode,
         )
         if not passed:
             return False, reason, mtf_meta
 
     return True, "ok", mtf_meta
+
+
+def resolve_nifty_expiry_1m_fade_relief(
+    symbol: str,
+    side: Side,
+    snap: SymbolSnapshot,
+    *,
+    explosion_event: Any = None,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> bool:
+    """Shallow 1m premium fade floor on NIFTY expiry CE near base (post-10:30 noise)."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "nifty_expiry_day_mtf_1m_fade_relief_enabled", True)):
+        return False
+    if str(symbol or "").upper() != "NIFTY":
+        return False
+    if bool(getattr(settings, "nifty_expiry_day_mtf_1m_fade_call_only", True)):
+        side_v = side.value if isinstance(side, Side) else str(side).upper()
+        if side_v != "CALL":
+            return False
+    from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+    if not is_symbol_expiry_day(snap):
+        return False
+    tier = str(getattr(explosion_event, "tier", "") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        alert_d = alert if isinstance(alert, dict) else {}
+        tier = str(alert_d.get("tier") or alert_d.get("bestTier") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        return False
+    alert_d = alert if isinstance(alert, dict) else {}
+    local_pad = float(
+        alert_d.get("localBaseMovePct")
+        or alert_d.get("ictBaseRelativeMovePct")
+        or getattr(explosion_event, "daily_move_pct", 0)
+        or 0
+    )
+    max_pad = float(
+        getattr(settings, "nifty_expiry_day_mtf_1m_fade_max_local_base_pct", 22.0) or 22.0
+    )
+    return 0 < local_pad <= max_pad + 1e-6
 
 
 async def monitor_trade_chart_before_execution(
@@ -677,6 +721,15 @@ async def monitor_trade_chart_before_execution(
             )
             index_anchor_htf_bypass = waived
 
+    nifty_expiry_1m_relief = resolve_nifty_expiry_1m_fade_relief(
+        symbol,
+        side,
+        snap,
+        explosion_event=explosion_event,
+        alert=alert if isinstance(alert, dict) else None,
+        settings=settings,
+    )
+
     passed, reason, mtf_meta = validate_execution_charts(
         side,
         index_chart,
@@ -700,6 +753,7 @@ async def monitor_trade_chart_before_execution(
         open_caution_bypass=open_setup_fade_bypass,
         open_setup_fade_bypass=open_setup_fade_bypass,
         index_anchor_htf_bypass=index_anchor_htf_bypass,
+        nifty_expiry_1m_relief=nifty_expiry_1m_relief,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
@@ -716,6 +770,7 @@ async def monitor_trade_chart_before_execution(
     meta["indexAnchorHtfBypass"] = index_anchor_htf_bypass
     meta["peWinCeMirrorFadeBypass"] = pe_win_mirror_bypass
     meta["indexTroughBypass"] = index_trough_bypass
+    meta["niftyExpiry1mFadeRelief"] = nifty_expiry_1m_relief
 
     delta = meta.get("snapshotDelta") or {}
     if delta.get("directionChanged"):
