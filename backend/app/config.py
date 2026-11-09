@@ -3245,6 +3245,12 @@ class Settings(BaseSettings):
     ce_rally_chase_max_local_base_pct: float = 10.0
     ce_rally_lift_near_miss_waive_enabled: bool = True
     ce_rally_at_base_waive_mtf_premium_fade: bool = True
+    # NIFTY weekly/monthly expiry: 1m premium MTF is noisy after 10:30 — use shallow
+    # retest floor (like open/post-open book) for ELITE/EXPLODING CE near base only.
+    nifty_expiry_day_mtf_1m_fade_relief_enabled: bool = True
+    nifty_expiry_day_mtf_1m_fade_call_only: bool = True
+    nifty_expiry_day_mtf_1m_fade_floor_pct: float = -2.0
+    nifty_expiry_day_mtf_1m_fade_max_local_base_pct: float = 22.0
     ce_cold_timing_chase_block_enabled: bool = False
     ce_cold_timing_max_local_base_pct: float = 10.0
     # Combined open setup (selector + pretrade + selective fade bypass).
