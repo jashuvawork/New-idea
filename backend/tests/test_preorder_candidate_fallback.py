@@ -12,6 +12,7 @@ from app.engines.preorder_rejection_suppression import (
     candidate_preorder_rejection_suppressed,
     reset_preorder_rejection_suppressions,
     suppress_after_preorder_rejection,
+    symbol_opposite_side_preorder_blocked,
 )
 from app.engines.trade_selector import (
     EntryCandidate,
@@ -61,6 +62,8 @@ def _candidate(
 def suppression_settings():
     settings = MagicMock()
     settings.preorder_rejection_suppression_seconds = 30
+    settings.preorder_reject_opposite_side_suppression_enabled = True
+    settings.preorder_reject_opposite_side_suppression_seconds = 180
     with patch(
         "app.engines.preorder_rejection_suppression.get_settings",
         return_value=settings,
@@ -166,6 +169,23 @@ def test_all_typed_preorder_premium_fade_reasons_suppress(reason):
     candidate = _candidate(24250)
     assert _record_deferred_candidate_fallback(candidate, reason)
     assert candidate_preorder_rejection_suppressed(candidate)
+
+
+@pytest.mark.usefixtures("suppression_settings")
+def test_call_fade_reject_blocks_put_same_symbol_not_other_strike():
+    call = _candidate(80700, side=Side.CALL, symbol="SENSEX")
+    put = _candidate(80700, side=Side.PUT, symbol="SENSEX")
+    put_other = _candidate(80600, side=Side.PUT, symbol="SENSEX")
+
+    suppress_after_preorder_rejection(
+        call, "exec_mtf_premium_1m_fading", now=NOW,
+    )
+    blocked, reason = symbol_opposite_side_preorder_blocked(put, now=NOW)
+    assert blocked is True
+    assert "call" in reason
+    # Symbol-wide: any PUT on SENSEX is blocked, not only the faded CALL strike.
+    assert symbol_opposite_side_preorder_blocked(put_other, now=NOW)[0] is True
+    assert not candidate_preorder_rejection_suppressed(put, now=NOW)
 
 
 @pytest.mark.usefixtures("suppression_settings")

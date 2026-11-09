@@ -26,6 +26,8 @@ PREORDER_EXEC_CHASE_REASONS = frozenset({
 })
 
 _suppressed_until: dict[tuple[str, str, str, float, str, str], datetime] = {}
+# After a CALL fade-reject at execution, block PUT on the same index (and mirror CE after PE).
+_symbol_opposite_suppressed_until: dict[tuple[str, str], datetime] = {}
 _session_date: str | None = None
 
 
@@ -51,7 +53,12 @@ def _roll_session(now: datetime) -> None:
     today = now.astimezone(IST).strftime("%Y-%m-%d")
     if _session_date != today:
         _suppressed_until.clear()
+        _symbol_opposite_suppressed_until.clear()
         _session_date = today
+
+
+def _opposite_side(side_value: str) -> str:
+    return "PUT" if side_value == "CALL" else "CALL"
 
 
 def suppress_after_preorder_rejection(
@@ -72,6 +79,25 @@ def suppress_after_preorder_rejection(
     if seconds <= 0:
         return False
     _suppressed_until[_candidate_key(candidate)] = current + timedelta(seconds=seconds)
+
+    settings = get_settings()
+    if bool(getattr(settings, "preorder_reject_opposite_side_suppression_enabled", True)):
+        opp_seconds = max(
+            0,
+            int(
+                getattr(settings, "preorder_reject_opposite_side_suppression_seconds", 180)
+                or 0
+            ),
+        )
+        if opp_seconds > 0:
+            side = getattr(candidate, "side", "")
+            side_value = side.value if isinstance(side, Side) else str(side).upper()
+            sym = str(getattr(candidate, "symbol", "") or "").upper()
+            if side_value in {"CALL", "PUT"} and sym:
+                opp = _opposite_side(side_value)
+                _symbol_opposite_suppressed_until[(sym, opp)] = current + timedelta(
+                    seconds=opp_seconds,
+                )
     return True
 
 
@@ -92,7 +118,34 @@ def candidate_preorder_rejection_suppressed(
     return False
 
 
+def symbol_opposite_side_preorder_blocked(
+    candidate: Any,
+    *,
+    now: datetime | None = None,
+) -> tuple[bool, str]:
+    """Block PUT after a recent CALL premium-fade reject on the same index (mirror for PE→CE)."""
+    settings = get_settings()
+    if not bool(getattr(settings, "preorder_reject_opposite_side_suppression_enabled", True)):
+        return False, "ok"
+    current = now or datetime.now(IST)
+    _roll_session(current)
+    side = getattr(candidate, "side", "")
+    side_value = side.value if isinstance(side, Side) else str(side).upper()
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    if side_value not in {"CALL", "PUT"} or not sym:
+        return False, "ok"
+    until = _symbol_opposite_suppressed_until.get((sym, side_value))
+    if until is None:
+        return False, "ok"
+    if current < until:
+        other = _opposite_side(side_value)
+        return True, f"preorder_opposite_side_after_{other.lower()}_fade_reject"
+    _symbol_opposite_suppressed_until.pop((sym, side_value), None)
+    return False, "ok"
+
+
 def reset_preorder_rejection_suppressions() -> None:
     global _session_date
     _suppressed_until.clear()
+    _symbol_opposite_suppressed_until.clear()
     _session_date = None
