@@ -372,6 +372,15 @@ def _explosion_candidates(
                 readiness_reason=first_lift_readiness_reason,
             )
         if not pad_lane_waive and side_u in ("CALL", "PUT"):
+            from app.engines.nifty_expiry_flip_capture import nifty_expiry_flip_near_miss_waive
+
+            pad_lane_waive = nifty_expiry_flip_near_miss_waive(
+                alert if isinstance(alert, dict) else None,
+                snap=snap,
+                state=state,
+                readiness_reason=first_lift_readiness_reason,
+            )
+        if not pad_lane_waive and side_u in ("CALL", "PUT"):
             from app.engines.session_mode_feedback import (
                 same_strike_post_win_fresh_base_reentry,
             )
@@ -2731,6 +2740,15 @@ def diagnose_missed_entries(
 
                 pad_lane_waive = pad_lane_early_near_miss_waive(
                     alert, readiness_reason=readiness_reason, snap=snap,
+                )
+            if not pad_lane_waive:
+                from app.engines.nifty_expiry_flip_capture import nifty_expiry_flip_near_miss_waive
+
+                pad_lane_waive = nifty_expiry_flip_near_miss_waive(
+                    alert,
+                    snap=snap,
+                    state=state,
+                    readiness_reason=readiness_reason,
                 )
             from app.engines.early_radar_pad_capture import alert_has_early_radar_pad_ready
 

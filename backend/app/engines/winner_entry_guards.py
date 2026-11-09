@@ -23,6 +23,7 @@ def premium_fading_blocks_entry(
     symmetric_near_base_bypass: bool = False,
     building_rip_bypass: bool = False,
     open_caution_bypass: bool = False,
+    nifty_expiry_flip_bypass: bool = False,
 ) -> tuple[bool, str]:
     """
     Block entries when option premium is fading at execution.
@@ -124,6 +125,18 @@ def premium_fading_blocks_entry(
         )
         if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
             return False, "open_caution_shallow_fade_ok"
+
+    if (
+        nifty_expiry_flip_bypass
+        and bool(getattr(settings, "nifty_expiry_flip_capture_waive_exec_premium_fade", True))
+        and tier in ("ELITE", "EXPLODING")
+    ):
+        shallow_floor = float(
+            getattr(settings, "nifty_expiry_flip_capture_premium_fade_floor_pct", -2.8)
+            or -2.8
+        )
+        if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
+            return False, "nifty_expiry_flip_shallow_fade_ok"
 
     min_mom = settings.execution_chart_min_premium_momentum_pct
     if premium_momentum_5s < min_mom and premium_momentum_3s < 0:

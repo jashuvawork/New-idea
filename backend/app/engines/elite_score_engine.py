@@ -1502,6 +1502,19 @@ def elite_entry_allowed(
     rally_fingerprint_active = False
     index_rally_flip_ok = False
     chop_rally_capture_armed = False
+    flip_capture_waive = False
+    symbol_u = str(evidence.get("symbol") or "").upper()
+    if state is not None and mirror_snap is not None and symbol_u == "NIFTY":
+        from app.engines.nifty_expiry_flip_capture import nifty_expiry_flip_capture_armed
+
+        _flip_armed, _flip_reason, _flip_meta = nifty_expiry_flip_capture_armed(
+            symbol_u,
+            resolved_side,
+            mirror_snap,
+            state=state,
+            alert=evidence if isinstance(evidence, Mapping) else None,
+        )
+        flip_capture_waive = _flip_armed
     if resolved_side == "CALL" and state is not None and mirror_snap is not None:
         from app.engines.best_trade_policy import call_at_base_best_trade_fingerprint
         from app.engines.pe_win_ce_mirror import (
@@ -1510,7 +1523,9 @@ def elite_entry_allowed(
             legacy_chop_rally_call_capture_armed,
         )
 
-        symbol = str(evidence.get("symbol") or getattr(mirror_snap, "symbol", "") or "").upper()
+        symbol = symbol_u or str(
+            evidence.get("symbol") or getattr(mirror_snap, "symbol", "") or ""
+        ).upper()
         rally_unlock_armed = call_ce_base_context_armed(
             state,
             mirror_snap,
@@ -1573,14 +1588,19 @@ def elite_entry_allowed(
     from app.engines.sep917_legacy_profile import legacy_call_capture_elite_waives_active
 
     call_capture_waive = bool(
-        legacy_call_capture_elite_waives_active(settings)
-        and resolved_side == "CALL"
+        resolved_side == "CALL"
         and (
-            mirror_active
-            or rally_fingerprint_active
-            or rally_unlock_armed
-            or index_rally_flip_ok
-            or chop_rally_capture_armed
+            flip_capture_waive
+            or (
+                legacy_call_capture_elite_waives_active(settings)
+                and (
+                    mirror_active
+                    or rally_fingerprint_active
+                    or rally_unlock_armed
+                    or index_rally_flip_ok
+                    or chop_rally_capture_armed
+                )
+            )
         )
     )
     if call_capture_waive:
@@ -1726,7 +1746,17 @@ def elite_entry_allowed(
                 **_adj_meta,
             }
 
-    continuation_waive = fresh_base_reentry or adjacent_continuation
+    flip_chase_waive = False
+    if flip_capture_waive:
+        _flip_local = _number(assessment.get("localBasePct"))
+        _flip_chase_cap = float(
+            getattr(settings, "nifty_expiry_flip_capture_max_chase_local_base_pct", 48.0)
+            or 48.0
+        )
+        flip_chase_waive = 0 < _flip_local <= _flip_chase_cap + 1e-6
+    continuation_waive = (
+        fresh_base_reentry or adjacent_continuation or flip_chase_waive
+    )
     from app.engines.session_mode_feedback import post_win_fresh_base_pad_in_capture_band
 
     if not elite_base_setup_allowed(
@@ -1796,7 +1826,7 @@ def elite_entry_allowed(
         side=resolved_side,
         ranking=ranking,
     )
-    if fvq_blocked and not continuation_waive:
+    if fvq_blocked and not continuation_waive and not flip_capture_waive:
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}
         return False, fvq_reason, assessment
 
@@ -1840,6 +1870,9 @@ def elite_entry_allowed(
         and building_rip_helper_ok
         and bool(getattr(settings, "building_rip_helper_waives_v_rip_shallow", True))
     ):
+        v_rip_shallow_blocked = False
+        v_rip_shallow_reason = ""
+    if v_rip_shallow_blocked and flip_capture_waive:
         v_rip_shallow_blocked = False
         v_rip_shallow_reason = ""
     if (

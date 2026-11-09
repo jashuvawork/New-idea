@@ -3251,6 +3251,13 @@ class Settings(BaseSettings):
     nifty_expiry_day_mtf_1m_fade_call_only: bool = True
     nifty_expiry_day_mtf_1m_fade_floor_pct: float = -2.0
     nifty_expiry_day_mtf_1m_fade_max_local_base_pct: float = 22.0
+    # Armed index/loss flip on NIFTY expiry — waiver near-miss/chase/exec fade near base (CE/PE).
+    nifty_expiry_flip_capture_waiver_enabled: bool = True
+    nifty_expiry_flip_capture_max_local_base_pct: float = 28.0
+    nifty_expiry_flip_capture_max_chase_local_base_pct: float = 48.0
+    nifty_expiry_flip_capture_elite_tiers_csv: str = "ELITE,EXPLODING"
+    nifty_expiry_flip_capture_waive_exec_premium_fade: bool = True
+    nifty_expiry_flip_capture_premium_fade_floor_pct: float = -2.8
     ce_cold_timing_chase_block_enabled: bool = False
     ce_cold_timing_max_local_base_pct: float = 10.0
     # Combined open setup (selector + pretrade + selective fade bypass).
