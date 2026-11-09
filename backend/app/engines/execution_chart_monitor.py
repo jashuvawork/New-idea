@@ -302,8 +302,15 @@ def validate_execution_charts(
     if blocked:
         return False, f"exec_{reason}", mtf_meta
 
-    mtf_first_lift_bypass = bool(first_lift_bypass or index_trough_bypass)
-    mtf_pad_lane_bypass = bool(pad_lane_bypass or index_trough_bypass)
+    # Trough/peak turn bypass applies only when momentum turn matches entry side.
+    from app.engines.spot_direction import index_trough_momentum_turn
+
+    side_trough_bypass = bool(
+        index_trough_bypass
+        and index_trough_momentum_turn(side, index_chart)
+    )
+    mtf_first_lift_bypass = bool(first_lift_bypass or side_trough_bypass)
+    mtf_pad_lane_bypass = bool(pad_lane_bypass or side_trough_bypass)
     if index_mtf_reads:
         passed, reason, mtf_meta = validate_mtf_scalp(
             side,
@@ -584,6 +591,27 @@ async def monitor_trade_chart_before_execution(
         return True, "ok", fallback
 
     index_chart = SpotChart(**meta["indexChartFull"])
+
+    from app.engines.index_lift_turn_guards import index_lift_turn_blocks_side
+
+    live_spot = float(meta.get("spot") or getattr(snap, "spot", 0) or 0)
+    live_snap = snap.model_copy(
+        update={"spotChart": index_chart, "spot": live_spot or snap.spot}
+    )
+    turn_blocked, turn_reason, turn_meta = index_lift_turn_blocks_side(
+        symbol, side, live_snap,
+    )
+    if turn_blocked:
+        meta["indexLiftTurn"] = turn_meta
+        meta["enabled"] = True
+        meta["passed"] = False
+        block_reason = (
+            turn_reason
+            if str(turn_reason).startswith("exec_")
+            else f"exec_{turn_reason}"
+        )
+        meta["blockReason"] = block_reason
+        return False, block_reason, meta
 
     # 09:15–09:45 cash-candle side. Intentionally before first-lift and premium bypasses.
     candles_1m = meta.pop("_indexCandles1m", None)

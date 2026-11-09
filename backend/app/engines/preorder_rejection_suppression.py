@@ -72,15 +72,16 @@ def suppress_after_preorder_rejection(
         return False
     current = now or datetime.now(IST)
     _roll_session(current)
+    settings = get_settings()
+    recorded = False
     seconds = max(
         0,
-        int(getattr(get_settings(), "preorder_rejection_suppression_seconds", 30) or 0),
+        int(getattr(settings, "preorder_rejection_suppression_seconds", 30) or 0),
     )
-    if seconds <= 0:
-        return False
-    _suppressed_until[_candidate_key(candidate)] = current + timedelta(seconds=seconds)
+    if seconds > 0:
+        _suppressed_until[_candidate_key(candidate)] = current + timedelta(seconds=seconds)
+        recorded = True
 
-    settings = get_settings()
     if bool(getattr(settings, "preorder_reject_opposite_side_suppression_enabled", True)):
         opp_seconds = max(
             0,
@@ -98,7 +99,8 @@ def suppress_after_preorder_rejection(
                 _symbol_opposite_suppressed_until[(sym, opp)] = current + timedelta(
                     seconds=opp_seconds,
                 )
-    return True
+                recorded = True
+    return recorded
 
 
 def candidate_preorder_rejection_suppressed(
