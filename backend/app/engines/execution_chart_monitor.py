@@ -350,10 +350,21 @@ def resolve_nifty_expiry_1m_fade_relief(
         return False
     if str(symbol or "").upper() != "NIFTY":
         return False
-    if bool(getattr(settings, "nifty_expiry_day_mtf_1m_fade_call_only", True)):
-        side_v = side.value if isinstance(side, Side) else str(side).upper()
-        if side_v != "CALL":
+    side_v = side.value if isinstance(side, Side) else str(side).upper()
+    call_only = bool(getattr(settings, "nifty_expiry_day_mtf_1m_fade_call_only", True))
+    put_slide = bool(getattr(settings, "nifty_expiry_day_mtf_1m_fade_put_slide_enabled", True))
+    if call_only and side_v == "PUT":
+        if not put_slide:
             return False
+        from app.engines.index_rally_side_flip import index_rally_side_flip_bypass
+
+        slide_ok, _, _ = index_rally_side_flip_bypass(
+            str(symbol or "").upper(), "PUT", snap, settings=settings,
+        )
+        if not slide_ok:
+            return False
+    elif call_only and side_v != "CALL":
+        return False
     from app.engines.expiry_day_guards import is_symbol_expiry_day
 
     if not is_symbol_expiry_day(snap):

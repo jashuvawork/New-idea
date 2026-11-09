@@ -151,6 +151,129 @@ def nifty_expiry_flip_near_miss_waive(
     return armed
 
 
+def _nifty_expiry_afternoon_ist(now: Any = None) -> bool:
+  from datetime import datetime
+  from zoneinfo import ZoneInfo
+
+  settings = get_settings()
+  if not bool(getattr(settings, "nifty_expiry_afternoon_opposite_fade_suppress_enabled", True)):
+    return False
+  ist = ZoneInfo("Asia/Kolkata")
+  when = now or datetime.now(ist)
+  if when.tzinfo is None:
+    when = when.replace(tzinfo=ist)
+  else:
+    when = when.astimezone(ist)
+  hh = int(getattr(settings, "nifty_expiry_afternoon_opposite_fade_min_hour_ist", 11) or 11)
+  mm = int(getattr(settings, "nifty_expiry_afternoon_opposite_fade_min_minute_ist", 45) or 45)
+  start = when.replace(hour=hh, minute=mm, second=0, microsecond=0)
+  return when >= start
+
+
+def nifty_expiry_opposite_trend_fade_waiver_suppressed(
+    symbol: str,
+    side: Side | str,
+    snap: SymbolSnapshot,
+    *,
+    state: Any = None,
+    settings: Any = None,
+    now: Any = None,
+) -> tuple[bool, str]:
+    """
+    On NIFTY expiry afternoon, suppress shallow premium-fade waivers when
+    dominant index trend opposes the entry side (e.g. PUT into RALLY).
+    """
+    settings = settings or get_settings()
+    sym = str(symbol or getattr(snap, "symbol", "") or "").upper()
+    if sym != "NIFTY":
+        return False, ""
+    from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+    if not is_symbol_expiry_day(snap):
+        return False, ""
+    if not _nifty_expiry_afternoon_ist(now):
+        return False, ""
+    from app.engines.index_session_dominant_trend import (
+        index_session_dominant_trend,
+        index_trend_features_active,
+        side_aligns_with_dominant_trend,
+    )
+
+    if not index_trend_features_active(settings):
+        return False, ""
+    dominant, meta = index_session_dominant_trend(
+        sym, snap, state, settings=settings, track_flip=False,
+    )
+    side_u = _side_val(side)
+    if side_aligns_with_dominant_trend(side_u, dominant):
+        return False, ""
+    if dominant == "NEUTRAL":
+        return False, ""
+    return True, f"nifty_expiry_afternoon_opposite_{dominant.lower()}"
+
+
+def nifty_expiry_flip_cheap_otm_near_atm_bypass(
+    candidate: Any,
+    snap: SymbolSnapshot,
+    alert: Mapping[str, Any] | None = None,
+    *,
+    state: Any = None,
+    settings: Any = None,
+) -> bool:
+    """Flip-capture armed + shallow OTM only — not ₹17 deep cheap on expiry."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "nifty_expiry_flip_cheap_otm_near_atm_bypass_enabled", True)):
+        return False
+    sym = str(getattr(candidate, "symbol", "") or "").upper()
+    if sym != "NIFTY" or snap is None:
+        return False
+    side_u = _side_val(getattr(candidate, "side", ""))
+    alert_d = alert if isinstance(alert, Mapping) else {}
+    if not alert_d and hasattr(candidate, "alert"):
+        a = getattr(candidate, "alert", None)
+        alert_d = dict(a) if isinstance(a, dict) else {}
+    armed, _, _ = nifty_expiry_flip_capture_armed(
+        sym,
+        side_u,
+        snap,
+        state=state,
+        alert=alert_d,
+        explosion_event=getattr(candidate, "explosion_event", None),
+        candidate=candidate,
+        settings=settings,
+    )
+    if not armed:
+        return False
+    from app.engines.best_trade_policy import _classify_moneyness
+    from app.engines.explosion_entry_guards import structured_near_atm
+    from app.engines.moneyness import _depth_steps, atm_strike, classify_moneyness
+
+    try:
+        strike = float(getattr(candidate, "strike", 0) or alert_d.get("strike") or 0)
+    except (TypeError, ValueError):
+        strike = 0.0
+    if strike <= 0:
+        return False
+    max_steps = int(
+        getattr(settings, "nifty_expiry_flip_cheap_otm_max_otm_steps", 1) or 1
+    )
+    money = _classify_moneyness(candidate, snap)
+    spot = float(getattr(snap, "spot", 0) or 0)
+    sym_u = str(getattr(snap, "symbol", "") or sym).upper()
+    atm = float(getattr(snap, "atmStrike", 0) or 0) or atm_strike(spot, sym_u)
+    depth = _depth_steps(side_u, strike, spot, sym_u, atm)
+    if money == "OTM" and depth > max_steps:
+        return False
+    return structured_near_atm(
+        side_u,
+        strike,
+        snap,
+        candidate=candidate,
+        alert=alert_d,
+        event=getattr(candidate, "explosion_event", None),
+    )
+
+
 def nifty_expiry_flip_premium_fade_bypass(
     *,
     side: Side | str,
@@ -163,6 +286,11 @@ def nifty_expiry_flip_premium_fade_bypass(
 ) -> bool:
     settings = settings or get_settings()
     if not bool(getattr(settings, "nifty_expiry_flip_capture_waive_exec_premium_fade", True)):
+        return False
+    suppressed, _ = nifty_expiry_opposite_trend_fade_waiver_suppressed(
+        symbol, side, snap, state=state, settings=settings,
+    )
+    if suppressed:
         return False
     armed, _, _ = nifty_expiry_flip_capture_armed(
         symbol,

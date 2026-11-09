@@ -1264,6 +1264,15 @@ def expiry_cheap_otm_entry_blocked(
                 return False, ""
 
     symbol = str(getattr(candidate, "symbol", "") or "").upper()
+    if symbol == "NIFTY" and state is not None:
+        from app.engines.nifty_expiry_flip_capture import (
+            nifty_expiry_flip_cheap_otm_near_atm_bypass,
+        )
+
+        if nifty_expiry_flip_cheap_otm_near_atm_bypass(
+            candidate, snap, alert, state=state, settings=settings,
+        ):
+            return False, ""
     if _expiry_itm_atm_only_symbol(symbol, settings=settings):
         if bool(
             getattr(settings, "best_trade_expiry_otm_open_first_lift_waive_enabled", True)

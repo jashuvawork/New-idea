@@ -88,6 +88,60 @@ def test_near_miss_waive_when_flip_armed():
         assert nifty_expiry_flip_near_miss_waive(alert, snap=snap, settings=settings) is True
 
 
+def test_afternoon_opposite_trend_suppresses_put_fade_waiver():
+    settings = Settings()
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST).replace(hour=14, minute=0).isoformat(),
+        marketPhase="LIVE_MARKET",
+        spot=25300.0,
+        dataAvailable=True,
+        optionExpiry=datetime.now(IST).strftime("%Y-%m-%d"),
+    )
+    with patch("app.engines.expiry_day_guards.is_symbol_expiry_day", return_value=True):
+        with patch(
+            "app.engines.index_session_dominant_trend.index_trend_features_active",
+            return_value=True,
+        ):
+            with patch(
+                "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+                return_value=("RALLY", {"dominantTrend": "RALLY"}),
+            ):
+                from app.engines.nifty_expiry_flip_capture import (
+                    nifty_expiry_opposite_trend_fade_waiver_suppressed,
+                )
+
+                blocked, reason = nifty_expiry_opposite_trend_fade_waiver_suppressed(
+                    "NIFTY", Side.PUT, snap, state=object(),
+                )
+    assert blocked is True
+    assert "rally" in reason.lower()
+
+
+def test_nifty_expiry_1m_relief_put_when_slide_armed():
+    from app.engines.execution_chart_monitor import resolve_nifty_expiry_1m_fade_relief
+
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST).isoformat(),
+        marketPhase="LIVE_MARKET",
+        spot=25300.0,
+        dataAvailable=True,
+        optionExpiry=datetime.now(IST).strftime("%Y-%m-%d"),
+    )
+    event = MagicMock(tier="ELITE", daily_move_pct=12.0)
+    alert = {"tier": "ELITE", "localBaseMovePct": 12.0}
+    with patch("app.engines.expiry_day_guards.is_symbol_expiry_day", return_value=True):
+        with patch(
+            "app.engines.index_rally_side_flip.index_rally_side_flip_bypass",
+            return_value=(True, "index_slide_side_flip", {}),
+        ):
+            ok = resolve_nifty_expiry_1m_fade_relief(
+                "NIFTY", Side.PUT, snap, explosion_event=event, alert=alert,
+            )
+    assert ok is True
+
+
 def test_exec_premium_shallow_fade_ok_when_flip_bypass():
     settings = Settings()
     event = MagicMock(tier="ELITE", daily_move_pct=10.0)
