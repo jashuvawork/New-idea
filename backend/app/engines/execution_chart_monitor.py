@@ -250,6 +250,7 @@ def validate_execution_charts(
     open_setup_fade_bypass: bool = False,
     index_anchor_htf_bypass: bool = False,
     nifty_expiry_1m_relief: bool = False,
+    nifty_expiry_flip_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
@@ -299,6 +300,7 @@ def validate_execution_charts(
         symmetric_near_base_bypass=symmetric_near_base_bypass,
         building_rip_bypass=building_rip_bypass,
         open_caution_bypass=open_caution_bypass,
+        nifty_expiry_flip_bypass=nifty_expiry_flip_bypass,
     )
     if blocked:
         return False, f"exec_{reason}", mtf_meta
@@ -596,6 +598,23 @@ async def monitor_trade_chart_before_execution(
         if pe_win_mirror_bypass:
             premium_fade_pad_lane = True
 
+    nifty_expiry_flip_bypass = False
+    if state is not None and snap is not None:
+        from app.engines.nifty_expiry_flip_capture import nifty_expiry_flip_premium_fade_bypass
+
+        alert_map = alert if isinstance(alert, dict) else {}
+        nifty_expiry_flip_bypass = nifty_expiry_flip_premium_fade_bypass(
+            side=side,
+            symbol=symbol,
+            snap=snap,
+            state=state,
+            alert=alert_map,
+            explosion_event=explosion_event,
+            settings=settings,
+        )
+        if nifty_expiry_flip_bypass:
+            premium_fade_pad_lane = True
+
     try:
         meta = await fetch_live_trade_charts(
             client, symbol, side, strike, snap, instrument_key=instrument_key,
@@ -754,6 +773,7 @@ async def monitor_trade_chart_before_execution(
         open_setup_fade_bypass=open_setup_fade_bypass,
         index_anchor_htf_bypass=index_anchor_htf_bypass,
         nifty_expiry_1m_relief=nifty_expiry_1m_relief,
+        nifty_expiry_flip_bypass=nifty_expiry_flip_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
@@ -771,6 +791,7 @@ async def monitor_trade_chart_before_execution(
     meta["peWinCeMirrorFadeBypass"] = pe_win_mirror_bypass
     meta["indexTroughBypass"] = index_trough_bypass
     meta["niftyExpiry1mFadeRelief"] = nifty_expiry_1m_relief
+    meta["niftyExpiryFlipCaptureFadeBypass"] = nifty_expiry_flip_bypass
 
     delta = meta.get("snapshotDelta") or {}
     if delta.get("directionChanged"):
