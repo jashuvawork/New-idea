@@ -1115,6 +1115,24 @@ def validate_candidate(
         )
         if not macd_ok:
             return False, macd_reason, meta
+
+        from app.engines.index_lift_turn_guards import index_lift_turn_blocks_side
+
+        turn_blocked, turn_reason, turn_meta = index_lift_turn_blocks_side(
+            sym, candidate.side, snap,
+        )
+        if turn_blocked:
+            meta["indexLiftTurn"] = turn_meta
+            return False, turn_reason, meta
+
+        from app.engines.preorder_rejection_suppression import (
+            symbol_opposite_side_preorder_blocked,
+        )
+
+        opp_blocked, opp_reason = symbol_opposite_side_preorder_blocked(candidate)
+        if opp_blocked:
+            return False, opp_reason, meta
+
         peak_ok, peak_reason = check_peak_chase_entry(candidate, explosion_event, snap)
         if not peak_ok:
             return False, peak_reason, meta

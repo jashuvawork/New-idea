@@ -2219,6 +2219,18 @@ class Settings(BaseSettings):
     index_rally_side_flip_require_put_session: bool = True
     index_rally_side_flip_require_call_session: bool = True
     index_rally_side_flip_symbols_csv: str = "SENSEX,NIFTY,BANKNIFTY"
+    # Index V-turn hard blocks — lower threshold than side-flip unlock; stop PE into CE lift
+    # (Nov09 SENSEX PUT 80700 filled 3s after CALL fade-reject at the session-low turn).
+    index_lift_turn_block_put_enabled: bool = True
+    index_lift_turn_block_call_enabled: bool = True
+    index_lift_turn_block_put_min_pts: float = 70.0
+    index_lift_turn_block_put_min_pts_nifty: float = 35.0
+    index_lift_turn_block_put_min_pts_banknifty: float = 60.0
+    index_lift_turn_block_call_min_pts: float = 70.0
+    index_lift_turn_block_call_min_pts_nifty: float = 35.0
+    index_lift_turn_block_call_min_pts_banknifty: float = 60.0
+    index_lift_turn_min_mom5_pct: float = 0.02
+    index_lift_turn_symbols_csv: str = "SENSEX,NIFTY,BANKNIFTY"
 
     # Loss-triggered opposite flip — same-side losses + index rally/slide + RSI/MACD → elite opposite
     loss_triggered_side_flip_enabled: bool = True
@@ -2285,6 +2297,9 @@ class Settings(BaseSettings):
     instrument_max_entries_per_day: int = 3
     # Exact-leg defer after execution-time premium fade; another leg may win next scan.
     preorder_rejection_suppression_seconds: int = 30
+    # Block opposite side on same index after a premium-fade preorder reject (CE↔PE).
+    preorder_reject_opposite_side_suppression_enabled: bool = True
+    preorder_reject_opposite_side_suppression_seconds: int = 180
     # Jul27 scalp churn: tiny win @6 lots → full size @24/25 → stop → repeat same CE.
     # Longer same-strike cooldowns + hard daily cap for scalp only.
     scalp_instrument_win_cooldown_seconds: int = 600

@@ -302,6 +302,8 @@ def validate_execution_charts(
     if blocked:
         return False, f"exec_{reason}", mtf_meta
 
+    mtf_first_lift_bypass = bool(first_lift_bypass or index_trough_bypass)
+    mtf_pad_lane_bypass = bool(pad_lane_bypass or index_trough_bypass)
     if index_mtf_reads:
         passed, reason, mtf_meta = validate_mtf_scalp(
             side,
@@ -310,8 +312,8 @@ def validate_execution_charts(
             trade_score=trade_score,
             premium_led_bypass=premium_led_bypass,
             vertical_rip_bypass=vertical_rip_bypass,
-            first_lift_bypass=first_lift_bypass,
-            pad_lane_bypass=pad_lane_bypass,
+            first_lift_bypass=mtf_first_lift_bypass,
+            pad_lane_bypass=mtf_pad_lane_bypass,
             open_setup_fade_bypass=open_setup_fade_bypass,
             index_anchor_htf_bypass=index_anchor_htf_bypass,
             scalp_mode=scalp_mode,
@@ -653,12 +655,12 @@ async def monitor_trade_chart_before_execution(
         breadth_aligned_bypass=breadth_bypass,
         premium_led_bypass=structure_chart_bypass,
         vertical_rip_bypass=vertical_bypass,
-        first_lift_bypass=strict_chart_bypass,
+        first_lift_bypass=bool(strict_chart_bypass or index_trough_bypass),
         expiry_explosion_bypass=expiry_chart_bypass,
         explosion_event=explosion_event,
         mode=mode,
         confirmed_ftv_bypass=confirmed_ftv_bypass,
-        pad_lane_bypass=premium_fade_pad_lane,
+        pad_lane_bypass=bool(premium_fade_pad_lane or index_trough_bypass),
         pe_win_mirror_bypass=pe_win_mirror_bypass,
         index_trough_bypass=index_trough_bypass,
         symmetric_near_base_bypass=symmetric_fade_bypass,

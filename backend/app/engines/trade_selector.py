@@ -131,11 +131,19 @@ def _exclude_preorder_rejected_candidates(
     candidates: list[EntryCandidate],
 ) -> list[EntryCandidate]:
     """Keep a rejected leg out of ranking without bypassing fresh selector guards."""
-    return [
-        candidate
-        for candidate in candidates
-        if not candidate_preorder_rejection_suppressed(candidate)
-    ]
+    from app.engines.preorder_rejection_suppression import (
+        symbol_opposite_side_preorder_blocked,
+    )
+
+    kept: list[EntryCandidate] = []
+    for candidate in candidates:
+        if candidate_preorder_rejection_suppressed(candidate):
+            continue
+        opp_blocked, _ = symbol_opposite_side_preorder_blocked(candidate)
+        if opp_blocked:
+            continue
+        kept.append(candidate)
+    return kept
 
 
 def _building_aligned_ict_alert_ok(
