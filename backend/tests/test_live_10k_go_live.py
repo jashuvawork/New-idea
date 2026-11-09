@@ -37,7 +37,7 @@ def test_live_10k_profile_is_removed():
     assert settings.live_early_fail_exit_enabled is False
     assert settings.chop_live_early_fail_exit_enabled is False
     assert settings.fallback_capital_inr == 200_000
-    assert settings.daily_loss_stop_capital_pct == 0.20
+    assert settings.daily_loss_stop_capital_pct == 0.35
 
 
 def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
@@ -85,7 +85,7 @@ def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
             values[key] = value
     assert values["FALLBACK_CAPITAL_INR"] == "200000"
     assert values["MAX_SIZING_CAPITAL_INR"] == "200000"
-    assert values["DAILY_LOSS_STOP_CAPITAL_PCT"] == "0.20"
+    assert values["DAILY_LOSS_STOP_CAPITAL_PCT"] == "0.35"
     assert values["DAILY_LOSS_STOP_INR"] == "0"
     assert values["EMERGENCY_STOP_INR"] == "20000"
     assert values["TOP_MOMENTS_MIN_GRADE"] == "A"
