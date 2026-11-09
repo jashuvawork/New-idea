@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from app.engines.index_lift_turn_guards import (
     index_lift_turn_blocks_side,
+    index_lift_turn_option_rip_waiver,
     index_session_rally_turn_active,
     index_session_slide_turn_active,
 )
@@ -65,6 +66,19 @@ def test_rally_turn_inactive_when_too_shallow(mock_metrics):
 
 
 @patch("app.engines.index_lift_turn_guards.index_rally_metrics")
+def test_rally_turn_inactive_when_index_mom5_bearish(mock_metrics):
+    mock_metrics.return_value = {
+        "rallyPoints": 120.0,
+        "sessionLow": 80600.0,
+        "sessionHigh": 81200.0,
+        "spot": 80720.0,
+    }
+    active, meta = index_session_rally_turn_active("SENSEX", _snap(mom5=-0.05))
+    assert active is False
+    assert meta.get("waiver") == "index_mom5_bearish_put_ok"
+
+
+@patch("app.engines.index_lift_turn_guards.index_rally_metrics")
 def test_lift_turn_blocks_put_not_call(mock_metrics):
     mock_metrics.return_value = {
         "rallyPoints": 100.0,
@@ -80,6 +94,30 @@ def test_lift_turn_blocks_put_not_call(mock_metrics):
     assert put_reason == "index_lift_turn_blocks_put"
     assert call_blocked is False
     assert call_reason == "ok"
+
+
+@patch("app.engines.index_lift_turn_guards.index_rally_metrics")
+def test_option_rip_waives_put_block_during_index_lift(mock_metrics):
+    mock_metrics.return_value = {
+        "rallyPoints": 100.0,
+        "slidePoints": 50.0,
+        "sessionLow": 80600.0,
+        "sessionHigh": 81200.0,
+        "spot": 80700.0,
+    }
+    event = MagicMock()
+    event.tier = "ELITE"
+    event.velocity_3s = 2.5
+    snap = _snap()
+    put_blocked, _, meta = index_lift_turn_blocks_side(
+        "SENSEX",
+        Side.PUT,
+        snap,
+        explosion_event=event,
+        alert={"momentType": "armed_base_launch", "tier": "ELITE"},
+    )
+    assert put_blocked is False
+    assert meta.get("waiverReason") == "index_lift_turn_put_option_rip_waiver"
 
 
 @patch("app.engines.index_lift_turn_guards.index_rally_metrics")
@@ -107,3 +145,19 @@ def test_slide_turn_blocks_call_mirror(mock_metrics):
     assert call_blocked is True
     assert call_reason == "index_lift_turn_blocks_call"
     assert put_blocked is False
+
+
+def test_option_rip_waiver_requires_tier_and_velocity():
+    event = MagicMock()
+    event.tier = "WATCH"
+    event.velocity_3s = 3.0
+    ok, _, _ = index_lift_turn_option_rip_waiver(Side.PUT, explosion_event=event)
+    assert ok is False
+    event.tier = "ELITE"
+    event.velocity_3s = 0.5
+    ok, _, _ = index_lift_turn_option_rip_waiver(Side.PUT, explosion_event=event)
+    assert ok is False
+    event.velocity_3s = 2.0
+    ok, reason, _ = index_lift_turn_option_rip_waiver(Side.PUT, explosion_event=event)
+    assert ok is True
+    assert "put_option_rip" in reason

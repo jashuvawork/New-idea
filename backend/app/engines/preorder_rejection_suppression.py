@@ -140,6 +140,38 @@ def symbol_opposite_side_preorder_blocked(
     if until is None:
         return False, "ok"
     if current < until:
+        if side_value == "PUT":
+            from app.engines.index_lift_turn_guards import (
+                index_lift_turn_option_rip_waiver,
+            )
+
+            rip_ok, _, _ = index_lift_turn_option_rip_waiver(
+                Side.PUT,
+                explosion_event=getattr(candidate, "explosion_event", None),
+                alert=(
+                    candidate.alert
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else None
+                ),
+            )
+            if rip_ok:
+                return False, "ok"
+        elif side_value == "CALL":
+            from app.engines.index_lift_turn_guards import (
+                index_lift_turn_option_rip_waiver,
+            )
+
+            rip_ok, _, _ = index_lift_turn_option_rip_waiver(
+                Side.CALL,
+                explosion_event=getattr(candidate, "explosion_event", None),
+                alert=(
+                    candidate.alert
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else None
+                ),
+            )
+            if rip_ok:
+                return False, "ok"
         other = _opposite_side(side_value)
         return True, f"preorder_opposite_side_after_{other.lower()}_fade_reject"
     _symbol_opposite_suppressed_until.pop((sym, side_value), None)

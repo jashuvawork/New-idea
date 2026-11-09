@@ -599,7 +599,11 @@ async def monitor_trade_chart_before_execution(
         update={"spotChart": index_chart, "spot": live_spot or snap.spot}
     )
     turn_blocked, turn_reason, turn_meta = index_lift_turn_blocks_side(
-        symbol, side, live_snap,
+        symbol,
+        side,
+        live_snap,
+        explosion_event=explosion_event,
+        alert=alert if isinstance(alert, dict) else None,
     )
     if turn_blocked:
         meta["indexLiftTurn"] = turn_meta

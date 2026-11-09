@@ -1064,8 +1064,15 @@ def validate_candidate(
         symbol_opposite_side_preorder_blocked,
     )
 
+    alert_lift = (
+        candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else None
+    )
     turn_blocked, turn_reason, turn_meta = index_lift_turn_blocks_side(
-        sym, candidate.side, snap,
+        sym,
+        candidate.side,
+        snap,
+        explosion_event=getattr(candidate, "explosion_event", None),
+        alert=alert_lift,
     )
     if turn_blocked:
         meta["indexLiftTurn"] = turn_meta

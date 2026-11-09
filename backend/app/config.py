@@ -2231,6 +2231,10 @@ class Settings(BaseSettings):
     index_lift_turn_block_call_min_pts_banknifty: float = 60.0
     index_lift_turn_min_mom5_pct: float = 0.02
     index_lift_turn_symbols_csv: str = "SENSEX,NIFTY,BANKNIFTY"
+    # Waive index lift-turn PE block when the PUT contract itself is ELITE/EXPLODING + hot v3.
+    index_lift_turn_option_rip_waiver_enabled: bool = True
+    index_lift_turn_option_rip_min_velocity_3s: float = 1.2
+    index_lift_turn_option_rip_tiers_csv: str = "ELITE,EXPLODING"
 
     # Loss-triggered opposite flip — same-side losses + index rally/slide + RSI/MACD → elite opposite
     loss_triggered_side_flip_enabled: bool = True
