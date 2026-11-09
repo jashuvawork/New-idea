@@ -172,6 +172,26 @@ def test_all_typed_preorder_premium_fade_reasons_suppress(reason):
 
 
 @pytest.mark.usefixtures("suppression_settings")
+def test_opposite_side_block_when_leg_suppression_seconds_zero():
+    settings = MagicMock()
+    settings.preorder_rejection_suppression_seconds = 0
+    settings.preorder_reject_opposite_side_suppression_enabled = True
+    settings.preorder_reject_opposite_side_suppression_seconds = 180
+    call = _candidate(80700, side=Side.CALL, symbol="SENSEX")
+    put = _candidate(80700, side=Side.PUT, symbol="SENSEX")
+    with patch(
+        "app.engines.preorder_rejection_suppression.get_settings",
+        return_value=settings,
+    ):
+        reset_preorder_rejection_suppressions()
+        assert suppress_after_preorder_rejection(
+            call, "exec_mtf_premium_1m_fading", now=NOW,
+        )
+        assert symbol_opposite_side_preorder_blocked(put, now=NOW)[0] is True
+        assert not candidate_preorder_rejection_suppressed(call, now=NOW)
+
+
+@pytest.mark.usefixtures("suppression_settings")
 def test_call_fade_reject_blocks_put_same_symbol_not_other_strike():
     call = _candidate(80700, side=Side.CALL, symbol="SENSEX")
     put = _candidate(80700, side=Side.PUT, symbol="SENSEX")

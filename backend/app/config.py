@@ -2231,6 +2231,10 @@ class Settings(BaseSettings):
     index_lift_turn_block_call_min_pts_banknifty: float = 60.0
     index_lift_turn_min_mom5_pct: float = 0.02
     index_lift_turn_symbols_csv: str = "SENSEX,NIFTY,BANKNIFTY"
+    # Waive index lift-turn PE block when the PUT contract itself is ELITE/EXPLODING + hot v3.
+    index_lift_turn_option_rip_waiver_enabled: bool = True
+    index_lift_turn_option_rip_min_velocity_3s: float = 1.2
+    index_lift_turn_option_rip_tiers_csv: str = "ELITE,EXPLODING"
 
     # Loss-triggered opposite flip — same-side losses + index rally/slide + RSI/MACD → elite opposite
     loss_triggered_side_flip_enabled: bool = True
@@ -3282,9 +3286,9 @@ class Settings(BaseSettings):
     neutral_breadth_explosion_min_score: float = 55.0
     sensex_rank_bonus: float = 10.0
     nifty_rank_penalty_chop: float = 5.0
-    # Daily loss stop: pct of sizing capital (default 20% of ₹2L → ₹40k). Fixed INR used
+    # Daily loss stop: pct of sizing capital (default 35% of sizing book). Fixed INR used
     # only when daily_loss_stop_capital_pct <= 0. Halts new entries, not a loss target.
-    daily_loss_stop_capital_pct: float = 0.20
+    daily_loss_stop_capital_pct: float = 0.35
     daily_loss_stop_inr: float = 0.0
     daily_max_trades_chop: int = 20
     daily_max_trades_pre10_chop: int = 5

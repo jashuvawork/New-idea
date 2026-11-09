@@ -72,15 +72,16 @@ def suppress_after_preorder_rejection(
         return False
     current = now or datetime.now(IST)
     _roll_session(current)
+    settings = get_settings()
+    recorded = False
     seconds = max(
         0,
-        int(getattr(get_settings(), "preorder_rejection_suppression_seconds", 30) or 0),
+        int(getattr(settings, "preorder_rejection_suppression_seconds", 30) or 0),
     )
-    if seconds <= 0:
-        return False
-    _suppressed_until[_candidate_key(candidate)] = current + timedelta(seconds=seconds)
+    if seconds > 0:
+        _suppressed_until[_candidate_key(candidate)] = current + timedelta(seconds=seconds)
+        recorded = True
 
-    settings = get_settings()
     if bool(getattr(settings, "preorder_reject_opposite_side_suppression_enabled", True)):
         opp_seconds = max(
             0,
@@ -98,7 +99,8 @@ def suppress_after_preorder_rejection(
                 _symbol_opposite_suppressed_until[(sym, opp)] = current + timedelta(
                     seconds=opp_seconds,
                 )
-    return True
+                recorded = True
+    return recorded
 
 
 def candidate_preorder_rejection_suppressed(
@@ -138,6 +140,38 @@ def symbol_opposite_side_preorder_blocked(
     if until is None:
         return False, "ok"
     if current < until:
+        if side_value == "PUT":
+            from app.engines.index_lift_turn_guards import (
+                index_lift_turn_option_rip_waiver,
+            )
+
+            rip_ok, _, _ = index_lift_turn_option_rip_waiver(
+                Side.PUT,
+                explosion_event=getattr(candidate, "explosion_event", None),
+                alert=(
+                    candidate.alert
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else None
+                ),
+            )
+            if rip_ok:
+                return False, "ok"
+        elif side_value == "CALL":
+            from app.engines.index_lift_turn_guards import (
+                index_lift_turn_option_rip_waiver,
+            )
+
+            rip_ok, _, _ = index_lift_turn_option_rip_waiver(
+                Side.CALL,
+                explosion_event=getattr(candidate, "explosion_event", None),
+                alert=(
+                    candidate.alert
+                    if isinstance(getattr(candidate, "alert", None), dict)
+                    else None
+                ),
+            )
+            if rip_ok:
+                return False, "ok"
         other = _opposite_side(side_value)
         return True, f"preorder_opposite_side_after_{other.lower()}_fade_reject"
     _symbol_opposite_suppressed_until.pop((sym, side_value), None)

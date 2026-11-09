@@ -2058,6 +2058,7 @@ async def _open_from_candidate(
             )
             live_score_meta = {**live_score_meta, **live_gate_meta}
             if live_blocked:
+                _record_deferred_candidate_fallback(candidate, live_reason)
                 return False, live_reason
             trade_score = candidate_trade_score(candidate)
             if candidate.mode == "explosion" and candidate.explosion_event:
