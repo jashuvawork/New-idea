@@ -3258,6 +3258,15 @@ class Settings(BaseSettings):
     nifty_expiry_flip_capture_elite_tiers_csv: str = "ELITE,EXPLODING"
     nifty_expiry_flip_capture_waive_exec_premium_fade: bool = True
     nifty_expiry_flip_capture_premium_fade_floor_pct: float = -2.8
+    # Afternoon expiry: no shallow-fade waivers on side opposing dominant index trend (CE/PE).
+    nifty_expiry_afternoon_opposite_fade_suppress_enabled: bool = True
+    nifty_expiry_afternoon_opposite_fade_min_hour_ist: int = 11
+    nifty_expiry_afternoon_opposite_fade_min_minute_ist: int = 45
+    # 1m MTF fade relief on NIFTY expiry PUT when index slide unlock is armed (mirror of CE #924).
+    nifty_expiry_day_mtf_1m_fade_put_slide_enabled: bool = True
+    # Cheap OTM ₹18–80: allow only near-ATM when flip capture armed (not deep cheap strikes).
+    nifty_expiry_flip_cheap_otm_near_atm_bypass_enabled: bool = True
+    nifty_expiry_flip_cheap_otm_max_otm_steps: int = 1
     ce_cold_timing_chase_block_enabled: bool = False
     ce_cold_timing_max_local_base_pct: float = 10.0
     # Combined open setup (selector + pretrade + selective fade bypass).

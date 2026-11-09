@@ -1410,6 +1410,14 @@ def pe_win_ce_mirror_premium_fade_bypass(
         return False
     sym = str(symbol or (evidence or {}).get("symbol") or getattr(snap, "symbol", "") or "").upper()
     side_u = _side_val(side)
+    from app.engines.nifty_expiry_flip_capture import (
+        nifty_expiry_opposite_trend_fade_waiver_suppressed,
+    )
+
+    if snap is not None and nifty_expiry_opposite_trend_fade_waiver_suppressed(
+        sym, side_u, snap, state=state, settings=settings,
+    )[0]:
+        return False
     cont_ok, _, _ = session_win_side_continuation_ok(
         side_u, state, snap, sym, settings=settings,
     )

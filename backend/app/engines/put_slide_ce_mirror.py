@@ -701,6 +701,14 @@ def put_slide_premium_fade_bypass(
     if _side_val(side) != "PUT" or snap is None or state is None:
         return False
     sym = str(symbol or (evidence or {}).get("symbol") or getattr(snap, "symbol", "") or "").upper()
+    from app.engines.nifty_expiry_flip_capture import (
+        nifty_expiry_opposite_trend_fade_waiver_suppressed,
+    )
+
+    if nifty_expiry_opposite_trend_fade_waiver_suppressed(
+        sym, "PUT", snap, state=state, settings=settings,
+    )[0]:
+        return False
     ev = evidence or {}
     if bool(getattr(settings, "pe_slide_at_base_waive_mtf_premium_fade", True)):
         from app.engines.pe_slide_breakdown_timing import pe_at_armed_base_capture_ok
