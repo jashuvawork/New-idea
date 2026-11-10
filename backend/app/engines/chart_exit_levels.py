@@ -821,6 +821,14 @@ def compute_chart_exit_levels(
 
     stop_floor = _cfg_float(settings, "scalp_stop_min_points", 2.5)
     abs_max = _cfg_float(settings, "explosion_stop_abs_max_points", 40.0)
+    from app.engines.nifty_expiry_sensex_parity import (
+        resolve_nifty_expiry_stop_abs_max_points,
+    )
+
+    _sym = str(getattr(snap, "symbol", "") or "").upper()
+    _nifty_cap = resolve_nifty_expiry_stop_abs_max_points(_sym, snap, settings=settings)
+    if _nifty_cap is not None:
+        abs_max = min(abs_max, _nifty_cap)
     pct_cap = _cfg_float(settings, "explosion_stop_max_pct_of_premium", 0.18)
     # Local-support stops need room through the support level (old ×12% erased structure).
     if use_local and local_support_sl:
@@ -1107,10 +1115,16 @@ def compute_live_chart_trail_tuning(
             stop = floor
             sources.append(f"protect_natural_sl_{floor:.1f}")
         stop_cap = max(stop_cap, natural)
-    stop_cap = min(
-        stop_cap,
-        float(getattr(settings, "explosion_stop_abs_max_points", 40.0) or 40.0),
+    abs_max = float(getattr(settings, "explosion_stop_abs_max_points", 40.0) or 40.0)
+    from app.engines.nifty_expiry_sensex_parity import (
+        resolve_nifty_expiry_stop_abs_max_points,
     )
+
+    _sym = str(getattr(snap, "symbol", "") or "").upper()
+    _nifty_cap = resolve_nifty_expiry_stop_abs_max_points(_sym, snap, settings=settings)
+    if _nifty_cap is not None:
+        abs_max = min(abs_max, _nifty_cap)
+    stop_cap = min(stop_cap, abs_max)
     return ChartTrailTuning(
         liveConfidence=round(live_confidence, 1),
         entryConfidence=round(entry_confidence, 1),

@@ -65,8 +65,14 @@ def expiry_itm_max_steps() -> int:
 def resolve_expiry_itm_scan_range(symbol: str) -> float:
     """ATM ± range wide enough to cover expiry_max_itm_steps on both CE and PE."""
     settings = get_settings()
-    if symbol.upper() == "SENSEX":
+    sym = symbol.upper()
+    if sym == "SENSEX":
         return float(getattr(settings, "expiry_sensex_itm_scan_range", 1200) or 1200)
+    from app.engines.nifty_expiry_sensex_parity import resolve_nifty_expiry_itm_scan_range
+
+    nifty_range = resolve_nifty_expiry_itm_scan_range(sym, settings=settings)
+    if nifty_range is not None:
+        return nifty_range
     return float(getattr(settings, "expiry_itm_scan_range", 800) or 800)
 
 

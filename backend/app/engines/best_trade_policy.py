@@ -1219,7 +1219,12 @@ def _expiry_itm_atm_only_symbol(symbol: str, *, settings: Any = None) -> bool:
         or "SENSEX,BANKNIFTY"
     )
     allowed = {s.strip().upper() for s in csv.split(",") if s.strip()}
-    return str(symbol or "").upper() in allowed
+    sym = str(symbol or "").upper()
+    if sym in allowed:
+        return True
+    from app.engines.nifty_expiry_sensex_parity import nifty_expiry_itm_atm_only
+
+    return nifty_expiry_itm_atm_only(sym, settings=settings)
 
 
 def expiry_cheap_otm_entry_blocked(

@@ -224,6 +224,14 @@ def compute_adaptive_exit_plan(
         stop_abs_max = float(
             getattr(settings, "explosion_stop_abs_max_points", 40.0) or 40.0
         )
+        from app.engines.nifty_expiry_sensex_parity import (
+            resolve_nifty_expiry_stop_abs_max_points,
+        )
+
+        _sym = str(getattr(snap, "symbol", "") or "").upper()
+        nifty_cap = resolve_nifty_expiry_stop_abs_max_points(_sym, snap, settings=settings)
+        if nifty_cap is not None:
+            stop_abs_max = min(stop_abs_max, nifty_cap)
         stop_cap = min(stop_abs_max, max(12.0, premium * stop_cap_pct))
         natural_stop = round(min(stop_cap, max(stop_floor, stop)), 2)
     else:

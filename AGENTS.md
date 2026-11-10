@@ -141,6 +141,10 @@ Scheduled market monitors live in `.cursor/automations/` — enable those only v
 - `.env.example` ships the production path `TRADE_STORE_DIR=/opt/nexusquant/data/trades`, which is NOT writable in this VM and makes `/api/deployment/status` 500. If you create a `.env` from the example, override it to a writable path (the code default is fine): `TRADE_STORE_DIR=/tmp/nexusquant/trades`. Running with no `.env` at all also works because that default is already dev-safe.
 - Redis is optional: `redis_store.py` falls back to in-memory storage when Redis is unavailable, so no Redis server is needed for local dev. PostgreSQL is declared in deps but unused.
 
+### Production API burst (agents)
+
+Do **not** parallelize heavy read-only routes (`/api/ai/eod-trade-report/*`, `/api/ai/eod-local-base-replay/*`, `/api/ai/radar-scorecard/*`). One date at a time; `sleep` ≥2s between calls (`NQ_API_DELAY_S` in audit scripts). Prefer local premium-tape replay from cached `radar-YYYY-MM-DD.zip` when batching many sessions.
+
 ### Radar / EOD storage (analysis-only from Aug 26+)
 - Intraday telemetry lives under `{TRADE_STORE_DIR}/radar_archives/telemetry/` (`*.premium.jsonl`, `*.funnel.jsonl`).
 - At **16:00 IST finalize**, the daily ZIP (`radar-YYYY-MM-DD.zip`) keeps only what EOD replay needs: **premium tape**, **funnel events**, **scorecard**, and radar entries. Alerts tape and pipeline history are **not** stored by default.
