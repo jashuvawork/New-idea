@@ -90,13 +90,14 @@ def test_near_miss_waive_when_flip_armed():
 
 def test_afternoon_opposite_trend_suppresses_put_fade_waiver():
     settings = Settings()
+    afternoon = datetime.now(IST).replace(hour=14, minute=0, second=0, microsecond=0)
     snap = SymbolSnapshot(
         symbol="NIFTY",
-        timestamp=datetime.now(IST).replace(hour=14, minute=0).isoformat(),
+        timestamp=afternoon.isoformat(),
         marketPhase="LIVE_MARKET",
         spot=25300.0,
         dataAvailable=True,
-        optionExpiry=datetime.now(IST).strftime("%Y-%m-%d"),
+        optionExpiry=afternoon.strftime("%Y-%m-%d"),
     )
     with patch("app.engines.expiry_day_guards.is_symbol_expiry_day", return_value=True):
         with patch(
@@ -112,7 +113,12 @@ def test_afternoon_opposite_trend_suppresses_put_fade_waiver():
                 )
 
                 blocked, reason = nifty_expiry_opposite_trend_fade_waiver_suppressed(
-                    "NIFTY", Side.PUT, snap, state=object(),
+                    "NIFTY",
+                    Side.PUT,
+                    snap,
+                    state=object(),
+                    settings=settings,
+                    now=afternoon,
                 )
     assert blocked is True
     assert "rally" in reason.lower()
