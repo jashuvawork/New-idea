@@ -1999,7 +1999,15 @@ def ftv_direct_trade_active(
     if peak_move > max_peak + 1e-6:
         return False
 
-    min_prem = float(getattr(settings, "min_option_premium_inr", 18.0) or 18.0)
+    from app.engines.premium_filter import resolve_premium_band_limits
+
+    min_prem, _ = resolve_premium_band_limits(
+        mode="explosion",
+        peak_move_pct=peak_move,
+        snap=resolved_snap,
+        symbol=str(getattr(resolved_snap, "symbol", "") or ""),
+        settings=settings,
+    )
     if premium > 0 and premium < min_prem:
         return False
 
