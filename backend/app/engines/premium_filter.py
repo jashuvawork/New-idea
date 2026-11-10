@@ -31,6 +31,11 @@ def resolve_premium_band_limits(
     else:
         min_prem = float(getattr(settings, "min_option_premium_inr", 18.0) or 18.0)
         max_prem = float(getattr(settings, "max_option_premium_inr", 350.0) or 350.0)
+        from app.engines.nifty_expiry_sensex_parity import resolve_nifty_expiry_max_premium_inr
+
+        max_prem = resolve_nifty_expiry_max_premium_inr(
+            default_max=max_prem, snap=snap, settings=settings
+        )
         sensex_fixed_cap = False
         if mode == "explosion" and float(getattr(settings, "explosion_max_premium_inr", 0) or 0) > 0:
             max_prem = max(
