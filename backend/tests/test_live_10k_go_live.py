@@ -83,8 +83,8 @@ def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
         if "=" in line and not line.lstrip().startswith("#"):
             key, value = line.split("=", 1)
             values[key] = value
-    assert values["FALLBACK_CAPITAL_INR"] == "200000"
-    assert values["MAX_SIZING_CAPITAL_INR"] == "200000"
+    assert values["FALLBACK_CAPITAL_INR"] == "35000"
+    assert values["MAX_SIZING_CAPITAL_INR"] == "35000"
     assert values["DAILY_LOSS_STOP_CAPITAL_PCT"] == "0.35"
     assert values["DAILY_LOSS_STOP_INR"] == "0"
     assert values["EMERGENCY_STOP_INR"] == "20000"
