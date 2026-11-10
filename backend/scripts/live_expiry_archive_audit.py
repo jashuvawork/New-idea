@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import time
 import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -44,6 +46,8 @@ SENSEX_EXPIRY_HINTS = frozenset(
 
 
 def _get(api_base: str, path: str, timeout: float = 90.0) -> dict:
+    delay = float(os.environ.get("NQ_API_DELAY_S", "2.5"))
+    time.sleep(delay)
     try:
         with urllib.request.urlopen(f"{api_base.rstrip('/')}{path}", timeout=timeout) as r:
             return json.loads(r.read().decode())
