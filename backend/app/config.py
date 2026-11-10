@@ -585,7 +585,9 @@ class Settings(BaseSettings):
     # NIFTY expiry ↔ SENSEX expiry book (paper replay first — enable on EC2 paper before live).
     nifty_expiry_sensex_parity_enabled: bool = False
     nifty_expiry_itm_atm_only_enabled: bool = True
-    nifty_expiry_max_option_premium_inr: float = 650.0
+    # NIFTY expiry LTPs sit near strike (often <₹200) — not SENSEX-scale premiums; cap is headroom only.
+    nifty_expiry_max_option_premium_inr: float = 250.0
+    nifty_expiry_min_option_premium_inr: float = 10.0
     expiry_nifty_itm_scan_range: float = 1200.0
     nifty_expiry_stop_abs_max_points: float = 12.0
     # Allow Sep15-style mid-rip ELITE entries (deep ITM while expanding to top LTP).

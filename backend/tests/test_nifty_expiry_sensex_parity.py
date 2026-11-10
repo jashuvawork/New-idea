@@ -51,14 +51,34 @@ def test_nifty_expiry_blocks_all_otm_like_sensex(mock_today):
 
 
 @patch("app.engines.expiry_day_guards._today_str")
-def test_nifty_expiry_premium_cap_650(mock_today):
+def test_nifty_expiry_premium_near_strike_not_sensex_650(mock_today):
     mock_today.return_value = datetime.now(IST).strftime("%Y-%m-%d")
     s = settings_mock(nifty_expiry_sensex_parity_enabled=True)
     snap = _nifty_expiry_snap()
     lo, hi = resolve_premium_band_limits(snap=snap, settings=s)
-    assert hi == 650.0
+    assert hi == 350.0
     hi2 = resolve_nifty_expiry_max_premium_inr(default_max=350.0, snap=snap, settings=s)
-    assert hi2 == 650.0
+    assert hi2 == 350.0
+    lo_tight, hi_lift = resolve_premium_band_limits(
+        snap=snap,
+        settings=settings_mock(
+            nifty_expiry_sensex_parity_enabled=True,
+            max_option_premium_inr=175.0,
+        ),
+    )
+    assert hi_lift == 250.0
+    assert lo_tight == 10.0
+
+
+@patch("app.engines.expiry_day_guards._today_str")
+def test_nifty_expiry_premium_min_coil(mock_today):
+    mock_today.return_value = datetime.now(IST).strftime("%Y-%m-%d")
+    s = settings_mock(nifty_expiry_sensex_parity_enabled=True)
+    snap = _nifty_expiry_snap()
+    lo, _ = resolve_premium_band_limits(
+        mode="explosion", snap=snap, settings=s
+    )
+    assert lo <= 10.0
 
 
 def test_nifty_expiry_scan_range_1200():
