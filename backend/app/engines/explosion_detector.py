@@ -1978,6 +1978,7 @@ def _premium_ok_for_scan(
     open_move: float,
     settings,
     *,
+    symbol: str = "",
     expiry_day: bool = False,
     moneyness: str = "",
     open_window: bool = False,
@@ -1991,7 +1992,14 @@ def _premium_ok_for_scan(
     deep-OTM noise must not dominate radar over near-base ATM/ITM.
     """
     lift = max(open_move, peak_move, float(trough_off_low or 0))
-    if premium_in_band(premium, mode="explosion", peak_move_pct=lift):
+    sym = str(symbol or "").upper()
+    if premium_in_band(
+        premium,
+        mode="explosion",
+        peak_move_pct=lift,
+        symbol=sym or None,
+        expiry_day_hint=bool(expiry_day and sym == "NIFTY"),
+    ):
         return True
     if open_window and expiry_day and near_atm:
         floor = float(
@@ -2433,6 +2441,7 @@ def scan_chain_explosions(
                 premium,
                 scan_lift,
                 settings,
+                symbol=symbol,
                 expiry_day=expiry_day,
                 moneyness=money,
                 open_window=open_window,

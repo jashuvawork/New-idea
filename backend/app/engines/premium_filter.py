@@ -19,6 +19,7 @@ def resolve_premium_band_limits(
     peak_move_pct: float = 0.0,
     snap: Any = None,
     symbol: str | None = None,
+    expiry_day_hint: bool = False,
     settings: Any = None,
 ) -> tuple[float, float]:
     """Return (min_premium_inr, max_premium_inr) for symbol and mode."""
@@ -37,10 +38,18 @@ def resolve_premium_band_limits(
         )
 
         max_prem = resolve_nifty_expiry_max_premium_inr(
-            default_max=max_prem, snap=snap, settings=settings
+            default_max=max_prem,
+            snap=snap,
+            symbol=sym,
+            force_expiry_day=expiry_day_hint and sym == "NIFTY",
+            settings=settings,
         )
         min_prem = resolve_nifty_expiry_min_premium_inr(
-            default_min=min_prem, snap=snap, settings=settings
+            default_min=min_prem,
+            snap=snap,
+            symbol=sym,
+            force_expiry_day=expiry_day_hint and sym == "NIFTY",
+            settings=settings,
         )
         sensex_fixed_cap = False
         if mode == "explosion" and float(getattr(settings, "explosion_max_premium_inr", 0) or 0) > 0:
@@ -106,6 +115,7 @@ def premium_in_band(
     peak_move_pct: float = 0.0,
     snap: Any = None,
     symbol: str | None = None,
+    expiry_day_hint: bool = False,
     settings: Any = None,
 ) -> bool:
     """True when option LTP is within configured tradeable band."""
@@ -116,6 +126,7 @@ def premium_in_band(
         peak_move_pct=peak_move_pct,
         snap=snap,
         symbol=symbol,
+        expiry_day_hint=expiry_day_hint,
         settings=settings,
     )
     return min_prem <= premium <= max_prem

@@ -30,19 +30,42 @@ def nifty_expiry_itm_atm_only(symbol: str, *, settings: Any = None) -> bool:
     return bool(getattr(settings, "nifty_expiry_itm_atm_only_enabled", True))
 
 
+def _nifty_expiry_active(
+    *,
+    snap: Any = None,
+    symbol: str | None = None,
+    force_expiry_day: bool = False,
+    settings: Any = None,
+) -> bool:
+    if not nifty_expiry_sensex_parity_enabled(settings):
+        return False
+    sym = str(symbol or getattr(snap, "symbol", "") or "").upper()
+    if sym != "NIFTY":
+        return False
+    if force_expiry_day:
+        return True
+    if snap is None:
+        return False
+    from app.engines.expiry_day_guards import is_symbol_expiry_day
+
+    return is_symbol_expiry_day(snap)
+
+
 def resolve_nifty_expiry_max_premium_inr(
     *,
     default_max: float,
     snap: Any = None,
+    symbol: str | None = None,
+    force_expiry_day: bool = False,
     settings: Any = None,
 ) -> float:
     """Near-strike expiry book — do not copy SENSEX ₹650; typical NIFTY LTP is <₹200."""
-    if snap is None or not nifty_expiry_sensex_parity_enabled(settings):
-        return default_max
-    from app.engines.expiry_day_guards import is_symbol_expiry_day
-
-    sym = str(getattr(snap, "symbol", "") or "").upper()
-    if sym != "NIFTY" or not is_symbol_expiry_day(snap):
+    if not _nifty_expiry_active(
+        snap=snap,
+        symbol=symbol,
+        force_expiry_day=force_expiry_day,
+        settings=settings,
+    ):
         return default_max
     from app.config import get_settings
 
@@ -62,15 +85,17 @@ def resolve_nifty_expiry_min_premium_inr(
     *,
     default_min: float,
     snap: Any = None,
+    symbol: str | None = None,
+    force_expiry_day: bool = False,
     settings: Any = None,
 ) -> float:
     """Allow sub-₹18 coil near base on expiry (e.g. 15→103 CE) when parity replaces cheap OTM."""
-    if snap is None or not nifty_expiry_sensex_parity_enabled(settings):
-        return default_min
-    from app.engines.expiry_day_guards import is_symbol_expiry_day
-
-    sym = str(getattr(snap, "symbol", "") or "").upper()
-    if sym != "NIFTY" or not is_symbol_expiry_day(snap):
+    if not _nifty_expiry_active(
+        snap=snap,
+        symbol=symbol,
+        force_expiry_day=force_expiry_day,
+        settings=settings,
+    ):
         return default_min
     from app.config import get_settings
 
