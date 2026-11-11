@@ -650,6 +650,48 @@ def _uses_paper_live_parity(settings) -> bool:
     )
 
 
+def _exec_premium_fade_funnel_fields(chart_meta: Optional[dict]) -> dict[str, Any]:
+    """Premium momentum at exec-chart reject — EOD funnel RCA for fade blocks."""
+    if not chart_meta:
+        return {}
+    prem = chart_meta.get("premiumChart") or {}
+    fields: dict[str, Any] = {}
+    mom3 = chart_meta.get("premiumMomentum3Pct")
+    mom5 = chart_meta.get("premiumMomentum5Pct")
+    if mom3 is None and prem:
+        mom3 = prem.get("momentum3Pct")
+    if mom5 is None and prem:
+        mom5 = prem.get("momentum5Pct")
+    if mom3 is not None:
+        fields["premiumMomentum3Pct"] = float(mom3)
+    if mom5 is not None:
+        fields["momentum5Pct"] = float(mom5)
+    direction = chart_meta.get("premiumDirection") or prem.get("direction")
+    if direction:
+        fields["premiumDirection"] = str(direction)
+    if chart_meta.get("indexTurnExecFadeBypass") is not None:
+        fields["indexTurnExecFadeBypass"] = bool(chart_meta.get("indexTurnExecFadeBypass"))
+    if chart_meta.get("indexTurnExecFade"):
+        fields["indexTurnExecFade"] = chart_meta.get("indexTurnExecFade")
+    return fields
+
+
+def _stash_exec_chart_reject_telemetry(
+    candidate: EntryCandidate,
+    chart_meta: Optional[dict],
+    reason: str,
+) -> None:
+    r = str(reason or "")
+    if "premium_fading" not in r and "premium_chart_fading" not in r:
+        return
+    payload = _exec_premium_fade_funnel_fields(chart_meta)
+    if not payload:
+        return
+    base = dict(candidate.pretrade_meta or {})
+    base["execChartReject"] = {**payload, "reason": r}
+    candidate.pretrade_meta = base
+
+
 def _record_deferred_candidate_fallback(
     candidate: EntryCandidate,
     reason: str,
@@ -2039,6 +2081,7 @@ async def _open_from_candidate(
             )
             if not chart_ok:
                 # This is structurally before place_entry_order/simulate_entry_order.
+                _stash_exec_chart_reject_telemetry(candidate, chart_meta, chart_reason)
                 _record_deferred_candidate_fallback(candidate, chart_reason)
                 return False, chart_reason
             prem_chart_obj = None
@@ -5168,7 +5211,7 @@ async def _process_locked(
                         record_post_win_afternoon_trap_reject(
                             best, reason=reason,
                         )
-                        await _record_funnel_event_safe({
+                        reject_evt: dict[str, Any] = {
                             "event": "ORDER_REJECTED",
                             "key": radar_key,
                             "symbol": best.symbol.upper(),
@@ -5179,7 +5222,21 @@ async def _process_locked(
                             "reason": reason,
                             "selectionMode": best.mode,
                             "selectionScore": best.score,
-                        })
+                        }
+                        _pre = getattr(best, "pretrade_meta", None) or {}
+                        _exec_reject = _pre.get("execChartReject") or {}
+                        if _exec_reject and (
+                            "premium_fading" in str(reason or "")
+                            or "premium_chart_fading" in str(reason or "")
+                        ):
+                            reject_evt.update(
+                                {
+                                    k: v
+                                    for k, v in _exec_reject.items()
+                                    if k != "reason"
+                                }
+                            )
+                        await _record_funnel_event_safe(reject_evt)
                         from app.services.operator_event_log import append_operator_event
 
                         append_operator_event(

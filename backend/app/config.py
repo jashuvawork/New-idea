@@ -2246,6 +2246,11 @@ class Settings(BaseSettings):
     index_lift_turn_option_rip_waiver_enabled: bool = True
     index_lift_turn_option_rip_min_velocity_3s: float = 1.2
     index_lift_turn_option_rip_tiers_csv: str = "ELITE,EXPLODING"
+    # Exec chart: 1m premium mom5 can lag a 5m V-turn; waive shallow fade when index turn
+    # confirms side (PUT + slide off high, CALL + rally off low) for ELITE/EXPLODING.
+    index_turn_exec_fade_waiver_enabled: bool = True
+    index_turn_exec_fade_waiver_tiers_csv: str = "ELITE,EXPLODING"
+    index_turn_exec_fade_waiver_shallow_mom3_pct: float = -0.35
 
     # Loss-triggered opposite flip — same-side losses + index rally/slide + RSI/MACD → elite opposite
     loss_triggered_side_flip_enabled: bool = True

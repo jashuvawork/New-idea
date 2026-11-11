@@ -7,6 +7,7 @@ from app.engines.index_lift_turn_guards import (
     index_lift_turn_option_rip_waiver,
     index_session_rally_turn_active,
     index_session_slide_turn_active,
+    index_turn_exec_premium_fade_waiver_active,
 )
 from app.models.schemas import MarketProfile, Side, SpotChart, SymbolSnapshot
 
@@ -145,6 +146,37 @@ def test_slide_turn_blocks_call_mirror(mock_metrics):
     assert call_blocked is True
     assert call_reason == "index_lift_turn_blocks_call"
     assert put_blocked is False
+
+
+@patch("app.engines.index_lift_turn_guards.index_session_slide_turn_active")
+def test_exec_fade_waiver_puts_on_slide_turn(mock_slide):
+    mock_slide.return_value = (True, {"slidePoints": 95.0})
+    event = MagicMock()
+    event.tier = "ELITE"
+    active, meta = index_turn_exec_premium_fade_waiver_active(
+        "SENSEX",
+        Side.PUT,
+        _snap(mom5=-0.08),
+        explosion_event=event,
+    )
+    assert active is True
+    assert meta.get("waiver") == "index_turn_exec_fade"
+    assert meta.get("mode") == "index_session_slide_turn"
+
+
+@patch("app.engines.index_lift_turn_guards.index_session_rally_turn_active")
+def test_exec_fade_waiver_calls_on_rally_turn(mock_rally):
+    mock_rally.return_value = (True, {"rallyPoints": 110.0})
+    event = MagicMock()
+    event.tier = "EXPLODING"
+    active, meta = index_turn_exec_premium_fade_waiver_active(
+        "SENSEX",
+        Side.CALL,
+        _snap(),
+        explosion_event=event,
+    )
+    assert active is True
+    assert meta.get("mode") == "index_session_rally_turn"
 
 
 def test_option_rip_waiver_requires_tier_and_velocity():

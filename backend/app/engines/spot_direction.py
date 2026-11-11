@@ -965,6 +965,7 @@ def premium_blocks_entry(
     building_rip_bypass: bool = False,
     open_caution_bypass: bool = False,
     nifty_expiry_flip_bypass: bool = False,
+    index_turn_fade_bypass: bool = False,
 ) -> tuple[bool, str]:
     """Block when option premium is fading at execution — bad fill timing."""
     settings = get_settings()
@@ -990,6 +991,7 @@ def premium_blocks_entry(
         building_rip_bypass=building_rip_bypass,
         open_caution_bypass=open_caution_bypass,
         nifty_expiry_flip_bypass=nifty_expiry_flip_bypass,
+        index_turn_fade_bypass=index_turn_fade_bypass,
     )
 
 
