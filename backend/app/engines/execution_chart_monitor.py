@@ -25,6 +25,7 @@ from app.engines.spot_direction import (
     side_aligned_with_chart,
 )
 from app.models.schemas import PremiumChart, Side, SpotChart, SymbolSnapshot
+from app.engines.index_lift_turn_guards import index_turn_exec_premium_fade_waiver_active
 from app.services.upstox import INDEX_KEYS, UpstoxClient
 
 logger = logging.getLogger(__name__)
@@ -251,21 +252,29 @@ def validate_execution_charts(
     index_anchor_htf_bypass: bool = False,
     nifty_expiry_1m_relief: bool = False,
     nifty_expiry_flip_bypass: bool = False,
+    index_turn_fade_bypass: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
     scalp_mode = _is_scalp_mode(mode)
+    # Index V-turn aligned with side: CE rally / PE slide may still show stale 5m BULLISH/BEARISH.
+    chart_turn_bypass = bool(index_turn_fade_bypass)
+    led_bypass = (
+        premium_led_bypass
+        or vertical_rip_bypass
+        or first_lift_bypass
+        or chart_turn_bypass
+    )
 
     blocked, reason = live_direction_blocks_side(
         side,
         index_chart,
         breadth_aligned_bypass=breadth_aligned_bypass,
-        premium_led_bypass=(
-            premium_led_bypass or vertical_rip_bypass or first_lift_bypass
-        ),
+        premium_led_bypass=led_bypass,
         expiry_explosion_bypass=expiry_explosion_bypass,
         strict_first_lift_bypass=first_lift_bypass,
         index_trough_bypass=index_trough_bypass,
+        index_turn_bypass=chart_turn_bypass,
         scalp_mode=scalp_mode,
     )
     if blocked:
@@ -274,12 +283,11 @@ def validate_execution_charts(
     blocked, reason = chart_blocks_side(
         side, index_chart, trade_score=trade_score,
         breadth_aligned_bypass=breadth_aligned_bypass,
-        premium_led_bypass=(
-            premium_led_bypass or vertical_rip_bypass or first_lift_bypass
-        ),
+        premium_led_bypass=led_bypass,
         expiry_explosion_bypass=expiry_explosion_bypass,
         strict_first_lift_bypass=first_lift_bypass,
         index_trough_bypass=index_trough_bypass,
+        index_turn_bypass=chart_turn_bypass,
         scalp_mode=scalp_mode,
     )
     if blocked:
@@ -301,6 +309,7 @@ def validate_execution_charts(
         building_rip_bypass=building_rip_bypass,
         open_caution_bypass=open_caution_bypass,
         nifty_expiry_flip_bypass=nifty_expiry_flip_bypass,
+        index_turn_fade_bypass=index_turn_fade_bypass,
     )
     if blocked:
         return False, f"exec_{reason}", mtf_meta
@@ -760,6 +769,16 @@ async def monitor_trade_chart_before_execution(
         settings=settings,
     )
 
+    index_turn_fade_bypass = False
+    index_turn_fade_meta: dict[str, Any] = {}
+    index_turn_fade_bypass, index_turn_fade_meta = index_turn_exec_premium_fade_waiver_active(
+        symbol,
+        side,
+        live_snap,
+        explosion_event=explosion_event,
+        settings=settings,
+    )
+
     passed, reason, mtf_meta = validate_execution_charts(
         side,
         index_chart,
@@ -785,6 +804,7 @@ async def monitor_trade_chart_before_execution(
         index_anchor_htf_bypass=index_anchor_htf_bypass,
         nifty_expiry_1m_relief=nifty_expiry_1m_relief,
         nifty_expiry_flip_bypass=nifty_expiry_flip_bypass,
+        index_turn_fade_bypass=index_turn_fade_bypass,
     )
     if mtf_meta:
         meta["mtfPreTest"] = mtf_meta
@@ -803,6 +823,13 @@ async def monitor_trade_chart_before_execution(
     meta["indexTroughBypass"] = index_trough_bypass
     meta["niftyExpiry1mFadeRelief"] = nifty_expiry_1m_relief
     meta["niftyExpiryFlipCaptureFadeBypass"] = nifty_expiry_flip_bypass
+    meta["indexTurnExecFadeBypass"] = index_turn_fade_bypass
+    if index_turn_fade_meta:
+        meta["indexTurnExecFade"] = index_turn_fade_meta
+    if premium_chart is not None:
+        meta["premiumMomentum3Pct"] = float(getattr(premium_chart, "momentum3Pct", 0) or 0)
+        meta["premiumMomentum5Pct"] = float(getattr(premium_chart, "momentum5Pct", 0) or 0)
+        meta["premiumDirection"] = str(getattr(premium_chart, "direction", "") or "")
 
     delta = meta.get("snapshotDelta") or {}
     if delta.get("directionChanged"):

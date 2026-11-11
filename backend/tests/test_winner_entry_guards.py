@@ -136,6 +136,70 @@ def test_shallow_dip_still_blocks_without_ftv_bypass(mock_settings):
 
 
 @patch("app.engines.winner_entry_guards.get_settings")
+def test_index_turn_bypass_allows_bullish_premium_on_shallow_mom5_fade(mock_settings):
+    """Index slide-turn PUT: 1m mom5 dip with bullish premium still fills (11-Nov noon miss)."""
+    s = MagicMock()
+    s.execution_chart_premium_check_enabled = True
+    s.all_day_explosion_extreme_move_min_pct = 80.0
+    s.execution_chart_min_premium_momentum_pct = -0.15
+    s.index_turn_exec_fade_waiver_shallow_mom3_pct = -0.35
+    mock_settings.return_value = s
+
+    blocked, reason = premium_fading_blocks_entry(
+        trade_score=90.0,
+        premium_momentum_3s=-0.12,
+        premium_momentum_5s=-0.20,
+        premium_direction="BULLISH",
+        explosion_event=_event(daily_move=12.0, tier="ELITE"),
+        index_turn_fade_bypass=True,
+    )
+    assert not blocked
+    assert reason == "index_turn_premium_rip_ok"
+
+
+@patch("app.engines.winner_entry_guards.get_settings")
+def test_index_turn_bypass_shallow_mom3_only(mock_settings):
+    s = MagicMock()
+    s.execution_chart_premium_check_enabled = True
+    s.all_day_explosion_extreme_move_min_pct = 80.0
+    s.execution_chart_min_premium_momentum_pct = -0.15
+    s.index_turn_exec_fade_waiver_shallow_mom3_pct = -0.35
+    mock_settings.return_value = s
+
+    blocked, reason = premium_fading_blocks_entry(
+        trade_score=90.0,
+        premium_momentum_3s=-0.28,
+        premium_momentum_5s=-0.20,
+        premium_direction="NEUTRAL",
+        explosion_event=_event(daily_move=12.0, tier="ELITE"),
+        index_turn_fade_bypass=True,
+    )
+    assert not blocked
+    assert reason == "index_turn_shallow_fade_ok"
+
+
+@patch("app.engines.winner_entry_guards.get_settings")
+def test_index_turn_bypass_still_blocks_deep_fade(mock_settings):
+    s = MagicMock()
+    s.execution_chart_premium_check_enabled = True
+    s.all_day_explosion_extreme_move_min_pct = 80.0
+    s.execution_chart_min_premium_momentum_pct = -0.15
+    s.index_turn_exec_fade_waiver_shallow_mom3_pct = -0.35
+    mock_settings.return_value = s
+
+    blocked, reason = premium_fading_blocks_entry(
+        trade_score=90.0,
+        premium_momentum_3s=-0.55,
+        premium_momentum_5s=-0.80,
+        premium_direction="BEARISH",
+        explosion_event=_event(daily_move=12.0, tier="ELITE"),
+        index_turn_fade_bypass=True,
+    )
+    assert blocked
+    assert reason == "premium_fading_at_execution"
+
+
+@patch("app.engines.winner_entry_guards.get_settings")
 def test_ftv_fade_fill_only_for_elite_exploding(mock_settings):
     """The shallow-fade bypass is restricted to ELITE/EXPLODING events."""
     s = MagicMock()

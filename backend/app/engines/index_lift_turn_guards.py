@@ -263,3 +263,54 @@ def index_lift_turn_blocks_side(
         if active:
             return True, "index_lift_turn_blocks_call", meta
     return False, "ok", {}
+
+
+def index_turn_exec_premium_fade_waiver_active(
+    symbol: str,
+    side: Side | str,
+    snap: SymbolSnapshot,
+    *,
+    explosion_event: Any = None,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """
+  Allow shallow 1m premium-fade exec fills when index V-turn matches entry side.
+
+  PUT: slide off session high (PE slide day). CALL: rally off session low.
+  Does not bypass counter-trend entries — only mirrors turn direction.
+  """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "index_turn_exec_fade_waiver_enabled", True)):
+        return False, {}
+    sym = str(symbol or getattr(snap, "symbol", "") or "").upper()
+    allowed = {
+        s.strip().upper()
+        for s in str(
+            getattr(settings, "index_lift_turn_symbols_csv", "SENSEX,NIFTY,BANKNIFTY") or ""
+        ).split(",")
+        if s.strip()
+    }
+    if allowed and sym not in allowed:
+        return False, {}
+    tier_u = str(getattr(explosion_event, "tier", "") or "").upper()
+    allowed_tiers = {
+        t.strip().upper()
+        for t in str(
+            getattr(settings, "index_turn_exec_fade_waiver_tiers_csv", "ELITE,EXPLODING") or ""
+        ).split(",")
+        if t.strip()
+    }
+    if tier_u not in allowed_tiers:
+        return False, {}
+    side_v = _side_val(side)
+    if side_v == "PUT":
+        active, meta = index_session_slide_turn_active(sym, snap, settings=settings)
+        mode = "index_session_slide_turn"
+    elif side_v == "CALL":
+        active, meta = index_session_rally_turn_active(sym, snap, settings=settings)
+        mode = "index_session_rally_turn"
+    else:
+        return False, {}
+    if not active:
+        return False, {}
+    return True, {**meta, "waiver": "index_turn_exec_fade", "mode": mode, "tier": tier_u}

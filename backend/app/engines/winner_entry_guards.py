@@ -24,6 +24,7 @@ def premium_fading_blocks_entry(
     building_rip_bypass: bool = False,
     open_caution_bypass: bool = False,
     nifty_expiry_flip_bypass: bool = False,
+    index_turn_fade_bypass: bool = False,
 ) -> tuple[bool, str]:
     """
     Block entries when option premium is fading at execution.
@@ -137,6 +138,16 @@ def premium_fading_blocks_entry(
         )
         if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
             return False, "nifty_expiry_flip_shallow_fade_ok"
+
+    if index_turn_fade_bypass and tier in ("ELITE", "EXPLODING"):
+        shallow_mom3 = float(
+            getattr(settings, "index_turn_exec_fade_waiver_shallow_mom3_pct", -0.35) or -0.35
+        )
+        prem_dir = str(premium_direction or "").upper()
+        if prem_dir == "BULLISH":
+            return False, "index_turn_premium_rip_ok"
+        if premium_momentum_3s >= shallow_mom3:
+            return False, "index_turn_shallow_fade_ok"
 
     min_mom = settings.execution_chart_min_premium_momentum_pct
     if premium_momentum_5s < min_mom and premium_momentum_3s < 0:
