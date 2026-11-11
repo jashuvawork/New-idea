@@ -325,6 +325,31 @@ def _premium_htf_oppose_allows_entry(
     return True, "ok"
 
 
+def _index_turn_mtf_premium_shallow_ok(
+    pt: Optional[TimeframeChartRead],
+    settings: Any,
+    *,
+    premium_mtf: Optional[dict[str, TimeframeChartRead]] = None,
+    timeframe: str = "",
+) -> bool:
+    """Last slide dip on 5m before bounce — same floor as index-turn 1m exec fade."""
+    if pt is None:
+        return True
+    if (
+        timeframe == "5m"
+        and premium_mtf
+        and str((premium_mtf.get("1m") or TimeframeChartRead(label="1m")).direction or "").upper()
+        == "BULLISH"
+    ):
+        return True
+    shallow = float(
+        getattr(settings, "index_turn_exec_fade_waiver_shallow_mom3_pct", -0.35) or -0.35
+    )
+    if str(pt.direction or "").upper() == "BULLISH":
+        return True
+    return float(pt.momentumPct or 0) >= shallow
+
+
 def _premium_mtf_fade_threshold(
     settings: Any,
     *,
@@ -355,6 +380,7 @@ def validate_mtf_scalp(
     open_setup_fade_bypass: bool = False,
     index_anchor_htf_bypass: bool = False,
     nifty_expiry_1m_relief: bool = False,
+    index_turn_fade_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
@@ -374,6 +400,7 @@ def validate_mtf_scalp(
         or first_lift_bypass
         or pad_lane_bypass
         or open_setup_fade_bypass
+        or index_turn_fade_bypass
     ):
         meta = {
             "index": mtf_summary(index_mtf, side),
@@ -383,6 +410,7 @@ def validate_mtf_scalp(
             "firstLiftBypass": first_lift_bypass,
             "padLaneBypass": pad_lane_bypass,
             "openSetupFadeBypass": open_setup_fade_bypass,
+            "indexTurnFadeBypass": index_turn_fade_bypass,
             # open-gap ELITE also arrives via premium_led_bypass from execution monitor
             "openGapEliteBypass": bool(premium_led_bypass or vertical_rip_bypass),
         }
@@ -403,6 +431,13 @@ def validate_mtf_scalp(
                     nifty_expiry_1m_relief=nifty_expiry_1m_relief,
                 )
                 if pt and pt.direction == "BEARISH" and pt.momentumPct < thresh:
+                    if index_turn_fade_bypass and _index_turn_mtf_premium_shallow_ok(
+                        pt,
+                        settings,
+                        premium_mtf=premium_mtf,
+                        timeframe=req,
+                    ):
+                        continue
                     meta["passed"] = False
                     return False, f"exec_mtf_premium_{req}_fading", meta
         if premium_mtf and settings.execution_chart_premium_check_enabled and (
@@ -434,7 +469,7 @@ def validate_mtf_scalp(
             settings,
             vertical_rip_bypass=vertical_rip_bypass,
             first_lift_bypass=first_lift_bypass,
-            premium_led_bypass=premium_led_bypass,
+            premium_led_bypass=premium_led_bypass or index_turn_fade_bypass,
             index_anchor_htf_bypass=index_anchor_htf_bypass,
         )
         if not htf_ok:
@@ -505,6 +540,13 @@ def validate_mtf_scalp(
                 nifty_expiry_1m_relief=nifty_expiry_1m_relief,
             )
             if pt and pt.direction == "BEARISH" and pt.momentumPct < thresh:
+                if index_turn_fade_bypass and _index_turn_mtf_premium_shallow_ok(
+                    pt,
+                    settings,
+                    premium_mtf=premium_mtf,
+                    timeframe=req,
+                ):
+                    continue
                 meta["passed"] = False
                 return False, f"exec_mtf_premium_{req}_fading", meta
     if nifty_expiry_1m_relief:
