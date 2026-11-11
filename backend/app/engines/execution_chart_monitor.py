@@ -257,17 +257,24 @@ def validate_execution_charts(
     """Final chart gate — 1m index + MTF scalp pre-test + premium."""
     mtf_meta: dict[str, Any] = {}
     scalp_mode = _is_scalp_mode(mode)
+    # Index V-turn aligned with side: CE rally / PE slide may still show stale 5m BULLISH/BEARISH.
+    chart_turn_bypass = bool(index_turn_fade_bypass)
+    led_bypass = (
+        premium_led_bypass
+        or vertical_rip_bypass
+        or first_lift_bypass
+        or chart_turn_bypass
+    )
 
     blocked, reason = live_direction_blocks_side(
         side,
         index_chart,
         breadth_aligned_bypass=breadth_aligned_bypass,
-        premium_led_bypass=(
-            premium_led_bypass or vertical_rip_bypass or first_lift_bypass
-        ),
+        premium_led_bypass=led_bypass,
         expiry_explosion_bypass=expiry_explosion_bypass,
         strict_first_lift_bypass=first_lift_bypass,
         index_trough_bypass=index_trough_bypass,
+        index_turn_bypass=chart_turn_bypass,
         scalp_mode=scalp_mode,
     )
     if blocked:
@@ -276,12 +283,11 @@ def validate_execution_charts(
     blocked, reason = chart_blocks_side(
         side, index_chart, trade_score=trade_score,
         breadth_aligned_bypass=breadth_aligned_bypass,
-        premium_led_bypass=(
-            premium_led_bypass or vertical_rip_bypass or first_lift_bypass
-        ),
+        premium_led_bypass=led_bypass,
         expiry_explosion_bypass=expiry_explosion_bypass,
         strict_first_lift_bypass=first_lift_bypass,
         index_trough_bypass=index_trough_bypass,
+        index_turn_bypass=chart_turn_bypass,
         scalp_mode=scalp_mode,
     )
     if blocked:

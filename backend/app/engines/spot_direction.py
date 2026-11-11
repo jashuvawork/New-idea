@@ -682,6 +682,7 @@ def live_direction_blocks_side(
     expiry_explosion_bypass: bool = False,
     strict_first_lift_bypass: bool = False,
     index_trough_bypass: bool = False,
+    index_turn_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str]:
     """
@@ -705,12 +706,14 @@ def live_direction_blocks_side(
             or premium_led_bypass
             or strict_first_lift_bypass
             or index_trough_bypass
+            or index_turn_bypass
         )
     if (
         bypass
         and _counter_trend_bypass_blocked(side_val, chart)
         and not strict_first_lift_bypass
         and not index_trough_bypass
+        and not index_turn_bypass
     ):
         bypass = False
 
@@ -736,6 +739,7 @@ def chart_blocks_side(
     expiry_explosion_bypass: bool = False,
     strict_first_lift_bypass: bool = False,
     index_trough_bypass: bool = False,
+    index_turn_bypass: bool = False,
     scalp_mode: bool = False,
 ) -> tuple[bool, str]:
     settings = get_settings()
@@ -755,6 +759,7 @@ def chart_blocks_side(
         expiry_explosion_bypass=expiry_explosion_bypass,
         strict_first_lift_bypass=strict_first_lift_bypass,
         index_trough_bypass=index_trough_bypass,
+        index_turn_bypass=index_turn_bypass,
         scalp_mode=scalp_mode,
     )
     if live_blocked:
@@ -766,6 +771,7 @@ def chart_blocks_side(
         _counter_trend_bypass_blocked(side_val, chart)
         and not strict_first_lift_bypass
         and not index_trough_bypass
+        and not index_turn_bypass
     )
     if side_val == "CALL" and chart.direction == "BEARISH" and chart.trendStrength >= min_strength:
         if (
@@ -775,6 +781,7 @@ def chart_blocks_side(
                 or premium_led_bypass
                 or expiry_explosion_bypass
                 or index_trough_bypass
+                or index_turn_bypass
             )
         ):
             return False, "ok"
@@ -787,6 +794,7 @@ def chart_blocks_side(
                 or premium_led_bypass
                 or expiry_explosion_bypass
                 or index_trough_bypass
+                or index_turn_bypass
             )
         ):
             return False, "ok"

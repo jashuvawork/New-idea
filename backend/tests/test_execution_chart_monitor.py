@@ -89,6 +89,28 @@ def test_validate_execution_blocks_scalp_call_on_weak_bearish_with_elite_score()
     assert reason == "exec_chart_live_bearish_no_calls"
 
 
+def test_index_turn_bypass_clears_live_bullish_no_puts():
+    """PE slide-turn ELITE: stale 5m BULLISH must not block when turn bypass is armed."""
+    chart = SpotChart(
+        direction="BULLISH",
+        momentum5Pct=0.02,
+        momentum15Pct=-0.01,
+        trendStrength=35,
+    )
+    premium = PremiumChart(direction="BULLISH", momentum5Pct=0.08, momentum3Pct=0.04)
+    event = SimpleNamespace(tier="ELITE", daily_move_pct=12.0)
+    ok, reason, _ = validate_execution_charts(
+        Side.PUT,
+        chart,
+        premium_chart=premium,
+        trade_score=200.0,
+        explosion_event=event,
+        index_turn_fade_bypass=True,
+    )
+    assert ok is True
+    assert reason == "ok"
+
+
 def test_validate_execution_blocks_fading_premium():
     index = SpotChart(direction="NEUTRAL", momentum5Pct=0.01, momentum15Pct=0.0, trendStrength=10)
     premium = PremiumChart(direction="BEARISH", momentum5Pct=-0.5, momentum3Pct=-0.3)
