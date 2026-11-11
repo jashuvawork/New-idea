@@ -886,6 +886,89 @@ def get_capital_snapshot() -> CapitalSnapshot:
     return _build_fallback_capital_snapshot()
 
 
+def _capital_tier_entries_enabled(settings: Any) -> bool:
+    """Only explicit ``True`` arms tiering (MagicMock attrs are otherwise truthy)."""
+    return getattr(settings, "capital_tier_entry_symbols_enabled", False) is True
+
+
+def expiry_index_priority_suppressed(settings: Any | None = None) -> bool:
+    """
+    When the capital book is at/below ``capital_tier_nifty_min_inr``, do not apply
+    cross-index / open-lane expiry priority (NIFTY-first on Tue, etc.) — only the
+    tier-allowed symbols (default SENSEX) trade with legacy per-index lanes.
+    """
+    settings = settings or get_settings()
+    if not _capital_tier_entries_enabled(settings):
+        return False
+    threshold = float(getattr(settings, "capital_tier_nifty_min_inr", 200_000) or 200_000)
+    return entry_capital_book_inr(settings) <= threshold
+
+
+def entry_capital_book_inr(settings: Any | None = None) -> float:
+    """Capital book used for tiered index entry policy (sizing snapshot, not open MTM)."""
+    settings = settings or get_settings()
+    snap = get_capital_snapshot()
+    book = float(snap.availableMarginInr or snap.totalEquityInr or 0)
+    if book > 0:
+        return book
+    return float(
+        getattr(settings, "max_sizing_capital_inr", 0)
+        or getattr(settings, "fallback_capital_inr", 0)
+        or 0
+    )
+
+
+def effective_entry_symbols(settings: Any | None = None) -> frozenset[str]:
+    """Symbols eligible for new entries — may be a subset of `settings.symbols` when book is small."""
+    settings = settings or get_settings()
+    configured = {
+        str(s or "").strip().upper()
+        for s in (getattr(settings, "symbols", None) or [])
+        if str(s or "").strip()
+    }
+    if not _capital_tier_entries_enabled(settings):
+        # Empty set = no symbol filter (tests/mocks without `symbols`).
+        return frozenset(configured)
+    if not configured:
+        configured = {"SENSEX"}
+    threshold = float(getattr(settings, "capital_tier_nifty_min_inr", 200_000) or 200_000)
+    if entry_capital_book_inr(settings) > threshold:
+        return frozenset(configured)
+    low_csv = str(
+        getattr(settings, "capital_tier_symbols_below_inr_csv", "SENSEX") or "SENSEX"
+    )
+    low = {s.strip().upper() for s in low_csv.split(",") if s.strip()}
+    allowed = configured & low
+    return frozenset(allowed if allowed else low)
+
+
+def entry_symbol_allowed(symbol: str, settings: Any | None = None) -> tuple[bool, str]:
+    sym = str(symbol or "").strip().upper()
+    allowed = effective_entry_symbols(settings)
+    if not allowed or sym in allowed:
+        return True, "ok"
+    return False, "below_capital_tier_symbol_blocked"
+
+
+def capital_tier_entry_summary(settings: Any | None = None) -> dict[str, Any]:
+    settings = settings or get_settings()
+    book = round(entry_capital_book_inr(settings), 2)
+    threshold = float(getattr(settings, "capital_tier_nifty_min_inr", 200_000) or 200_000)
+    symbols = sorted(effective_entry_symbols(settings))
+    return {
+        "enabled": _capital_tier_entries_enabled(settings),
+        "capitalBookInr": book,
+        "unlockAboveInr": threshold,
+        "niftyUnlocked": book > threshold,
+        "expiryIndexPrioritySuppressed": expiry_index_priority_suppressed(settings),
+        "entrySymbols": symbols,
+        "configuredSymbols": list(getattr(settings, "symbols", None) or []),
+        "belowInrSymbolsCsv": str(
+            getattr(settings, "capital_tier_symbols_below_inr_csv", "SENSEX") or "SENSEX"
+        ),
+    }
+
+
 def set_manual_capital_limit(amount: float) -> CapitalSnapshot:
     """Set the operator sizing ceiling used by every capital calculation."""
     value = float(amount)

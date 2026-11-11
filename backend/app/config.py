@@ -3635,6 +3635,10 @@ class Settings(BaseSettings):
     # strongest approved contracts first instead of spending the whole book on one leg.
     fallback_capital_inr: float = 200_000
     max_sizing_capital_inr: float = 200_000
+    # Until capital book exceeds the threshold, only trade symbols in the below-INR CSV (₹35k → SENSEX only).
+    capital_tier_entry_symbols_enabled: bool = False
+    capital_tier_nifty_min_inr: float = 200_000
+    capital_tier_symbols_below_inr_csv: str = "SENSEX"
     per_trade_capital_pct: float = 0.90
     ftv_ranked_allocation_enabled: bool = True
     ftv_allocation_weights_csv: str = "0.60,0.25,0.10"

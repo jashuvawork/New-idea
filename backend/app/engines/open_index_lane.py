@@ -143,6 +143,14 @@ def resolve_open_session_expiry_lane_pair(
     """
     settings = settings or get_settings()
     meta: dict[str, Any] = {"openSessionExpiryLanes": True}
+    from app.engines.capital_allocator import expiry_index_priority_suppressed
+
+    if expiry_index_priority_suppressed(settings):
+        return None, None, {
+            **meta,
+            "mode": "legacy",
+            "capitalTierSuppressesExpiryPriority": True,
+        }
     if not bool(getattr(settings, "open_session_expiry_lane_enabled", True)):
         return None, None, {**meta, "mode": "legacy"}
     if not snapshots:
