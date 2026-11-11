@@ -712,6 +712,11 @@ async def _open_from_candidate(
     """Open one trade from best-ranked setup — paper journal + optional live broker order."""
     settings = get_settings()
     symbol = candidate.symbol
+    from app.engines.capital_allocator import entry_symbol_allowed
+
+    sym_ok, sym_reason = entry_symbol_allowed(symbol, settings=settings)
+    if not sym_ok:
+        return False, sym_reason
     snap = candidate.snap
     policy_decision = None
     policy_ranking = None

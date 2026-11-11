@@ -3,7 +3,11 @@
 from fastapi import APIRouter
 
 from app.config import audit_week_local_base_overrides, get_settings
-from app.engines.capital_allocator import get_lot_sizes_meta, resolve_daily_loss_stop_inr
+from app.engines.capital_allocator import (
+    capital_tier_entry_summary,
+    get_lot_sizes_meta,
+    resolve_daily_loss_stop_inr,
+)
 from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.engines.sep917_legacy_profile import sep917_legacy_profile_summary as _sep917_legacy_profile_summary
 from app.engines.open_index_lane import open_index_lane_summary
@@ -72,6 +76,7 @@ async def deployment_status():
         },
         "flags": {
             "symbols": settings.symbols,
+            "capitalTierEntry": capital_tier_entry_summary(settings),
             "enableLiveTrading": settings.enable_live_trading,
             "autoTradingEnabled": settings.auto_trading_enabled,
             "paperTrading": settings.paper_trading,

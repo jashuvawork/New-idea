@@ -1824,8 +1824,13 @@ def find_best_entry(
                 except Exception:
                     pass
 
+    from app.engines.capital_allocator import effective_entry_symbols
+
+    entry_symbols = effective_entry_symbols(settings)
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
+            continue
+        if entry_symbols and str(symbol or "").upper() not in entry_symbols:
             continue
         if settings.explosion_capture_mode and scalp_open < max_scalp_slots:
             if not limits or getattr(limits, "allowExplosion", True):
