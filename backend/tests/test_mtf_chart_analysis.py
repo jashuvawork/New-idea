@@ -67,6 +67,76 @@ def test_mtf_summary_counts():
     assert summary["alignedCount"] >= 3
 
 
+def test_index_turn_waives_shallow_premium_5m_fade_on_bounce():
+    """Nov 11 SENSEX 81300 CE miss: 5m premium dip before vertical — shallow fade OK."""
+    from app.config import Settings
+    from app.models.schemas import TimeframeChartRead
+    from unittest.mock import patch
+
+    candles = _rising_candles(steps=300)
+    price = candles[-1][4]
+    reads = _reads_from_1m(candles, price)
+    premium_reads = {
+        "1m": TimeframeChartRead(
+            label="1m", price=576.0, direction="BULLISH", momentumPct=0.05,
+        ),
+        "5m": TimeframeChartRead(
+            label="5m", price=576.0, direction="BEARISH", momentumPct=-0.28,
+        ),
+    }
+    settings = Settings()
+    with patch("app.engines.mtf_chart_analysis.get_settings", return_value=settings):
+        ok, reason, _ = validate_mtf_scalp(
+            Side.CALL,
+            reads,
+            premium_reads,
+            trade_score=207.0,
+            index_turn_fade_bypass=True,
+        )
+    assert ok is True
+    assert reason == "ok"
+
+    with patch("app.engines.mtf_chart_analysis.get_settings", return_value=settings):
+        ok, reason, _ = validate_mtf_scalp(
+            Side.CALL,
+            reads,
+            premium_reads,
+            trade_score=60.0,
+            index_turn_fade_bypass=False,
+        )
+    assert ok is False
+    assert reason == "exec_mtf_premium_5m_fading"
+
+
+def test_index_turn_waives_5m_fade_when_1m_premium_already_bullish():
+    from app.config import Settings
+    from app.models.schemas import TimeframeChartRead
+    from unittest.mock import patch
+
+    candles = _rising_candles(steps=300)
+    price = candles[-1][4]
+    reads = _reads_from_1m(candles, price)
+    premium_reads = {
+        "1m": TimeframeChartRead(
+            label="1m", price=590.0, direction="BULLISH", momentumPct=1.2,
+        ),
+        "5m": TimeframeChartRead(
+            label="5m", price=576.0, direction="BEARISH", momentumPct=-2.5,
+        ),
+    }
+    settings = Settings()
+    with patch("app.engines.mtf_chart_analysis.get_settings", return_value=settings):
+        ok, reason, _ = validate_mtf_scalp(
+            Side.CALL,
+            reads,
+            premium_reads,
+            trade_score=60.0,
+            index_turn_fade_bypass=True,
+        )
+    assert ok is True
+    assert reason == "ok"
+
+
 def test_pad_lane_bypass_allows_shallow_premium_5m_fade_on_put():
     from app.config import Settings
     from app.models.schemas import TimeframeChartRead

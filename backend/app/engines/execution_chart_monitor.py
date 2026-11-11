@@ -336,6 +336,7 @@ def validate_execution_charts(
             open_setup_fade_bypass=open_setup_fade_bypass,
             index_anchor_htf_bypass=index_anchor_htf_bypass,
             nifty_expiry_1m_relief=nifty_expiry_1m_relief,
+            index_turn_fade_bypass=index_turn_fade_bypass,
             scalp_mode=scalp_mode,
         )
         if not passed:
