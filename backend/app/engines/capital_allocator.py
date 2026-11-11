@@ -891,6 +891,19 @@ def _capital_tier_entries_enabled(settings: Any) -> bool:
     return getattr(settings, "capital_tier_entry_symbols_enabled", False) is True
 
 
+def expiry_index_priority_suppressed(settings: Any | None = None) -> bool:
+    """
+    When the capital book is at/below ``capital_tier_nifty_min_inr``, do not apply
+    cross-index / open-lane expiry priority (NIFTY-first on Tue, etc.) — only the
+    tier-allowed symbols (default SENSEX) trade with legacy per-index lanes.
+    """
+    settings = settings or get_settings()
+    if not _capital_tier_entries_enabled(settings):
+        return False
+    threshold = float(getattr(settings, "capital_tier_nifty_min_inr", 200_000) or 200_000)
+    return entry_capital_book_inr(settings) <= threshold
+
+
 def entry_capital_book_inr(settings: Any | None = None) -> float:
     """Capital book used for tiered index entry policy (sizing snapshot, not open MTM)."""
     settings = settings or get_settings()
@@ -947,6 +960,7 @@ def capital_tier_entry_summary(settings: Any | None = None) -> dict[str, Any]:
         "capitalBookInr": book,
         "unlockAboveInr": threshold,
         "niftyUnlocked": book > threshold,
+        "expiryIndexPrioritySuppressed": expiry_index_priority_suppressed(settings),
         "entrySymbols": symbols,
         "configuredSymbols": list(getattr(settings, "symbols", None) or []),
         "belowInrSymbolsCsv": str(

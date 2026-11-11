@@ -890,6 +890,11 @@ def cross_index_rank_adjustment(
     if not settings.bad_day_routing_enabled:
         return 0.0
 
+    from app.engines.capital_allocator import expiry_index_priority_suppressed
+
+    if expiry_index_priority_suppressed(settings):
+        return 0.0
+
     fading_map = fading_expiry_symbols(state, snapshots)
     sym = candidate.symbol.upper()
     snap = snapshots.get(sym) or candidate.snap
@@ -995,6 +1000,10 @@ def cross_index_elite_priority_bonus(
         snap = snapshots.get(sym) or getattr(candidate, "snap", None)
         if snap is not None and not is_symbol_expiry_day(snap):
             return 0.0
+    from app.engines.capital_allocator import expiry_index_priority_suppressed
+
+    if expiry_index_priority_suppressed(settings):
+        return 0.0
     if not getattr(settings, "cross_index_elite_priority_enabled", True):
         return 0.0
     if str(getattr(candidate, "mode", "") or "") != "explosion":
@@ -1049,6 +1058,9 @@ def bad_day_routing_summary(
     pm_alts = sorted(pm_itm_alternate_symbols(state, snapshots))
     nearest, nxt = expiry_proximity_ranks(snapshots)
     prefer_near = bool(getattr(settings, "expiry_day_prefer_same_day_enabled", True))
+    from app.engines.capital_allocator import expiry_index_priority_suppressed
+
+    tier_suppresses_expiry_priority = expiry_index_priority_suppressed(settings)
     # When near-expiry is priority, do NOT advertise near→far alternates (misleading
     # Aug12 SENSEX→NIFTY stand-down). Only list alternates for fading nearest expiry.
     if prefer_near:
@@ -1070,8 +1082,9 @@ def bad_day_routing_summary(
         "minRankFloor": bad_day_min_rank_floor(state, snapshots),
         "fadingExpirySymbols": fading,
         "nearExpirySymbols": near,
-        "nearExpiryPriority": nearest if prefer_near else [],
-        "sameWeekNextSymbols": nxt if prefer_near else [],
+        "nearExpiryPriority": nearest if (prefer_near and not tier_suppresses_expiry_priority) else [],
+        "sameWeekNextSymbols": nxt if (prefer_near and not tier_suppresses_expiry_priority) else [],
+        "capitalTierSuppressesExpiryPriority": tier_suppresses_expiry_priority,
         "preExpiryAlternates": pre_alts,
         "alternateIndex": alts,
         "pmItmAlternateSymbols": pm_alts,

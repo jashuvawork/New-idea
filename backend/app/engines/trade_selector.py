@@ -2531,18 +2531,21 @@ def find_best_entry(
                 bonus += 6
         # Nearest expiry index #1, same-week next #2 (Tue NIFTY ↔ Thu SENSEX).
         if getattr(settings, "expiry_day_prefer_same_day_enabled", True):
-            from app.engines.bad_day_routing import expiry_proximity_ranks
+            from app.engines.capital_allocator import expiry_index_priority_suppressed
 
-            nearest, nxt = expiry_proximity_ranks(snapshots)
-            sym_u = c.symbol.upper()
-            if sym_u in nearest:
-                bonus += float(
-                    getattr(settings, "expiry_day_sort_priority_bonus", 30.0) or 30.0
-                )
-            elif sym_u in nxt:
-                bonus += float(
-                    getattr(settings, "expiry_day_same_week_next_sort_bonus", 15.0) or 15.0
-                )
+            if not expiry_index_priority_suppressed(settings):
+                from app.engines.bad_day_routing import expiry_proximity_ranks
+
+                nearest, nxt = expiry_proximity_ranks(snapshots)
+                sym_u = c.symbol.upper()
+                if sym_u in nearest:
+                    bonus += float(
+                        getattr(settings, "expiry_day_sort_priority_bonus", 30.0) or 30.0
+                    )
+                elif sym_u in nxt:
+                    bonus += float(
+                        getattr(settings, "expiry_day_same_week_next_sort_bonus", 15.0) or 15.0
+                    )
         from app.engines.best_trade_policy import cheap_base_strike_rank_bonus
 
         gate = (c.pretrade_meta or {}).get("topMomentGate") or {}
