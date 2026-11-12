@@ -17,31 +17,32 @@ from app.services import trade_store
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def test_entries_blocked_before_915():
+def test_entries_blocked_before_920():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 14, 0, tzinfo=IST)
+            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 19, 59, tzinfo=IST)
             ok, reason = entries_allowed_now()
     assert not ok
-    assert "09:15" in reason
+    assert "09:20" in reason
 
 
-def test_entries_allowed_at_915():
+def test_entries_blocked_at_915_open_setup_only():
+    """09:15–09:19: open book active but first order clock still 09:20."""
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 6, 30, 9, 15, 0, tzinfo=IST)
             ok, reason = entries_allowed_now()
-    assert ok
-    assert reason == "ok"
+    assert not ok
+    assert "09:20" in reason
 
 
-def test_explosion_and_entries_aligned_at_open_setup_start():
+def test_explosion_and_entries_aligned_at_920():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 10, 21, 9, 16, 37, tzinfo=IST)
+            mock_dt.now.return_value = datetime(2026, 10, 21, 9, 20, 0, tzinfo=IST)
             early_ok, _ = explosion_entries_allowed_now()
             ok, reason = entries_allowed_now()
-    assert early_ok is False
+    assert early_ok is False  # no gap when explosion clock == entry clock (both 09:20)
     assert ok is True
     assert reason == "ok"
 

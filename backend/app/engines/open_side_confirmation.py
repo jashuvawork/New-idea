@@ -7,7 +7,7 @@ index tape: price moved away from the session open in the trade's direction and 
 in that side's half of the session range. CALL and PUT are exact mirrors.
 
 The macro side check runs 09:25–09:45 so the 09:15–09:45 cash-candle hold votes first.
-Before 09:25 and at or after 09:45 this check is idle. The first order stays 09:15.
+Before 09:25 and at or after 09:45 this check is idle. The first order clock is 09:20.
 """
 
 from __future__ import annotations

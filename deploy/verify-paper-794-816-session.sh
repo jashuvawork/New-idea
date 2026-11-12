@@ -18,7 +18,7 @@ with urllib.request.urlopen(url, timeout=20) as resp:
 f = d.get("flags") or {}
 failed = []
 
-entry_want = os.environ.get("EXPECT_ENTRY_EARLIEST", "09:15")
+entry_want = os.environ.get("EXPECT_ENTRY_EARLIEST", "09:20")
 open_setup_want = os.environ.get("EXPECT_OPEN_SETUP_START", "09:15")
 checks = [
     ("paperTrading", True),
