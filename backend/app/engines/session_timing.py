@@ -32,7 +32,7 @@ def open_setup_start_minutes() -> int:
 
 
 def entries_allowed_now() -> tuple[bool, str]:
-    """False until configured IST time (default 09:15) during live market."""
+    """False until configured IST time (default 09:20) during live market."""
     phase = get_market_phase()
     if phase != "LIVE_MARKET":
         return False, "market_not_live"

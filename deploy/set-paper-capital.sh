@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Set paper trading capital (default ₹35k) on EC2 — env + runtime API + backend restart.
+# Set paper trading capital (default ₹25k) on EC2 — env + runtime API + backend restart.
 #
 # Usage (on EC2 as root):
 #   sudo bash deploy/set-paper-capital.sh
-#   PAPER_CAPITAL_INR=35000 sudo bash deploy/set-paper-capital.sh
+#   PAPER_CAPITAL_INR=25000 sudo bash deploy/set-paper-capital.sh
 #
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-/opt/nexusquant/New-idea}"
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
-PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-35000}"
+PAPER_CAPITAL_INR="${PAPER_CAPITAL_INR:-25000}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
 CAPITAL_URL="${CAPITAL_URL:-http://127.0.0.1:8000/api/auto-trader/capital}"
 
