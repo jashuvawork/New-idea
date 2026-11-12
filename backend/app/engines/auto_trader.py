@@ -714,7 +714,7 @@ async def _open_from_candidate(
     symbol = candidate.symbol
     from app.engines.capital_allocator import entry_symbol_allowed
 
-    sym_ok, sym_reason = entry_symbol_allowed(symbol, settings=settings)
+    sym_ok, sym_reason = entry_symbol_allowed(symbol, settings=settings, snapshots=snapshots)
     if not sym_ok:
         return False, sym_reason
     snap = candidate.snap

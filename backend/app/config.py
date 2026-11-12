@@ -3639,6 +3639,8 @@ class Settings(BaseSettings):
     capital_tier_entry_symbols_enabled: bool = False
     capital_tier_nifty_min_inr: float = 200_000
     capital_tier_symbols_below_inr_csv: str = "SENSEX"
+    # Below ₹2L: default SENSEX-only — add NIFTY when no SENSEX explosion alert is in premium band.
+    capital_tier_nifty_oob_fallback_enabled: bool = False
     per_trade_capital_pct: float = 0.90
     ftv_ranked_allocation_enabled: bool = True
     ftv_allocation_weights_csv: str = "0.60,0.25,0.10"
@@ -3707,12 +3709,16 @@ class Settings(BaseSettings):
     never_green_hard_stop_max_best_pct: float = 2.0
     never_green_hard_stop_min_hold_seconds: float = 300.0
     # Scratch a launch that immediately loses both price and velocity confirmation.
+    # Wait ≥1m before scratch; premium fading + no bullish tape (long CE/PE).
     explosion_failed_launch_exit_enabled: bool = False
-    explosion_failed_launch_min_hold_seconds: int = 15
+    explosion_failed_launch_min_hold_seconds: int = 60
     explosion_failed_launch_max_hold_seconds: int = 180
     explosion_failed_launch_max_best_points: float = 4.0
     explosion_failed_launch_min_loss_points: float = 2.5
     explosion_failed_launch_max_velocity_3s: float = -0.5
+    explosion_failed_launch_allow_with_sl_only: bool = True
+    explosion_failed_launch_premium_direction_gate_enabled: bool = True
+    explosion_failed_launch_min_premium_momentum_5_pct: float = 0.0
     # Same-chain cooldown after a failed launch / never-green chop spike.
     explosion_failed_launch_reentry_block_enabled: bool = True
     explosion_failed_launch_reentry_cooldown_seconds: int = 1800

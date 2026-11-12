@@ -1824,9 +1824,9 @@ def find_best_entry(
                 except Exception:
                     pass
 
-    from app.engines.capital_allocator import effective_entry_symbols
+    from app.engines.capital_allocator import effective_entry_symbols_with_snapshots
 
-    entry_symbols = effective_entry_symbols(settings)
+    entry_symbols = effective_entry_symbols_with_snapshots(settings, snapshots)
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
             continue
