@@ -390,7 +390,12 @@ def _apply_elite_respected_early_exit(
         return None
     settings = settings or get_settings()
     if sl_only_loss_exits_enabled(settings):
-        return None
+        if not (
+            exit_reason == "explosion_failed_launch"
+            and bool(getattr(settings, "explosion_failed_launch_allow_with_sl_only", True))
+            and bool(getattr(settings, "explosion_failed_launch_exit_enabled", False))
+        ):
+            return None
     if _should_skip_elite_runner_early_exits(trade, settings=settings):
         return None
     return exit_reason
@@ -485,6 +490,68 @@ def _failed_launch_thresholds(
             float(getattr(settings, "elite_failed_launch_relaxed_max_velocity_3s", -1.0) or -1.0),
         )
     return min_hold, max_hold, max_best, min_loss, max_v
+
+
+def _failed_launch_premium_not_bullish(trade: PaperTrade, *, settings: Any = None) -> bool:
+    """Long CE/PE: scratch only when premium tape is not supporting the long (not bullish)."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "explosion_failed_launch_premium_direction_gate_enabled", True)):
+        return True
+    ctx = trade.entryContext or {}
+    meta = ctx.get("liveEntryScoreMeta") or ctx.get("chartMeta") or {}
+    direction = str(meta.get("premiumDirection") or ctx.get("premiumDirection") or "").upper()
+    mom5 = meta.get("premiumMomentum5Pct")
+    if mom5 is None:
+        mom5 = meta.get("premiumMom5Pct")
+    try:
+        mom5_f = float(mom5) if mom5 is not None else None
+    except (TypeError, ValueError):
+        mom5_f = None
+    min_mom = float(
+        getattr(settings, "explosion_failed_launch_min_premium_momentum_5_pct", 0.0) or 0.0
+    )
+    if direction == "BULLISH" and (mom5_f is None or mom5_f + 1e-6 >= min_mom):
+        return False
+    return True
+
+
+def explosion_failed_launch_exit_reason(
+    trade: PaperTrade,
+    *,
+    hold_seconds: float,
+    best_points: float,
+    pnl_points: float,
+    live_velocity_3s: float,
+    settings: Any = None,
+) -> Optional[str]:
+    """After min hold: scratch when premium is falling and tape is not bullish."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "explosion_failed_launch_exit_enabled", False)):
+        return None
+    if _should_skip_elite_runner_early_exits(trade, settings=settings):
+        return None
+    min_hold, max_hold, max_best, min_loss, max_v = _failed_launch_thresholds(
+        trade, settings=settings
+    )
+    if not (min_hold <= hold_seconds <= max_hold):
+        return None
+    if best_points > max_best + 1e-6:
+        return None
+    if pnl_points > -min_loss + 1e-6:
+        return None
+    if live_velocity_3s >= max_v - 1e-6:
+        return None
+    if not _failed_launch_premium_not_bullish(trade, settings=settings):
+        return None
+    return "explosion_failed_launch"
+
+
+def _failed_launch_exit_allowed(settings: Any) -> bool:
+    if not bool(getattr(settings, "explosion_failed_launch_exit_enabled", False)):
+        return False
+    if sl_only_loss_exits_enabled(settings):
+        return bool(getattr(settings, "explosion_failed_launch_allow_with_sl_only", True))
+    return True
 
 
 # symbol -> last explosion stop timestamp (IST)
@@ -2665,24 +2732,18 @@ def evaluate_explosion_exit(
         if chop_exit:
             return chop_exit, pnl_inr
 
-    # The launch thesis failed immediately: it never established green and live
-    # premium is still contracting. Scratch before the wider structural stop.
-    if (
-        not sl_only_loss_exits_enabled(settings)
-        and not hold_to_sl
-        and bool(getattr(settings, "explosion_failed_launch_exit_enabled", True))
-        and not _should_skip_elite_runner_early_exits(trade, settings=settings)
-    ):
-        failed_min_hold, failed_max_hold, failed_max_best, failed_min_loss, failed_max_v = (
-            _failed_launch_thresholds(trade, settings=settings)
+    # Failed launch: wait ≥1m, then scratch if premium is falling and not bullish.
+    if not hold_to_sl and _failed_launch_exit_allowed(settings):
+        failed_exit = explosion_failed_launch_exit_reason(
+            trade,
+            hold_seconds=hold,
+            best_points=best,
+            pnl_points=pnl_pts,
+            live_velocity_3s=v3,
+            settings=settings,
         )
-        if (
-            failed_min_hold <= hold <= failed_max_hold
-            and best <= failed_max_best
-            and pnl_pts <= -failed_min_loss
-            and v3 < failed_max_v
-        ):
-            return "explosion_failed_launch", pnl_inr
+        if failed_exit:
+            return failed_exit, pnl_inr
 
     # Armed-base launch window expired without establishing a real runner (Sep03 23850 PE).
     if (

@@ -918,6 +918,44 @@ def entry_capital_book_inr(settings: Any | None = None) -> float:
     )
 
 
+def sensex_has_in_band_explosion_alert(snap: Any, settings: Any | None = None) -> bool:
+    """True when at least one SENSEX explosion alert passes premium_in_band."""
+    settings = settings or get_settings()
+    if snap is None or not getattr(snap, "dataAvailable", False):
+        return False
+    from app.engines.premium_filter import premium_in_band
+
+    for alert in getattr(snap, "explosionAlerts", None) or []:
+        if not isinstance(alert, dict):
+            continue
+        prem = float(alert.get("lastPremium") or alert.get("premium") or 0)
+        if prem <= 0:
+            continue
+        peak = float(alert.get("peakMovePct") or alert.get("dailyMovePct") or 0)
+        if premium_in_band(prem, mode="explosion", peak_move_pct=peak, snap=snap):
+            return True
+    return False
+
+
+def effective_entry_symbols_with_snapshots(
+    settings: Any | None = None,
+    snapshots: dict[str, Any] | None = None,
+) -> frozenset[str]:
+    """Tier symbols plus NIFTY when SENSEX-only book has no in-band explosion alerts."""
+    base = effective_entry_symbols(settings)
+    if not snapshots or not _capital_tier_entries_enabled(settings):
+        return base
+    if not getattr(settings, "capital_tier_nifty_oob_fallback_enabled", False) is True:
+        return base
+    if "NIFTY" in base or "SENSEX" not in base:
+        return base
+    sensex = snapshots.get("SENSEX") or snapshots.get("sensex")
+    if sensex_has_in_band_explosion_alert(sensex, settings):
+        return base
+    expanded = set(base) | {"NIFTY"}
+    return frozenset(expanded)
+
+
 def effective_entry_symbols(settings: Any | None = None) -> frozenset[str]:
     """Symbols eligible for new entries — may be a subset of `settings.symbols` when book is small."""
     settings = settings or get_settings()
@@ -942,9 +980,17 @@ def effective_entry_symbols(settings: Any | None = None) -> frozenset[str]:
     return frozenset(allowed if allowed else low)
 
 
-def entry_symbol_allowed(symbol: str, settings: Any | None = None) -> tuple[bool, str]:
+def entry_symbol_allowed(
+    symbol: str,
+    settings: Any | None = None,
+    snapshots: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
     sym = str(symbol or "").strip().upper()
-    allowed = effective_entry_symbols(settings)
+    allowed = (
+        effective_entry_symbols_with_snapshots(settings, snapshots)
+        if snapshots
+        else effective_entry_symbols(settings)
+    )
     if not allowed or sym in allowed:
         return True, "ok"
     return False, "below_capital_tier_symbol_blocked"
@@ -960,6 +1006,9 @@ def capital_tier_entry_summary(settings: Any | None = None) -> dict[str, Any]:
         "capitalBookInr": book,
         "unlockAboveInr": threshold,
         "niftyUnlocked": book > threshold,
+        "niftyOobFallbackEnabled": bool(
+            getattr(settings, "capital_tier_nifty_oob_fallback_enabled", False) is True
+        ),
         "expiryIndexPrioritySuppressed": expiry_index_priority_suppressed(settings),
         "entrySymbols": symbols,
         "configuredSymbols": list(getattr(settings, "symbols", None) or []),
