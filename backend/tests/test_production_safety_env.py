@@ -24,8 +24,8 @@ def test_production_template_uses_bounded_loss_policy():
     # 35% of sizing capital (₹35k → ₹12.25k daily loss stop for new entries).
     assert env["DAILY_LOSS_STOP_CAPITAL_PCT"] == "0.35"
     assert env["DAILY_LOSS_STOP_INR"] == "0"
-    assert env["FALLBACK_CAPITAL_INR"] == "35000"
-    assert env["MAX_SIZING_CAPITAL_INR"] == "35000"
+    assert env["FALLBACK_CAPITAL_INR"] == "25000"
+    assert env["MAX_SIZING_CAPITAL_INR"] == "25000"
     assert env["UNIFIED_PROFIT_LADDER_ENABLED"] == "true"
     assert env["UNIFIED_PROFIT_LADDER_BREAKEVEN_ENABLED"] == "false"
     assert env["TP_RUNG_LADDER_EXIT_ENABLED"] == "true"
