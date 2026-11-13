@@ -823,6 +823,18 @@ def _index_dominant_trend_hud(
     return index_session_dominant_trend_summary(snapshots, state=state)
 
 
+def _index_session_monitoring_hud(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> dict:
+    from app.engines.index_session_narrative import index_session_monitoring_summary
+
+    try:
+        return index_session_monitoring_summary(snapshots, state=state)
+    except Exception:
+        return {"enabled": False, "symbols": {}}
+
+
 def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]) -> dict:
     chop = is_chop_session(snapshots)
     cap, cap_label = daily_trade_cap(state, snapshots)
@@ -915,6 +927,7 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
         "directionalLock": directional_lock_summary(snapshots),
         "openSideConfirmation": _open_side_confirmation_hud(snapshots),
         "indexSessionDominantTrend": _index_dominant_trend_hud(state, snapshots),
+        "indexSessionMonitoring": _index_session_monitoring_hud(state, snapshots),
         "symmetricBestTradeCapture": bool(
             getattr(settings, "symmetric_best_trade_capture_enabled", True)
         ),
