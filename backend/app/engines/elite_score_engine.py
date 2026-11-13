@@ -1662,6 +1662,27 @@ def elite_entry_allowed(
             float(evidence.get("radarExplosionScore") or evidence.get("explosionScore") or 0),
         )
         assessment = {**assessment, "eliteScore": score_blend}
+    flip_sess_floor, flip_sess_meta = (None, {})
+    from app.engines.index_flip_session_low_capture import index_flip_session_low_elite_floor
+
+    flip_sess_floor, flip_sess_meta = index_flip_session_low_elite_floor(
+        evidence,
+        mirror_snap,
+        resolved_side,
+        settings=settings,
+        readiness_reason=readiness_reason,
+    )
+    if flip_sess_floor is not None:
+        min_score = min(min_score, flip_sess_floor)
+        assessment = {
+            **assessment,
+            "indexFlipSessionLowCapture": flip_sess_meta,
+            "indexFlipSessionLowEliteFloor": flip_sess_floor,
+        }
+        assessment["eliteScore"] = max(
+            float(assessment.get("eliteScore") or 0),
+            flip_sess_floor,
+        )
     max_local = elite_side_local_base_cap(
         resolved_side,
         settings=settings,
