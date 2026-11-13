@@ -196,6 +196,74 @@ async def years_index_analysis(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+_five_year_task: asyncio.Task | None = None
+
+
+@router.post("/upstox-five-year-analysis/start")
+async def upstox_five_year_analysis_start(
+    symbol: str = "NIFTY",
+    years: int = 5,
+    resume: bool = True,
+):
+    """Start background 5y Upstox download + analysis (EC2; uses live token)."""
+    global _five_year_task
+    from app.engines.upstox_five_year_pipeline import (
+        get_five_year_job_status,
+        run_five_year_pipeline,
+    )
+
+    years = max(1, min(int(years or 5), 15))
+    st = get_five_year_job_status(symbol)
+    if st.get("status") == "running":
+        return {"status": "already_running", **st}
+    if _five_year_task and not _five_year_task.done():
+        return {"status": "already_running", "detail": "background task active"}
+
+    async def _run() -> None:
+        await run_five_year_pipeline(symbol=symbol, years=years, resume=resume)
+
+    _five_year_task = asyncio.create_task(_run())
+    return {
+        "status": "started",
+        "symbol": symbol.upper(),
+        "years": years,
+        "resume": resume,
+        "hint": "Poll GET /api/ai/upstox-five-year-analysis/status",
+    }
+
+
+@router.get("/upstox-five-year-analysis/status")
+async def upstox_five_year_analysis_status(symbol: str = "NIFTY"):
+    """Job progress and paths under TRADE_STORE_DIR/upstox_history/{symbol}."""
+    from app.engines.upstox_five_year_pipeline import get_five_year_job_status
+
+    out = get_five_year_job_status(symbol)
+    if _five_year_task is not None:
+        out["backgroundTaskDone"] = _five_year_task.done()
+        if _five_year_task.done() and _five_year_task.exception():
+            out["backgroundTaskError"] = str(_five_year_task.exception())
+    return out
+
+
+@router.get("/upstox-five-year-analysis/report")
+async def upstox_five_year_analysis_report(symbol: str = "NIFTY", years: int = 5):
+    """Return completed analysis JSON from disk (no new Upstox calls)."""
+    from pathlib import Path
+
+    from app.config import get_settings
+    from app.engines.upstox_history_store import history_root
+
+    path = history_root(Path(get_settings().trade_store_dir), symbol) / f"analysis_{years}y.json"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="analysis not found; run start job first")
+    try:
+        import json
+
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.get("/lever-replay-compare/{date}")
 async def lever_replay_compare(
     date: str,
