@@ -127,6 +127,20 @@ def index_aligned_book_rank_adjustment(
             adj += near_base_extra
         return adj
 
+    try:
+        cand_score = float(getattr(candidate, "score", 0) or 0)
+    except (TypeError, ValueError):
+        cand_score = 0.0
+    top_book_score = max(
+        (float(p.get("explosionScore") or 0) for p in picks),
+        default=0.0,
+    )
+    gap_bypass = float(
+        getattr(settings, "index_aligned_book_elite_score_gap_bypass", 55.0) or 55.0
+    )
+    if cand_score > 0 and top_book_score > 0 and cand_score >= top_book_score + gap_bypass:
+        return 0.0
+
     off_penalty = float(
         getattr(settings, "index_aligned_book_off_pick_penalty", 140.0) or 140.0
     )

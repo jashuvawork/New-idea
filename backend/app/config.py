@@ -3321,8 +3321,10 @@ class Settings(BaseSettings):
     index_aligned_book_near_base_extra: float = 10.0
     index_aligned_book_off_pick_penalty: float = 140.0
     index_aligned_book_chase_penalty: float = 25.0
-    index_aligned_book_hard_require_enabled: bool = True
+    # Rank-only preference: do not stack a hard disqualify (direction-lock style).
+    index_aligned_book_hard_require_enabled: bool = False
     index_aligned_book_disqualify_penalty: float = 120.0
+    index_aligned_book_elite_score_gap_bypass: float = 55.0
     # Index leg may flip when both rally/slide arms are live — penalize wrong-side chase.
     index_imminent_flip_enabled: bool = True
     index_imminent_flip_thin_margin_pts: float = 25.0

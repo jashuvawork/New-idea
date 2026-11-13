@@ -97,8 +97,10 @@ def test_aligned_book_picks_put_near_base_first():
     assert picks[0]["nearBase676"] is True
 
 
-def test_off_book_put_penalized_on_slide_leg():
+def test_elite_off_book_gap_bypass_keeps_chase_eligible():
     settings = _symmetric_settings()
+    settings.index_aligned_book_hard_require_enabled = False
+    settings.index_aligned_book_elite_score_gap_bypass = 55.0
     snap = _snap(alerts=_put_alerts())
     snapshots = {"NIFTY": snap}
     state = AutoTraderState()
@@ -117,6 +119,40 @@ def test_off_book_put_penalized_on_slide_leg():
             side=Side.PUT,
             strike=25200.0,
             score=244.0,
+            snap=snap,
+            alert={"strike": 25200, "localBaseMovePct": 45.0},
+        )
+        adj_chase = index_aligned_book_rank_adjustment(
+            chase, snapshots, state, settings=settings,
+        )
+        adj_on = index_aligned_book_rank_adjustment(
+            on_book, snapshots, state, settings=settings,
+        )
+    assert adj_chase == 0.0
+    assert chase.score + adj_chase > on_book.score + adj_on
+
+
+def test_off_book_put_penalized_on_slide_leg():
+    settings = _symmetric_settings()
+    settings.index_aligned_book_elite_score_gap_bypass = 200.0
+    snap = _snap(alerts=_put_alerts())
+    snapshots = {"NIFTY": snap}
+    state = AutoTraderState()
+    p1, p2, p3 = _slide_leg_patches()
+    with p1, p2, p3:
+        on_book = SimpleNamespace(
+            symbol="NIFTY",
+            side=Side.PUT,
+            strike=25150.0,
+            score=88.0,
+            snap=snap,
+            alert={"strike": 25150, "localBaseMovePct": 18.8},
+        )
+        chase = SimpleNamespace(
+            symbol="NIFTY",
+            side=Side.PUT,
+            strike=25200.0,
+            score=105.0,
             snap=snap,
             alert={"strike": 25200, "localBaseMovePct": 45.0},
         )

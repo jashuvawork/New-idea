@@ -213,7 +213,8 @@ def index_imminent_flip_rank_adjustment(
             )
         return bonus
 
-    if risk == "WATCH" and side_aligns_with_dominant_trend(side, dominant):
+    # Rank nudge only — never punish the leg that is still dominant (direction-lock trap).
+    if risk in ("WATCH", "CONTESTED") and side_aligns_with_dominant_trend(side, dominant):
         return 0.0
 
     wrong_pen = float(getattr(settings, "index_imminent_flip_wrong_side_watch_penalty", 40.0) or 40.0)

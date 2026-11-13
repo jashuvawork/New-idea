@@ -79,6 +79,24 @@ def test_slide_dominant_put_aligned_no_wrong_penalty(_m1, _m2, _m3):
 @patch("app.engines.put_slide_ce_mirror.put_slide_unlock_armed", return_value=(True, "ok", {}))
 @patch(
     "app.engines.index_rally_side_flip.index_rally_metrics",
+    return_value={"rallyPoints": 55.0, "slidePoints": 48.0, "momentum5Pct": 0.03},
+)
+def test_contested_dominant_rally_call_not_penalized(_m1, _m2, _m3):
+    """CONTESTED lean PUT must not direction-lock a still-dominant CALL rip."""
+    settings = _settings()
+    snap = _snap(mom5=0.03)
+    snapshots = {"NIFTY": snap}
+    call_c = SimpleNamespace(symbol="NIFTY", side="CALL", snap=snap)
+    adj = index_imminent_flip_rank_adjustment(
+        call_c, snapshots, AutoTraderState(), settings=settings,
+    )
+    assert adj >= 0.0
+
+
+@patch("app.engines.pe_win_ce_mirror.call_rally_unlock_armed", return_value=(True, "ok", {}))
+@patch("app.engines.put_slide_ce_mirror.put_slide_unlock_armed", return_value=(True, "ok", {}))
+@patch(
+    "app.engines.index_rally_side_flip.index_rally_metrics",
     return_value={"rallyPoints": 48.0, "slidePoints": 55.0, "momentum5Pct": -0.04},
 )
 def test_contested_call_wrong_side_when_predicting_slide(_m1, _m2, _m3):
