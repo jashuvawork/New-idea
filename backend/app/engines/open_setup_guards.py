@@ -12,6 +12,7 @@ from app.engines.open_index_lane import (
     _side_value,
     allowed_open_lane_sides,
     in_open_caution_window_at,
+    in_open_side_align_window_at,
     in_post_open_setup_window_at,
     open_setup_guard_when,
     validate_open_index_lane,
@@ -123,6 +124,49 @@ def _resolve_spot(candidate: Any, snapshots: Optional[dict[str, SymbolSnapshot]]
     return 0.0
 
 
+def open_caution_index_leg_confirmed(
+    symbol: str,
+    side: str,
+    snap: Any,
+    *,
+    settings: Any = None,
+    frac: float | None = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Index rally off low (CALL) or slide off high (PUT) — for open side-align waivers."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    from app.engines.index_rally_side_flip import _min_move_pts, index_rally_metrics
+
+    side_u = _side_value(side)
+    sym = str(symbol or "").upper()
+    metrics = index_rally_metrics(sym, snap, settings=settings)
+    min_pts = _min_move_pts(sym, settings)
+    if frac is None:
+        if side_u == "PUT":
+            frac = float(
+                getattr(settings, "open_caution_open_put_slide_waiver_frac", 0.35) or 0.35
+            )
+        else:
+            frac = float(
+                getattr(settings, "open_caution_index_rally_waiver_frac", 0.35) or 0.35
+            )
+    need = min_pts * frac
+    rally_pts = float(metrics.get("rallyPoints") or 0)
+    slide_pts = float(metrics.get("slidePoints") or 0)
+    mom5 = float(metrics.get("momentum5Pct") or 0)
+    meta["indexTrendMetrics"] = metrics
+    meta["indexLegMinPoints"] = round(need, 1)
+    if side_u == "CALL":
+        ok = rally_pts >= need - 1e-6 and mom5 > 0.0
+        meta["indexLeg"] = "rally_off_low"
+        return ok, meta
+    if side_u == "PUT":
+        ok = slide_pts >= need - 1e-6 and mom5 < 0.0
+        meta["indexLeg"] = "slide_off_high"
+        return ok, meta
+    return False, meta
+
+
 def open_caution_side_align_ok(
     symbol: str,
     side: str,
@@ -135,12 +179,13 @@ def open_caution_side_align_ok(
     settings = settings or get_settings()
     meta: dict[str, Any] = {"openSideAlign": True}
     when = open_setup_guard_when(None, when)
-    if not in_open_caution_window_at(when):
-        return True, "ok", meta
-    if bool(getattr(settings, "open_caution_block_puts_enabled", False)) and _side_value(side) == "PUT":
+    in_open = in_open_caution_window_at(when)
+    if in_open and bool(getattr(settings, "open_caution_block_puts_enabled", False)) and _side_value(side) == "PUT":
         nifty_put_lane = bool(getattr(settings, "open_nifty_put_lane_enabled", False))
         if not (nifty_put_lane and _index_bucket(symbol) == "NIFTY"):
             return False, "open_caution_puts_blocked", meta
+    if not in_open_side_align_window_at(when):
+        return True, "ok", meta
     if not bool(getattr(settings, "open_caution_side_align_index_enabled", True)):
         return True, "ok", meta
     from app.engines.index_tick_helpers import resolve_index_session
@@ -160,7 +205,29 @@ def open_caution_side_align_ok(
     if move_pct >= min_move and side_u == "PUT":
         return False, "open_caution_put_on_bullish_open", meta
     if move_pct <= -min_move and side_u == "CALL":
+        if bool(
+            getattr(settings, "open_caution_index_rally_side_align_waiver_enabled", True)
+        ):
+            leg_ok, leg_meta = open_caution_index_leg_confirmed(
+                symbol, side_u, snap, settings=settings,
+            )
+            meta.update(leg_meta)
+            if leg_ok:
+                meta["openIndexRallySideAlignWaiver"] = True
+                return True, "ok", meta
         return False, "open_caution_call_on_bearish_open", meta
+    if (
+        move_pct <= -min_move
+        and side_u == "PUT"
+        and bool(getattr(settings, "open_caution_open_put_requires_slide_off_high_enabled", True))
+    ):
+        leg_ok, leg_meta = open_caution_index_leg_confirmed(
+            symbol, side_u, snap, settings=settings,
+        )
+        meta.update(leg_meta)
+        if not leg_ok:
+            return False, "open_caution_put_bearish_open_without_slide", meta
+        meta["openPutSlideOffHighConfirmed"] = True
     return True, "ok", meta
 
 
@@ -328,18 +395,45 @@ def open_caution_structural_side_align_waiver(
         or getattr(getattr(candidate, "explosion_event", None), "tier", "")
         or ""
     ).upper()
-    if tier not in {"ELITE", "EXPLODING"}:
+    allow_exploding = bool(
+        getattr(settings, "open_caution_structural_waiver_allow_exploding_tier", True)
+    )
+    if tier not in {"ELITE", "EXPLODING"} or (
+        tier == "EXPLODING" and not allow_exploding
+    ):
         meta["structuralWaiverReason"] = "tier_not_elite"
         return False, meta
     if not _structural_open_lift_moment_ok(alert, side_u):
-        meta["structuralWaiverReason"] = "no_structural_lift_moment"
-        return False, meta
+        leg_ok, leg_meta = open_caution_index_leg_confirmed(
+            sym, side_u, snap, settings=settings,
+        )
+        meta.update(leg_meta)
+        if not (tier == "EXPLODING" and allow_exploding and leg_ok):
+            meta["structuralWaiverReason"] = "no_structural_lift_moment"
+            return False, meta
+        meta["structuralIndexLegWaiver"] = True
     pad_ok, lb = _open_structural_pad_band_ok(alert, settings)
     meta["localBaseMovePct"] = lb
-    if not pad_ok:
+    if not pad_ok and tier != "EXPLODING":
         meta["structuralWaiverReason"] = "local_base_out_of_band"
         return False, meta
-    if not open_caution_fade_bypass_rank_ok(alert, settings=settings):
+    rank_ok = open_caution_fade_bypass_rank_ok(alert, settings=settings)
+    if tier == "EXPLODING" and not rank_ok:
+        try:
+            rank = float(
+                alert.get("rankScore")
+                or alert.get("causalRankScore")
+                or alert.get("selectionScore")
+                or 0
+            )
+        except (TypeError, ValueError):
+            rank = 0.0
+        floor = float(
+            getattr(settings, "open_caution_structural_waiver_exploding_rank_floor", 72.0)
+            or 72.0
+        )
+        rank_ok = rank >= floor - 1e-6
+    if not rank_ok:
         meta["structuralWaiverReason"] = "rank_below_floor"
         return False, meta
     v_ok, v_meta = _open_structural_index_v_ok(sym, side_u, snap, settings=settings)
@@ -356,6 +450,16 @@ def open_setup_guard_summary(settings: Any = None) -> dict[str, Any]:
         "sideAlignIndex": bool(getattr(settings, "open_caution_side_align_index_enabled", True)),
         "structuralSideAlignWaiver": bool(
             getattr(settings, "open_caution_structural_side_align_waiver_enabled", True)
+        ),
+        "sideAlignUntilIst": (
+            f"{int(getattr(settings, 'open_caution_side_align_until_hour', 9)):02d}:"
+            f"{int(getattr(settings, 'open_caution_side_align_until_minute', 30)):02d}"
+        ),
+        "indexRallySideAlignWaiver": bool(
+            getattr(settings, "open_caution_index_rally_side_align_waiver_enabled", True)
+        ),
+        "openPutRequiresSlideOffHigh": bool(
+            getattr(settings, "open_caution_open_put_requires_slide_off_high_enabled", True)
         ),
         "legacyBlockAllPuts": bool(getattr(settings, "open_caution_block_puts_enabled", False)),
         "blockPutsInOpen": bool(getattr(settings, "open_caution_block_puts_enabled", False)),

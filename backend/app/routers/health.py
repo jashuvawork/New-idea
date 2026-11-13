@@ -10,6 +10,8 @@ from app.engines.capital_allocator import (
 )
 from app.engines.paper_slippage import config_summary as slippage_config_summary
 from app.engines.sep917_legacy_profile import sep917_legacy_profile_summary as _sep917_legacy_profile_summary
+from app.engines.index_session_narrative import index_session_narrative_summary
+from app.engines.index_slide_capture_lane import index_slide_capture_lane_summary
 from app.engines.open_index_lane import open_index_lane_summary
 from app.engines.open_setup_guards import open_setup_guard_summary
 from app.engines.live_paper_parity import live_paper_parity_status
@@ -110,6 +112,8 @@ async def deployment_status():
             "openCautionMinExplosionScore": settings.open_caution_min_explosion_score,
             "openIndexLane": open_index_lane_summary(settings),
             "openSetupGuards": open_setup_guard_summary(settings),
+            "indexSlideCaptureLane": index_slide_capture_lane_summary(settings),
+            "indexSessionNarrativeEnabled": settings.index_session_narrative_enabled,
             "openSetupPolicy": open_setup_policy_status(settings),
             "livePaperParity": live_paper_parity_status(settings),
             "aggressiveMinExplosionScore": settings.aggressive_min_explosion_score,

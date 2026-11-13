@@ -3291,6 +3291,27 @@ class Settings(BaseSettings):
     open_caution_structural_waiver_rally_frac: float = 0.5
     open_caution_structural_waiver_min_range_position: float = 0.30
     open_caution_structural_waiver_near_extreme_pct: float = 0.15
+    # Open side-align (spot vs cash open) ends 09:30; other open guards run until 09:45 (#ABC-A).
+    open_caution_side_align_until_hour: int = 9
+    open_caution_side_align_until_minute: int = 30
+    open_caution_index_rally_side_align_waiver_enabled: bool = True
+    open_caution_index_rally_waiver_frac: float = 0.35
+    open_caution_structural_waiver_allow_exploding_tier: bool = True
+    open_caution_structural_waiver_exploding_rank_floor: float = 72.0
+    # Open PUT only when index rolls off session high, not blind bearish-open gap (#ABC-B).
+    open_caution_open_put_requires_slide_off_high_enabled: bool = True
+    open_caution_open_put_slide_waiver_frac: float = 0.35
+    # Afternoon index slide leg — SENSEX PUT capture without global elite-90 choke (#ABC-C).
+    index_slide_capture_lane_enabled: bool = True
+    index_slide_capture_lane_start_hour: int = 10
+    index_slide_capture_lane_start_minute: int = 30
+    index_slide_capture_lane_min_elite_score: float = 78.0
+    index_slide_capture_lane_symbols_csv: str = "SENSEX"
+    index_slide_capture_lane_min_slide_frac: float = 0.35
+    index_slide_capture_lane_rank_bonus: float = 22.0
+    index_slide_capture_lane_ce_rank_penalty: float = 12.0
+    # HUD: per-index dominant RALLY/SLIDE leg + flip (always-on narrative).
+    index_session_narrative_enabled: bool = True
     open_caution_block_puts_enabled: bool = False
     open_caution_non_lane_index_blocked: bool = True
     # Expiry lanes may CE only the nearest index; aligned CALL/PUT on the other index still trades.

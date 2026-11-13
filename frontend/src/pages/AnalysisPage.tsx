@@ -44,6 +44,7 @@ import { TradeJournal, NewsPanel } from '../components/TradeJournal';
 import { PsychologyPanel } from '../components/PsychologyPanel';
 import { LiveTradingGate, MorningChecklist } from '../components/LiveTradingGate';
 import { FutureSignalsPanel } from '../components/FutureSignalsPanel';
+import { IndexSessionMonitoringPanel } from '../components/IndexSessionMonitoringPanel';
 
 const SYMBOLS = ['NIFTY', 'SENSEX'] as const;
 
@@ -224,6 +225,7 @@ export function AnalysisPage(props: {
           <SystemSnapshot auto={auto} deployment={deployment} readiness={readiness} marketPhase={marketPhase} />
           <RejectionReview auto={auto} />
         </div>
+        <IndexSessionMonitoringPanel auto={auto} deployment={deployment} />
         <CapitalAlignmentCallout deployment={deployment} auto={auto} />
       </div>
 

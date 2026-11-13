@@ -527,6 +527,51 @@ export interface ChopGuards {
   eliteTradeBudget?: EliteTradeBudgetSummary;
   ictBreakoutMonitor?: IctBreakoutMonitorSummary;
   sep917LiveChecklist?: Sep917LiveChecklistSummary;
+  indexSessionDominantTrend?: {
+    enabled?: boolean;
+    symbols?: Record<string, unknown>;
+  };
+  indexSessionMonitoring?: IndexSessionMonitoringSummary;
+}
+
+export interface IndexAlignedBookPick {
+  symbol?: string;
+  side?: string;
+  strike?: number;
+  tier?: string;
+  momentType?: string;
+  explosionScore?: number;
+  localBasePct?: number;
+  nearBase676?: boolean;
+  premium?: number;
+}
+
+export interface IndexSessionSymbolMonitoring {
+  dominantLeg?: string;
+  bullishOptionSide?: string | null;
+  rallyPoints?: number;
+  slidePoints?: number;
+  dominantTrendFlipped?: boolean;
+  dominantTrendPrevious?: string;
+  callRallyUnlockArmed?: boolean;
+  putSlideUnlockArmed?: boolean;
+  slideCaptureLane?: { armed?: boolean; reason?: string; dominantTrend?: string };
+  alignedBookPicks?: IndexAlignedBookPick[];
+  timingHint?: string;
+}
+
+export interface IndexSessionMonitoringSummary {
+  enabled?: boolean;
+  updatedAtIst?: string;
+  openCautionWindow?: boolean;
+  openSetupGuards?: Record<string, unknown>;
+  slideCaptureLanePolicy?: {
+    enabled?: boolean;
+    windowIst?: string;
+    minEliteScore?: number;
+    symbols?: string;
+  };
+  symbols?: Record<string, IndexSessionSymbolMonitoring>;
 }
 
 export interface Sep917ChecklistStepGuide {

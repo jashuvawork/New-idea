@@ -57,7 +57,7 @@ def index_rally_metrics(
     """Spot rally off session low + slide off session high with chart RSI/MACD."""
     settings = settings or get_settings()
     hi, lo, spot = _session_extremes_and_spot(symbol, snap)
-    chart = snap.spotChart
+    chart = getattr(snap, "spotChart", None)
     rsi = float(getattr(chart, "rsi", 0) or 0) if chart else 0.0
     macd_bias = str(getattr(chart, "macdBias", "") or "NEUTRAL").upper() if chart else "NEUTRAL"
     macd_hist = float(getattr(chart, "macdHistogram", 0) or 0) if chart else 0.0
@@ -106,7 +106,7 @@ def _call_rally_bypass(
     if rally_pts < min_pts:
         return False, f"rally_{rally_pts:.0f}<{min_pts:.0f}pts", metrics
 
-    chart = snap.spotChart
+    chart = getattr(snap, "spotChart", None)
     if chart is None:
         return False, "no_chart", metrics
 
@@ -165,7 +165,7 @@ def _put_slide_bypass(
     if slide_pts < min_pts:
         return False, f"slide_{slide_pts:.0f}<{min_pts:.0f}pts", metrics
 
-    chart = snap.spotChart
+    chart = getattr(snap, "spotChart", None)
     if chart is None:
         return False, "no_chart", metrics
 
