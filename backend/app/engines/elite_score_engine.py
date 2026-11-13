@@ -1497,6 +1497,21 @@ def elite_entry_allowed(
             or 78.0
         )
         min_score = min(min_score, capture_floor)
+    if mirror_snap is not None:
+        from app.engines.index_slide_capture_lane import index_slide_capture_elite_floor
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        _ist = ZoneInfo("Asia/Kolkata")
+        slide_floor = index_slide_capture_elite_floor(
+            evidence,
+            snap=mirror_snap,
+            when=datetime.now(_ist),
+            settings=settings,
+        )
+        if slide_floor is not None:
+            min_score = min(min_score, slide_floor)
+            assessment = {**assessment, "indexSlideCaptureEliteFloor": slide_floor}
     mirror_active = False
     rally_unlock_armed = False
     rally_fingerprint_active = False

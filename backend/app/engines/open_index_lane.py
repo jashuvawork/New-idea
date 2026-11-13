@@ -40,6 +40,35 @@ def _side_value(side: Any) -> str:
     return raw
 
 
+def in_open_side_align_window_at(when: datetime) -> bool:
+    """09:15–open_caution_side_align_until (default 09:30) — cash-open side-align only."""
+    settings = get_settings()
+    if not isinstance(when, datetime):
+        return False
+    local = when.astimezone(IST)
+    try:
+        current = int(local.hour) * 60 + int(local.minute)
+    except (TypeError, ValueError):
+        return False
+
+    def _clock_minutes(hour_attr: str, min_attr: str, default_h: int, default_m: int) -> int:
+        try:
+            h = int(getattr(settings, hour_attr, default_h))
+            m = int(getattr(settings, min_attr, default_m))
+            return h * 60 + m
+        except (TypeError, ValueError):
+            return default_h * 60 + default_m
+
+    earliest = _clock_minutes("open_setup_start_hour", "open_setup_start_minute", 9, 15)
+    end = _clock_minutes(
+        "open_caution_side_align_until_hour",
+        "open_caution_side_align_until_minute",
+        9,
+        30,
+    )
+    return earliest <= current < end
+
+
 def in_open_caution_window_at(when: datetime) -> bool:
     """Same window as session_timing.in_open_caution_window, for replay/tests."""
     settings = get_settings()

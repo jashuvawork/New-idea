@@ -1925,6 +1925,14 @@ def find_best_entry(
         from app.engines.index_session_dominant_trend import index_trend_rank_adjustment
 
         c.score += index_trend_rank_adjustment(c, snapshots, state)
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from app.engines.index_slide_capture_lane import index_slide_capture_rank_adjustment
+
+        c.score += index_slide_capture_rank_adjustment(
+            c, snapshots, when=datetime.now(ZoneInfo("Asia/Kolkata")),
+        )
         from app.engines.best_trade_policy import best_trade_base_rank_adjustment
 
         c.score += best_trade_base_rank_adjustment(c)

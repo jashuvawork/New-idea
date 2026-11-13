@@ -17,6 +17,7 @@ from app.models.schemas import Side, SymbolSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 OPEN = datetime(2026, 10, 29, 9, 35, tzinfo=IST)
+OPEN_SIDE_ALIGN = datetime(2026, 10, 29, 9, 25, tzinfo=IST)
 
 
 def _cand(symbol: str, side: Side, strike: float, *, spot: float | None = None, alert: dict | None = None):
@@ -60,7 +61,7 @@ def test_put_blocked_on_bullish_open(mock_session):
     s = Settings(open_caution_side_align_index_enabled=True)
     snap = SimpleNamespace(spot=73500.0)
     ok, reason, _ = open_caution_side_align_ok(
-        "SENSEX", "PUT", snap, settings=s, when=OPEN,
+        "SENSEX", "PUT", snap, settings=s, when=OPEN_SIDE_ALIGN,
     )
     assert not ok
     assert reason == "open_caution_put_on_bullish_open"
@@ -72,7 +73,7 @@ def test_call_blocked_on_bearish_open(mock_session):
     s = Settings(open_caution_side_align_index_enabled=True)
     snap = SimpleNamespace(spot=73000.0)
     ok, reason, _ = open_caution_side_align_ok(
-        "SENSEX", "CALL", snap, settings=s, when=OPEN,
+        "SENSEX", "CALL", snap, settings=s, when=OPEN_SIDE_ALIGN,
     )
     assert not ok
     assert reason == "open_caution_call_on_bearish_open"
@@ -87,7 +88,8 @@ def test_sensex_put_allowed_on_bearish_open(mock_session):
         open_caution_side_align_index_enabled=True,
     )
     cand = _cand("SENSEX", Side.PUT, 73800.0, spot=73000.0)
-    ok, reason, _ = validate_open_setup_entry(cand, settings=s, when=OPEN)
+    cand.snap.spotChart = SimpleNamespace(momentum5Pct=-0.04)
+    ok, reason, _ = validate_open_setup_entry(cand, settings=s, when=OPEN_SIDE_ALIGN)
     assert ok, reason
 
 

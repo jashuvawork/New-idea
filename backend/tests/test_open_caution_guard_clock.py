@@ -16,7 +16,8 @@ from app.models.schemas import Side
 
 IST = ZoneInfo("Asia/Kolkata")
 MORNING_SNAP = datetime(2026, 11, 5, 9, 20, tzinfo=IST)
-OPEN = datetime(2026, 11, 5, 9, 35, tzinfo=IST)
+OPEN = datetime(2026, 11, 5, 9, 25, tzinfo=IST)
+OPEN_AFTER_SIDE_ALIGN = datetime(2026, 11, 5, 9, 35, tzinfo=IST)
 AFTER_OPEN = datetime(2026, 11, 5, 10, 30, tzinfo=IST)
 
 
@@ -41,6 +42,22 @@ def test_resolve_lane_when_still_uses_snap_for_replay_helpers():
     cand = _cand_bearish_call_block()
     assert resolve_lane_when(cand, None) == MORNING_SNAP
     assert open_setup_guard_when(cand, OPEN) == OPEN
+
+
+@patch("app.engines.index_tick_helpers.resolve_index_session")
+def test_side_align_idle_after_0930_despite_open_caution(mock_session):
+    mock_session.return_value = {
+        "open": 73000.0,
+        "last": 72800.0,
+        "hi": 73000.0,
+        "lo": 72800.0,
+    }
+    s = Settings(open_caution_side_align_index_enabled=True)
+    snap = SimpleNamespace(spot=72800.0)
+    ok, reason, _ = open_caution_side_align_ok(
+        "SENSEX", "CALL", snap, settings=s, when=OPEN_AFTER_SIDE_ALIGN,
+    )
+    assert ok, reason
 
 
 @patch("app.engines.index_tick_helpers.resolve_index_session")
