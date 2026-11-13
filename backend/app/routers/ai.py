@@ -137,6 +137,36 @@ async def window_replay(
         }
 
 
+@router.get("/historical-setup-analysis/{date}")
+async def historical_setup_analysis(
+    date: str,
+    at: str = "10:50:00",
+    symbol: str = "NIFTY",
+    side: str = "PUT",
+    instrument_key: str | None = None,
+):
+    """Point-in-time index/option MTF + base-rip heuristics from Upstox historical candles."""
+    from app.engines.historical_upstox_analysis import analyze_historical_setup
+    from app.services.upstox import UpstoxClient, UpstoxError
+
+    if side.upper() not in ("CALL", "PUT"):
+        raise HTTPException(status_code=400, detail="side must be CALL or PUT")
+    try:
+        client = UpstoxClient()
+        return await analyze_historical_setup(
+            client,
+            symbol=symbol.upper(),
+            session_date=date,
+            at_ist=at,
+            side=side.upper(),
+            instrument_key=instrument_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UpstoxError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.get("/lever-replay-compare/{date}")
 async def lever_replay_compare(
     date: str,
