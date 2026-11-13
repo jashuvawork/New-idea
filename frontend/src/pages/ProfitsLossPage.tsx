@@ -230,7 +230,10 @@ export function ProfitsLossPage({
 
   const flags = deployment?.flags as Record<string, unknown> | undefined;
   const fallbackCap = Number(flags?.fallbackCapitalInr ?? 0);
-  const allocated = auto.capitalAllocation?.perTradeCapitalInr;
+  const maxSizingCap = Number(flags?.maxSizingCapitalInr ?? fallbackCap);
+  const envBook = Math.max(fallbackCap, maxSizingCap);
+  const runtimeBook = auto.capitalAllocation?.availableMarginInr;
+  const perTrade = auto.capitalAllocation?.perTradeCapitalInr;
   const execMode = auto.liveTradingEnabled ? 'LIVE' : 'PAPER';
 
   return (
@@ -251,11 +254,19 @@ export function ProfitsLossPage({
         />
         <KpiCard
           label="API sizing capital"
-          value={fallbackCap > 0 ? `₹${fallbackCap.toLocaleString('en-IN')}` : '—'}
+          value={
+            runtimeBook != null && runtimeBook > 0
+              ? `₹${runtimeBook.toLocaleString('en-IN')}`
+              : fallbackCap > 0
+                ? `₹${fallbackCap.toLocaleString('en-IN')}`
+                : '—'
+          }
           sub={
-            allocated != null && fallbackCap > 0 && Math.abs(allocated - fallbackCap) > 1
-              ? `runtime ₹${allocated.toLocaleString('en-IN')}`
-              : 'book + runtime aligned'
+            runtimeBook != null && envBook > 0 && Math.abs(runtimeBook - envBook) > 1
+              ? `env book ₹${envBook.toLocaleString('en-IN')} · per-trade ₹${(perTrade ?? 0).toLocaleString('en-IN')}`
+              : perTrade != null
+                ? `per-trade sleeve ₹${perTrade.toLocaleString('en-IN')}`
+                : 'book + runtime aligned'
           }
         />
       </div>

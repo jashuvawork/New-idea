@@ -61,8 +61,19 @@ function SystemSnapshot({
   const flags = deployment?.flags as Record<string, unknown> | undefined;
   const parity = flags?.livePaperParity as { settingsAligned?: boolean } | undefined;
   const fallback = Number(flags?.fallbackCapitalInr ?? 0);
+  const maxSizing = Number(flags?.maxSizingCapitalInr ?? fallback);
+  const envBook = Math.max(fallback, maxSizing);
+  const runtimeBook = auto.capitalAllocation?.availableMarginInr;
   const enableLive = Boolean(flags?.enableLiveTrading ?? auto.liveTradingEnabled);
   const paper = Boolean(flags?.paperTrading ?? auto.paperTrading);
+  const capitalAligned =
+    runtimeBook == null || envBook <= 0 || Math.abs(runtimeBook - envBook) <= 1;
+  const capitalValue =
+    runtimeBook != null && runtimeBook > 0
+      ? `₹${runtimeBook.toLocaleString('en-IN')} runtime · env ₹${envBook.toLocaleString('en-IN')}`
+      : fallback > 0
+        ? `₹${fallback.toLocaleString('en-IN')}`
+        : '—';
 
   const rows: { label: string; value: string; warn?: boolean }[] = [
     { label: 'Market', value: marketPhase },
@@ -73,7 +84,7 @@ function SystemSnapshot({
       value: parity?.settingsAligned ? 'On' : 'Check drift',
       warn: parity?.settingsAligned === false,
     },
-    { label: 'Capital alignment', value: fallback > 0 ? `₹${fallback.toLocaleString('en-IN')}` : '—' },
+    { label: 'Capital alignment', value: capitalValue, warn: !capitalAligned },
     {
       label: 'Live readiness',
       value: readiness?.readyForLive ? 'Established' : 'Not established',
@@ -131,19 +142,26 @@ function CapitalAlignmentCallout({
 }) {
   const flags = deployment?.flags as Record<string, unknown> | undefined;
   const fallback = Number(flags?.fallbackCapitalInr ?? 0);
-  const max = Number(flags?.maxSizingCapitalInr ?? fallback);
-  const runtime = auto.capitalAllocation?.perTradeCapitalInr;
+  const maxSizing = Number(flags?.maxSizingCapitalInr ?? fallback);
+  const envBook = Math.max(fallback, maxSizing);
+  const runtimeBook = auto.capitalAllocation?.availableMarginInr;
+  const perTrade = auto.capitalAllocation?.perTradeCapitalInr;
+  const perTradePct = Number(flags?.perTradeCapitalPct ?? 0.9);
   const mismatch =
-    runtime != null && fallback > 0 && (Math.abs(runtime - fallback) > 1 || Math.abs(max - fallback) > 1);
+    runtimeBook != null && envBook > 0 && Math.abs(runtimeBook - envBook) > 1;
   if (!mismatch) return null;
   return (
     <div className="audit-callout">
       <h3 className="text-[12px] font-semibold text-nexus-yellow">Capital alignment required</h3>
       <p className="text-[11px] text-gray-300 mt-2 leading-relaxed">
-        API capital is ₹{fallback.toLocaleString('en-IN')}
-        {runtime != null ? ` but runtime sizing shows ₹${runtime.toLocaleString('en-IN')}` : ''}. Align env capital
-        with POST <span className="font-mono text-nexus-accent">/api/auto-trader/capital</span> before trusting lot
-        sizes.
+        Env sizing book is ₹{envBook.toLocaleString('en-IN')} (FALLBACK / MAX) but the running API book is ₹
+        {runtimeBook.toLocaleString('en-IN')}
+        {perTrade != null
+          ? `. Per-trade sleeve is ₹${perTrade.toLocaleString('en-IN')} (${Math.round(perTradePct * 100)}% of book) — that is expected and not a mismatch.`
+          : '.'}{' '}
+        Align with POST <span className="font-mono text-nexus-accent">/api/auto-trader/capital</span> or{' '}
+        <span className="font-mono text-nexus-accent">deploy/set-paper-capital.sh</span> on EC2 so env and runtime match
+        after restart.
       </p>
     </div>
   );
