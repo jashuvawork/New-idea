@@ -212,16 +212,22 @@ def _timing_hint(
     flip_risk = flip_risk or {}
     risk = str(flip_risk.get("riskLevel") or "NONE").upper()
     pred = flip_risk.get("predictedBullishOptionSide")
+    part = flip_risk.get("participation") or {}
+    part_side = part.get("leadingOptionSide")
+    part_conf = part.get("confidence")
+    part_line = ""
+    if part_side and float(part_conf or 0) >= 0.5:
+        part_line = f" Participation leading {part_side} ({float(part_conf):.0%})."
     if risk in ("CONTESTED", "IMMINENT"):
         ps = pred or "?"
         if risk == "CONTESTED":
             return (
                 f"Leg contested — flip anytime; defer wrong-side chase, "
-                f"favor {ps} at base when pad confirms."
+                f"favor {ps} at base when pad confirms.{part_line}"
             )
         return (
             f"Flip risk {risk.lower()} → favor {ps}; "
-            f"avoid {('PUT' if ps == 'CALL' else 'CALL')} rip until leg confirms."
+            f"avoid {('PUT' if ps == 'CALL' else 'CALL')} rip until leg confirms.{part_line}"
         )
     if leg.get("dominantTrendFlipped"):
         prev = leg.get("dominantTrendPrevious") or "?"

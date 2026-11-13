@@ -78,6 +78,7 @@ def index_imminent_flip_assessment(
         "legMarginPts": 0.0,
         "momentum5Pct": 0.0,
         "indexVelocity3s": 0.0,
+        "participation": {},
         "reasons": [],
     }
     if not out["enabled"]:
@@ -157,6 +158,29 @@ def index_imminent_flip_assessment(
         reasons.append("thin_leg_margin")
         predicted = "SLIDE" if slide >= rally else "RALLY"
 
+    from app.engines.index_flip_participation import (
+        index_flip_participation_assessment,
+        participation_should_lead_flip,
+    )
+
+    participation = index_flip_participation_assessment(snap, settings=settings)
+    out["participation"] = participation
+    predicted, part_reasons = participation_should_lead_flip(
+        dominant,
+        predicted,
+        participation,
+        settings=settings,
+        margin_pts=margin_pts,
+        thin_margin=thin_margin,
+    )
+    for r in part_reasons:
+        if r not in reasons:
+            reasons.append(r)
+    if part_reasons and participation.get("reasons"):
+        for r in participation["reasons"]:
+            if r not in reasons:
+                reasons.append(r)
+
     out["predictedLeg"] = predicted
     out["predictedBullishOptionSide"] = _leg_to_option_side(predicted)
     out["reasons"] = reasons
@@ -210,6 +234,16 @@ def index_imminent_flip_rank_adjustment(
         if risk == "IMMINENT":
             bonus += float(
                 getattr(settings, "index_imminent_flip_imminent_aligned_bonus", 4.0) or 4.0
+            )
+        part = assess.get("participation") or {}
+        lead = _side_u(part.get("leadingOptionSide"))
+        conf = float(part.get("confidence") or 0)
+        min_c = float(
+            getattr(settings, "index_flip_participation_min_confidence", 0.5) or 0.5
+        )
+        if lead and side == lead and conf >= min_c:
+            bonus += float(
+                getattr(settings, "index_flip_participation_aligned_bonus", 5.0) or 5.0
             )
         return bonus
 

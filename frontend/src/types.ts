@@ -564,6 +564,16 @@ export interface IndexSessionSymbolMonitoring {
     contestedLeg?: boolean;
     legMarginPts?: number;
     reasons?: string[];
+    participation?: {
+      leadingOptionSide?: string | null;
+      leadingLeg?: string;
+      confidence?: number;
+      breadthBias?: string | null;
+      pcr?: number;
+      callVotes?: number;
+      putVotes?: number;
+      reasons?: string[];
+    };
   };
   timingHint?: string;
 }

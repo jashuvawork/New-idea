@@ -12,6 +12,13 @@ type IndexLegRow = {
   flipRisk?: {
     riskLevel?: string;
     predictedBullishOptionSide?: string | null;
+    participation?: {
+      leadingOptionSide?: string | null;
+      confidence?: number;
+      breadthBias?: string;
+      callVotes?: number;
+      putVotes?: number;
+    };
   };
   slideCaptureLane?: { armed?: boolean; reason?: string };
   alignedBookPicks?: Array<{
@@ -54,6 +61,13 @@ function IndexCard({ symbol, row }: { symbol: string; row: IndexLegRow }) {
             {row.flipRisk.predictedBullishOptionSide
               ? ` → ${row.flipRisk.predictedBullishOptionSide}`
               : ''}
+          </span>
+        ) : null}
+        {row.flipRisk?.participation?.leadingOptionSide &&
+        (row.flipRisk.participation.confidence ?? 0) >= 0.5 ? (
+          <span className="text-[9px] px-1.5 py-0.5 rounded border border-nexus-accent/40 text-nexus-accent">
+            FLOW {row.flipRisk.participation.leadingOptionSide}{' '}
+            {Math.round((row.flipRisk.participation.confidence ?? 0) * 100)}%
           </span>
         ) : null}
         {side ? (
