@@ -3335,6 +3335,16 @@ class Settings(BaseSettings):
     index_imminent_flip_wrong_side_watch_penalty: float = 40.0
     index_imminent_flip_wrong_side_imminent_penalty: float = 75.0
     index_imminent_flip_wrong_side_contested_penalty: float = 55.0
+    index_flip_participation_enabled: bool = True
+    index_flip_participation_min_votes: int = 2
+    index_flip_participation_min_confidence: float = 0.5
+    index_flip_participation_imminent_confidence: float = 0.65
+    index_flip_participation_pcr_high: float = 1.12
+    index_flip_participation_pcr_low: float = 0.88
+    index_flip_participation_book_score_gap: float = 15.0
+    index_flip_participation_book_vel_gap: float = 0.04
+    index_flip_participation_orderflow_delta_min: float = 25.0
+    index_flip_participation_aligned_bonus: float = 5.0
     open_caution_block_puts_enabled: bool = False
     open_caution_non_lane_index_blocked: bool = True
     # Expiry lanes may CE only the nearest index; aligned CALL/PUT on the other index still trades.
