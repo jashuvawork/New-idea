@@ -2360,4 +2360,23 @@ def rank_entry_candidate(
             reasons = list(result.get("reasons") or [])
             reasons.append("opposite_side_dump_capture")
             result["reasons"] = reasons
+        from app.config import get_settings
+        from app.engines.index_flip_session_low_capture import (
+            index_flip_opposing_side_rank_penalty,
+        )
+
+        side = str(
+            getattr(getattr(candidate, "side", None), "value", None)
+            or getattr(candidate, "side", "")
+            or alert.get("side")
+            or ""
+        )
+        opp_pen = index_flip_opposing_side_rank_penalty(
+            side, live_snapshot, settings=get_settings(),
+        )
+        if opp_pen > 0:
+            result["rankScore"] = max(0.0, float(result.get("rankScore") or 0) - opp_pen)
+            penalties = list(result.get("penalties") or [])
+            penalties.append("index_flip_opposing_participation")
+            result["penalties"] = penalties
     return result

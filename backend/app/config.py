@@ -3345,6 +3345,21 @@ class Settings(BaseSettings):
     index_flip_participation_book_vel_gap: float = 0.04
     index_flip_participation_orderflow_delta_min: float = 25.0
     index_flip_participation_aligned_bonus: float = 5.0
+    # Session-low V rip: participation-led flip lowers elite floor before 15% local-base proof.
+    index_flip_session_low_capture_enabled: bool = True
+    index_flip_session_low_min_off_low_pct: float = 4.0
+    index_flip_session_low_max_off_low_pct: float = 22.0
+    index_flip_session_low_min_velocity_3s: float = 1.2
+    index_flip_session_low_min_velocity_9s: float = 2.0
+    index_flip_session_low_min_volume_surge: float = 1.8
+    index_flip_session_low_min_participation_confidence: float = 0.5
+    index_flip_session_low_elite_score_floor: float = 82.0
+    index_flip_session_low_elite_score_blend: float = 80.0
+    index_flip_opposing_side_rank_penalty_enabled: bool = True
+    index_flip_opposing_side_rank_penalty: float = 18.0
+    explosion_tier_elite_score_floor: float = 58.0
+    explosion_tier_exploding_score_floor: float = 50.0
+    explosion_tier_building_score_floor: float = 42.0
     open_caution_block_puts_enabled: bool = False
     open_caution_non_lane_index_blocked: bool = True
     # Expiry lanes may CE only the nearest index; aligned CALL/PUT on the other index still trades.
