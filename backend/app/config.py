@@ -3312,6 +3312,17 @@ class Settings(BaseSettings):
     index_slide_capture_lane_ce_rank_penalty: float = 12.0
     # HUD: per-index dominant RALLY/SLIDE leg + flip (always-on narrative).
     index_session_narrative_enabled: bool = True
+    # Selector: prefer ``alignedBookPicks`` on clear RALLY/SLIDE leg (index-first #676).
+    index_aligned_book_selector_enabled: bool = True
+    index_aligned_book_picks_limit: int = 5
+    index_aligned_book_near_base_max_pct: float = 28.0
+    index_aligned_book_on_pick_bonus: float = 32.0
+    index_aligned_book_top_pick_extra: float = 14.0
+    index_aligned_book_near_base_extra: float = 10.0
+    index_aligned_book_off_pick_penalty: float = 140.0
+    index_aligned_book_chase_penalty: float = 25.0
+    index_aligned_book_hard_require_enabled: bool = True
+    index_aligned_book_disqualify_penalty: float = 120.0
     open_caution_block_puts_enabled: bool = False
     open_caution_non_lane_index_blocked: bool = True
     # Expiry lanes may CE only the nearest index; aligned CALL/PUT on the other index still trades.

@@ -1933,6 +1933,11 @@ def find_best_entry(
         c.score += index_slide_capture_rank_adjustment(
             c, snapshots, when=datetime.now(ZoneInfo("Asia/Kolkata")),
         )
+        from app.engines.index_aligned_book_selector import (
+            index_aligned_book_rank_adjustment,
+        )
+
+        c.score += index_aligned_book_rank_adjustment(c, snapshots, state)
         from app.engines.best_trade_policy import best_trade_base_rank_adjustment
 
         c.score += best_trade_base_rank_adjustment(c)
