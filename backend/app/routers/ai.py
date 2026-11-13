@@ -167,6 +167,35 @@ async def historical_setup_analysis(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@router.get("/years-index-analysis")
+async def years_index_analysis(
+    symbol: str = "NIFTY",
+    minute_from: str = "2022-01-01",
+    minute_to: str | None = None,
+    max_minute_chunks: int | None = None,
+    include_yahoo_daily: bool = True,
+    include_upstox_minutes: bool = True,
+):
+    """Multi-year index pull (Upstox 1m + Yahoo daily max) and FTV-style profile."""
+    from app.engines.upstox_years_analysis import run_years_analysis
+    from app.services.upstox import UpstoxError
+
+    try:
+        return await run_years_analysis(
+            symbol=symbol.upper(),
+            minute_from=minute_from,
+            minute_to=minute_to,
+            include_yahoo_daily=include_yahoo_daily,
+            include_upstox_minutes=include_upstox_minutes,
+            max_minute_chunks=max_minute_chunks,
+            out_dir=None,
+        )
+    except UpstoxError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/lever-replay-compare/{date}")
 async def lever_replay_compare(
     date: str,
