@@ -21,6 +21,17 @@ def _side_u(raw: Any) -> str:
     return val
 
 
+def aligned_explosion_book_picks(
+    symbol: str,
+    snap: SymbolSnapshot,
+    aligned_side: str | None,
+    *,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    """Same ordering as Analysis HUD ``alignedBookPicks`` (near #676 base first)."""
+    return _aligned_explosion_picks(symbol, snap, aligned_side, limit=limit)
+
+
 def _aligned_explosion_picks(
     symbol: str,
     snap: SymbolSnapshot,
@@ -173,7 +184,7 @@ def index_session_monitoring_summary(
         symbols_out[sym] = {
             **leg,
             "slideCaptureLane": slide_lane,
-            "alignedBookPicks": _aligned_explosion_picks(sym, snap, aligned),
+            "alignedBookPicks": aligned_explosion_book_picks(sym, snap, aligned),
             "timingHint": _timing_hint(leg, slide_lane),
         }
 
