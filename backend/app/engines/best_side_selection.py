@@ -43,7 +43,7 @@ def side_velocity_metrics(snap: SymbolSnapshot) -> dict[str, Any]:
     call_v3 = put_v3 = 0.0
     call_score = put_score = 0.0
 
-    for entry in snap.explosiveRunnerWatchlist or []:
+    for entry in getattr(snap, "explosiveRunnerWatchlist", None) or []:
         side = _side_str(entry.get("side", ""))
         vel = float(entry.get("premiumVelocityPct", 0) or 0)
         score = float(entry.get("score", 0) or 0)
@@ -54,7 +54,7 @@ def side_velocity_metrics(snap: SymbolSnapshot) -> dict[str, Any]:
             put_v3 = max(put_v3, vel)
             put_score = max(put_score, score)
 
-    for alert in snap.explosionAlerts or []:
+    for alert in getattr(snap, "explosionAlerts", None) or []:
         side = _side_str(alert.get("side", ""))
         v3 = float(alert.get("velocity3s", 0) or 0)
         score = float(alert.get("explosionScore", 0) or 0)
@@ -65,7 +65,7 @@ def side_velocity_metrics(snap: SymbolSnapshot) -> dict[str, Any]:
             put_v3 = max(put_v3, v3)
             put_score = max(put_score, score)
 
-    top = snap.topExplosion or {}
+    top = getattr(snap, "topExplosion", None) or {}
     top_side = _side_str(top.get("side", ""))
     top_v3 = float(top.get("velocity3s", 0) or 0)
     top_score = float(top.get("explosionScore", 0) or 0)
@@ -76,7 +76,7 @@ def side_velocity_metrics(snap: SymbolSnapshot) -> dict[str, Any]:
         put_v3 = max(put_v3, top_v3)
         put_score = max(put_score, top_score)
 
-    runner = snap.explosiveRunner
+    runner = getattr(snap, "explosiveRunner", None)
     if runner and runner.side:
         rs = _side_str(runner.side)
         rv = float(getattr(runner.signal, "premiumVelocityPct", 0) or 0) if runner.signal else 0.0

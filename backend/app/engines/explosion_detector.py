@@ -765,14 +765,16 @@ def _apply_sticky_score(strike_key: str, score: float, tier: str) -> float:
     # Retain for BUILDING+ so early ICT flat→vertical doesn't flicker below gates.
     if _TIER_RANK.get(str(tier or "").upper(), 0) >= _TIER_RANK["BUILDING"] or held > score:
         _score_sticky[strike_key] = (held, now + timedelta(seconds=hold_s))
-    try:
-        from app.engines.index_flip_session_low_capture import tier_explosion_score_floor
+    # Tier floor only during an active sticky window (not on unrelated fresh reads).
+    if prev and now < prev[1]:
+        try:
+            from app.engines.index_flip_session_low_capture import tier_explosion_score_floor
 
-        tier_floor = tier_explosion_score_floor(tier)
-        if tier_floor > 0:
-            held = max(held, tier_floor)
-    except Exception:
-        pass
+            tier_floor = tier_explosion_score_floor(tier)
+            if tier_floor > 0:
+                held = max(held, tier_floor)
+        except Exception:
+            pass
     return round(held, 1)
 
 
