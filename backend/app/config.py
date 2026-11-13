@@ -3323,6 +3323,16 @@ class Settings(BaseSettings):
     index_aligned_book_chase_penalty: float = 25.0
     index_aligned_book_hard_require_enabled: bool = True
     index_aligned_book_disqualify_penalty: float = 120.0
+    # Index leg may flip when both rally/slide arms are live — penalize wrong-side chase.
+    index_imminent_flip_enabled: bool = True
+    index_imminent_flip_thin_margin_pts: float = 25.0
+    index_imminent_flip_mom5_threshold: float = 0.02
+    index_imminent_flip_velocity_3s: float = 0.015
+    index_imminent_flip_aligned_bonus: float = 6.0
+    index_imminent_flip_imminent_aligned_bonus: float = 4.0
+    index_imminent_flip_wrong_side_watch_penalty: float = 40.0
+    index_imminent_flip_wrong_side_imminent_penalty: float = 75.0
+    index_imminent_flip_wrong_side_contested_penalty: float = 55.0
     open_caution_block_puts_enabled: bool = False
     open_caution_non_lane_index_blocked: bool = True
     # Expiry lanes may CE only the nearest index; aligned CALL/PUT on the other index still trades.

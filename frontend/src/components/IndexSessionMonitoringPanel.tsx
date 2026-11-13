@@ -9,6 +9,10 @@ type IndexLegRow = {
   dominantTrendPrevious?: string;
   callRallyUnlockArmed?: boolean;
   putSlideUnlockArmed?: boolean;
+  flipRisk?: {
+    riskLevel?: string;
+    predictedBullishOptionSide?: string | null;
+  };
   slideCaptureLane?: { armed?: boolean; reason?: string };
   alignedBookPicks?: Array<{
     strike?: number;
@@ -42,6 +46,14 @@ function IndexCard({ symbol, row }: { symbol: string; row: IndexLegRow }) {
         {row.dominantTrendFlipped ? (
           <span className="text-[9px] px-1.5 py-0.5 rounded border border-nexus-accent/50 text-nexus-accent">
             FLIP {row.dominantTrendPrevious ?? '?'} → {row.dominantLeg}
+          </span>
+        ) : null}
+        {row.flipRisk?.riskLevel && row.flipRisk.riskLevel !== 'NONE' ? (
+          <span className="text-[9px] px-1.5 py-0.5 rounded border border-nexus-yellow/60 text-nexus-yellow">
+            FLIP RISK {row.flipRisk.riskLevel}
+            {row.flipRisk.predictedBullishOptionSide
+              ? ` → ${row.flipRisk.predictedBullishOptionSide}`
+              : ''}
           </span>
         ) : null}
         {side ? (

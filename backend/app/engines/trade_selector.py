@@ -1938,6 +1938,9 @@ def find_best_entry(
         )
 
         c.score += index_aligned_book_rank_adjustment(c, snapshots, state)
+        from app.engines.index_imminent_flip import index_imminent_flip_rank_adjustment
+
+        c.score += index_imminent_flip_rank_adjustment(c, snapshots, state)
         from app.engines.best_trade_policy import best_trade_base_rank_adjustment
 
         c.score += best_trade_base_rank_adjustment(c)

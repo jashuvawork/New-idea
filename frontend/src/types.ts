@@ -557,6 +557,14 @@ export interface IndexSessionSymbolMonitoring {
   putSlideUnlockArmed?: boolean;
   slideCaptureLane?: { armed?: boolean; reason?: string; dominantTrend?: string };
   alignedBookPicks?: IndexAlignedBookPick[];
+  flipRisk?: {
+    riskLevel?: string;
+    predictedLeg?: string;
+    predictedBullishOptionSide?: string | null;
+    contestedLeg?: boolean;
+    legMarginPts?: number;
+    reasons?: string[];
+  };
   timingHint?: string;
 }
 

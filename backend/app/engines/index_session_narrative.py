@@ -181,11 +181,15 @@ def index_session_monitoring_summary(
                 "reason": lane_reason,
                 "dominantTrend": lane_meta.get("dominantTrend"),
             }
+        from app.engines.index_imminent_flip import index_imminent_flip_assessment
+
+        flip_risk = index_imminent_flip_assessment(sym, snap, state, settings=settings)
         symbols_out[sym] = {
             **leg,
             "slideCaptureLane": slide_lane,
             "alignedBookPicks": aligned_explosion_book_picks(sym, snap, aligned),
-            "timingHint": _timing_hint(leg, slide_lane),
+            "flipRisk": flip_risk,
+            "timingHint": _timing_hint(leg, slide_lane, flip_risk),
         }
 
     return {
@@ -198,9 +202,27 @@ def index_session_monitoring_summary(
     }
 
 
-def _timing_hint(leg: dict[str, Any], slide_lane: dict[str, Any]) -> str:
+def _timing_hint(
+    leg: dict[str, Any],
+    slide_lane: dict[str, Any],
+    flip_risk: dict[str, Any] | None = None,
+) -> str:
     trend = str(leg.get("dominantLeg") or "NEUTRAL").upper()
     side = leg.get("bullishOptionSide")
+    flip_risk = flip_risk or {}
+    risk = str(flip_risk.get("riskLevel") or "NONE").upper()
+    pred = flip_risk.get("predictedBullishOptionSide")
+    if risk in ("CONTESTED", "IMMINENT"):
+        ps = pred or "?"
+        if risk == "CONTESTED":
+            return (
+                f"Leg contested — flip anytime; defer wrong-side chase, "
+                f"favor {ps} at base when pad confirms."
+            )
+        return (
+            f"Flip risk {risk.lower()} → favor {ps}; "
+            f"avoid {('PUT' if ps == 'CALL' else 'CALL')} rip until leg confirms."
+        )
     if leg.get("dominantTrendFlipped"):
         prev = leg.get("dominantTrendPrevious") or "?"
         return f"Flip {prev} → {trend} — trade {side or 'flat'} at base after confirm."

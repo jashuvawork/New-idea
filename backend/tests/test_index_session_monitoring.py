@@ -43,9 +43,13 @@ def test_monitoring_prefers_near_base_aligned_picks(mock_narr):
             ],
         ),
     }
+    flip_stub = {"riskLevel": "NONE", "predictedBullishOptionSide": "PUT"}
     with patch(
         "app.engines.index_slide_capture_lane.index_slide_capture_lane_status",
         return_value=(True, "ok", {"dominantTrend": "SLIDE"}),
+    ), patch(
+        "app.engines.index_imminent_flip.index_imminent_flip_assessment",
+        return_value=flip_stub,
     ):
         out = index_session_monitoring_summary(
             snapshots,
