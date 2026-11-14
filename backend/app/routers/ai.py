@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from app.engines.ai_learning import get_ai_learning
 from app.engines.composer_market_monitor import (
@@ -242,6 +243,38 @@ async def upstox_five_year_analysis_status(symbol: str = "NIFTY"):
         out["backgroundTaskDone"] = _five_year_task.done()
         if _five_year_task.done() and _five_year_task.exception():
             out["backgroundTaskError"] = str(_five_year_task.exception())
+    return out
+
+
+class OptionsDataLinkBody(BaseModel):
+    url: str = Field(..., min_length=8, description="HTTPS link to options 1m .csv or .zip (Drive ok)")
+    persist: bool = True
+
+
+@router.post("/options-data/from-link")
+async def options_data_from_link(body: OptionsDataLinkBody):
+    """Download options history from URL, analyze, persist training priors under TRADE_STORE_DIR."""
+    from app.engines.options_upload_from_link import run_options_upload_from_link
+
+    try:
+        return await asyncio.to_thread(
+            run_options_upload_from_link, body.url, persist=body.persist
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("options_data_from_link failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/options-data/training-results")
+async def options_data_training_results():
+    """Latest options upload training profile (from POST /options-data/from-link)."""
+    from app.engines.options_upload_from_link import load_latest_training
+
+    out = load_latest_training()
+    if not out:
+        raise HTTPException(status_code=404, detail="no training results yet")
     return out
 
 
