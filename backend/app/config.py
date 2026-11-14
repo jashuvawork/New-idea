@@ -344,10 +344,10 @@ class Settings(BaseSettings):
     top_trades_only_block_chop_unless_must_take: bool = True
     top_trades_only_require_near_base_or_must_take: bool = True
     # Sep 9–17 near-base ELITE FTV/V waives chop/expiry-worst block (both CE + PE).
-    top_trades_only_near_base_waives_chop: bool = True
-    top_trades_only_ce_at_base_waives_chop: bool = True
+    top_trades_only_near_base_waives_chop: bool = False
+    top_trades_only_ce_at_base_waives_chop: bool = False
     # CHOP + RALLY only: waive top-trades chop block for rally-unlocked CE (not plain CHOP DAY).
-    top_trades_only_chop_rally_ce_unlock_enabled: bool = True
+    top_trades_only_chop_rally_ce_unlock_enabled: bool = False
     top_trades_only_chop_rally_allow_building_tier: bool = True
     # CHOP + RALLY only: BUILDING CE in capture window when LTP scoreboard ready + local≤15%.
     top_trades_only_chop_rally_ce_capture_window_enabled: bool = True
@@ -356,12 +356,12 @@ class Settings(BaseSettings):
     top_trades_only_ce_allow_building_tier: bool = True
     top_trades_only_ce_building_capture_enabled: bool = True
     # PE mirror — slide-unlock / at-base waives top-trades chop (symmetric to CE rally unlock).
-    top_trades_only_pe_at_base_waives_chop: bool = True
+    top_trades_only_pe_at_base_waives_chop: bool = False
     top_trades_only_pe_best_trade_unlock_enabled: bool = True
-    top_trades_only_chop_rally_pe_unlock_enabled: bool = True
+    top_trades_only_chop_rally_pe_unlock_enabled: bool = False
     top_trades_only_pe_allow_building_tier: bool = True
     # Session side alignment (#623) — off by default; Sep 9–17 day-mode machinery only.
-    session_side_alignment_enabled: bool = False
+    session_side_alignment_enabled: bool = True
     # Legacy alias — kept for deploy configs; session_side_alignment_enabled takes precedence.
     chop_day_require_side_alignment_enabled: bool = False
     # Symmetric Sep 9–17 near-base window for CE (0 = same 20% band as PE).
@@ -389,7 +389,7 @@ class Settings(BaseSettings):
     pe_win_ce_mirror_max_local_pct: float = 15.0
     pe_win_ce_mirror_min_velocity_3s: float = 1.0
     pe_win_ce_mirror_building_rip_grace_seconds: int = 300
-    pe_win_ce_mirror_waive_chop_shallow: bool = True
+    pe_win_ce_mirror_waive_chop_shallow: bool = False
     pe_win_ce_mirror_waive_premium_fade: bool = True
     pe_win_ce_mirror_premium_fade_max_drawdown_pct: float = -1.0
     pe_win_ce_mirror_rally_pts_fraction: float = 0.5
@@ -429,7 +429,7 @@ class Settings(BaseSettings):
     put_at_base_best_trade_min_grade: str = "A"
     call_rally_unlock_waive_mtf_premium_fade: bool = True
     call_rally_unlock_near_miss_enabled: bool = True
-    call_rally_unlock_waive_chop_shallow: bool = True
+    call_rally_unlock_waive_chop_shallow: bool = False
     # After trail-proved same-side win: allow next leg when index rally/slide unlock is armed (normal trend days).
     session_win_side_continuation_enabled: bool = True
     # CE at base — same near-base max-lots bar as PE best trades (score ≥90, local ≤20%).
@@ -632,7 +632,7 @@ class Settings(BaseSettings):
     elite_trade_block_worst_day_type_enabled: bool = True
     # Block CALL on chop day modes when still very near base (Sep03 EOD loser).
     # Off with symmetric CE/PE — PE never had this; CE uses same near-base explosive path.
-    elite_call_chop_shallow_block_enabled: bool = False
+    elite_call_chop_shallow_block_enabled: bool = True
     elite_call_chop_shallow_max_local_pct: float = 10.0
     # V-RIP shallow entries must show firstLift, not tier-inferred breakout alone.
     elite_v_rip_shallow_require_first_lift_enabled: bool = True
@@ -3187,9 +3187,9 @@ class Settings(BaseSettings):
     open_setup_start_minute: int = 15
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
-    # First order clock — 09:20 IST (#794 paper book); open setup book still starts 09:15.
+    # First order clock — 09:45 IST (audit: avoid pre-09:45 chop losers); open setup book still 09:15–09:45 for radar only.
     entry_earliest_hour: int = 9
-    entry_earliest_minute: int = 20
+    entry_earliest_minute: int = 45
     # Macro side check 09:25–09:45. Idle before 09:25 and after 09:45.
     # The cash-candle hold covers 09:15–09:45. First order at 09:15 with open-setup guards.
     open_side_confirmation_enabled: bool = True
@@ -3452,7 +3452,7 @@ class Settings(BaseSettings):
     # Open premium explosion aligns with open setup (09:15–09:45). Mid-rip still gated by lanes + first lift.
     explosion_open_entry_enabled: bool = True
     explosion_entry_earliest_hour: int = 9
-    explosion_entry_earliest_minute: int = 20
+    explosion_entry_earliest_minute: int = 45
     # Open premium explosion — NIFTY PE 60→160 style gap rips at 9:15
     open_premium_explosion_enabled: bool = True
     open_premium_min_move_pct: float = 25.0
@@ -3584,7 +3584,7 @@ class Settings(BaseSettings):
     open_gap_elite_mtf_bypass_enabled: bool = True
     open_gap_elite_mtf_min_move_pct: float = 40.0
     # Pre-10 chop: never block ELITE; allow EXPLODING open-gaps ≥ this move.
-    open_gap_chop_elite_bypass_enabled: bool = True
+    open_gap_chop_elite_bypass_enabled: bool = False
     # Near-expiry (today/tomorrow): allow breadth-aligned ELITE/EXPLODING on the
     # expiry symbol itself — don't force alternate-index routing.
     open_gap_near_expiry_symbol_allow_enabled: bool = True

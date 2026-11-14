@@ -17,40 +17,40 @@ from app.services import trade_store
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def test_entries_blocked_before_920():
+def test_entries_blocked_before_945():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 19, 59, tzinfo=IST)
+            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 44, 59, tzinfo=IST)
             ok, reason = entries_allowed_now()
     assert not ok
-    assert "09:20" in reason
+    assert "09:45" in reason
 
 
 def test_entries_blocked_at_915_open_setup_only():
-    """09:15–09:19: open book active but first order clock still 09:20."""
+    """09:15–09:44: open caution / radar only; first order clock at 09:45."""
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 15, 0, tzinfo=IST)
+            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 20, 0, tzinfo=IST)
             ok, reason = entries_allowed_now()
     assert not ok
-    assert "09:20" in reason
+    assert "09:45" in reason
 
 
-def test_explosion_and_entries_aligned_at_920():
+def test_explosion_and_entries_aligned_at_945():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 10, 21, 9, 20, 0, tzinfo=IST)
+            mock_dt.now.return_value = datetime(2026, 10, 21, 9, 45, 0, tzinfo=IST)
             early_ok, _ = explosion_entries_allowed_now()
             ok, reason = entries_allowed_now()
-    assert early_ok is False  # no gap when explosion clock == entry clock (both 09:20)
+    assert early_ok is False  # no gap when explosion clock == entry clock (both 09:45)
     assert ok is True
     assert reason == "ok"
 
 
-def test_entries_allowed_at_920():
+def test_entries_allowed_at_945():
     with patch("app.engines.session_timing.get_market_phase", return_value="LIVE_MARKET"):
         with patch("app.engines.session_timing.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 20, 0, tzinfo=IST)
+            mock_dt.now.return_value = datetime(2026, 6, 30, 9, 45, 0, tzinfo=IST)
             ok, reason = entries_allowed_now()
     assert ok
 
