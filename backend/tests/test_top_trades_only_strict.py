@@ -128,8 +128,8 @@ def test_allows_elite_near_base_on_directional_day():
     assert blocked is False
 
 
-def test_near_base_elite_put_waives_expiry_worst_chop_block():
-    """Sep 9–17 PE on EXPIRY WORST — near-base ELITE FTV/V must not die on chop block."""
+def test_near_base_elite_put_blocked_on_expiry_worst_chop_default():
+    """Audit discipline — near-base ELITE still blocked on chop/expiry-worst (no chop waiver)."""
     ev = _evidence(tier="ELITE", setup="FTV")
     ranking = _ranking()
     assessment = {
@@ -142,12 +142,12 @@ def test_near_base_elite_put_waives_expiry_worst_chop_block():
     blocked, reason = top_trades_only_blocks_entry(
         ev, ranking, assessment, day_mode="EXPIRY WORST", side="PUT",
     )
-    assert blocked is False
-    assert reason == ""
+    assert blocked is True
+    assert "chop" in reason.lower() or "TOP_TRADES" in reason
 
 
-def test_near_base_elite_call_waives_chop_day_without_rally_unlock():
-    """Sep 9–17 CE near-base on CHOP DAY — symmetric chop waiver (not CE-only path)."""
+def test_near_base_elite_call_blocked_on_chop_day_default():
+    """Audit discipline — CE near-base on CHOP DAY blocked (chop rally unlock off)."""
     ev = _evidence(tier="ELITE", side="CALL")
     ranking = _ranking(side="CALL")
     assessment = {
@@ -160,8 +160,7 @@ def test_near_base_elite_call_waives_chop_day_without_rally_unlock():
     blocked, reason = top_trades_only_blocks_entry(
         ev, ranking, assessment, day_mode="CHOP DAY", side="CALL",
     )
-    assert blocked is False
-    assert reason == ""
+    assert blocked is True
 
 
 @patch("app.engines.elite_score_engine.resolve_elite_session_day_type", return_value=("CHOP DAY", "CHOP"))

@@ -157,7 +157,7 @@ def test_mirror_fingerprint_accepts_building_rip(mock_armed):
     assert ok is True
 
 
-def test_chop_shallow_waived_for_mirror():
+def test_chop_shallow_not_waived_for_mirror_by_default():
     blocked, reason = elite_call_chop_shallow_blocked(
         "CALL",
         "CHOP DAY",
@@ -165,8 +165,8 @@ def test_chop_shallow_waived_for_mirror():
         settings=Settings(elite_call_chop_shallow_block_enabled=True),
         mirror_waived=True,
     )
-    assert blocked is False
-    assert reason == ""
+    assert blocked is True
+    assert reason == "elite_call_chop_shallow_blocked"
 
 
 @patch("app.engines.pe_win_ce_mirror.pe_win_ce_mirror_armed")
