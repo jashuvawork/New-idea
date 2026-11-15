@@ -61,6 +61,9 @@ def main() -> int:
         f"MAX_SIZING_CAPITAL_INR={int(args.capital_inr)}",
         f"PAPER_LAB_PROD_API_BASE={args.api_base}",
         "PAPER_LAB_USE_PROD_SNAPSHOTS=true",
+        "PAPER_LAB_BASE_RIP_ENABLED=true",
+        "UNIFIED_PROFIT_LADDER_ENABLED=true",
+        "LAB_EXPERIMENT_NOTES=base-to-max-rip-v1",
     ]
     # Mirror a few clock gates from prod HUD (optional)
     ee = flags.get("entryEarliestIst")

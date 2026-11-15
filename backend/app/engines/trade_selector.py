@@ -848,6 +848,10 @@ def _explosion_candidates(
         rank += min(15, event.velocity_3s * 2)
         rank += min(10, event.velocity_9s)
         rank += index_moment_rank_bonus(snap, event.side)
+        from app.engines.paper_lab_base_rip import paper_lab_base_rip_rank_bonus
+
+        rip_alert = alert if isinstance(alert, dict) else {}
+        rank += paper_lab_base_rip_rank_bonus(rip_alert, settings)
         from app.engines.loss_triggered_side_flip import loss_triggered_side_flip_rank_bonus
         from types import SimpleNamespace
 

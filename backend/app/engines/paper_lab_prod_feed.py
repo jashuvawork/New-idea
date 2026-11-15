@@ -90,6 +90,15 @@ async def maybe_run_prod_snapshot_cycle(*, broadcast: bool = False) -> bool:
     _last_data_ready = True
     tag = str(getattr(settings, "lab_session_tag", "") or "local-paper-lab")
     await process(multi.snapshots, client=None)
+    try:
+        from app.engines.paper_lab_base_rip import (
+            append_monitor_artifact,
+            build_index_base_rip_monitor,
+        )
+
+        append_monitor_artifact(build_index_base_rip_monitor(multi.snapshots))
+    except Exception:
+        pass
     logger.debug("Paper lab cycle complete (%s, %d symbols)", tag, len(multi.snapshots))
     return True
 
