@@ -1869,6 +1869,19 @@ def _volume_awakening(
     return v3 >= min_v3 or open_move >= settings.open_premium_min_move_pct
 
 
+def _apply_min_strike_half_width_scan(symbol: str, settings: Any, base: float) -> float:
+    """Floor ATM±scan in strike steps so WS/radar never clip to <N listed strikes."""
+    min_steps = int(getattr(settings, "explosion_scan_strike_half_width_min", 0) or 0)
+    if min_steps <= 0:
+        return base
+    try:
+        from app.engines.moneyness import strike_step
+
+        return max(base, float(strike_step(symbol)) * min_steps)
+    except Exception:
+        return base
+
+
 def resolve_explosion_scan_range(
     symbol: str,
     settings=None,
@@ -1896,14 +1909,20 @@ def resolve_explosion_scan_range(
             try:
                 from app.engines.expiry_day_guards import resolve_expiry_itm_scan_range
 
-                return resolve_expiry_itm_scan_range(symbol)
+                return _apply_min_strike_half_width_scan(
+                    symbol, settings, resolve_expiry_itm_scan_range(symbol),
+                )
             except Exception:
                 if symbol.upper() == "SENSEX":
-                    return float(getattr(settings, "expiry_sensex_itm_scan_range", 1200) or 1200)
-                return float(getattr(settings, "expiry_itm_scan_range", 800) or 800)
+                    base = float(getattr(settings, "expiry_sensex_itm_scan_range", 1200) or 1200)
+                else:
+                    base = float(getattr(settings, "expiry_itm_scan_range", 800) or 800)
+                return _apply_min_strike_half_width_scan(symbol, settings, base)
         if symbol.upper() == "SENSEX":
-            return float(getattr(settings, "explosion_sensex_worst_day_scan_range", 500) or 500)
-        return float(getattr(settings, "explosion_worst_day_scan_range", 500) or 500)
+            base = float(getattr(settings, "explosion_sensex_worst_day_scan_range", 500) or 500)
+        else:
+            base = float(getattr(settings, "explosion_worst_day_scan_range", 500) or 500)
+        return _apply_min_strike_half_width_scan(symbol, settings, base)
 
     if tight_scan is None:
         try:
@@ -1919,14 +1938,20 @@ def resolve_explosion_scan_range(
             try:
                 from app.engines.expiry_day_guards import resolve_expiry_itm_scan_range
 
-                return resolve_expiry_itm_scan_range(symbol)
+                return _apply_min_strike_half_width_scan(
+                    symbol, settings, resolve_expiry_itm_scan_range(symbol),
+                )
             except Exception:
                 if symbol.upper() == "SENSEX":
-                    return float(getattr(settings, "expiry_sensex_itm_scan_range", 1200) or 1200)
-                return float(getattr(settings, "expiry_itm_scan_range", 800) or 800)
+                    base = float(getattr(settings, "expiry_sensex_itm_scan_range", 1200) or 1200)
+                else:
+                    base = float(getattr(settings, "expiry_itm_scan_range", 800) or 800)
+                return _apply_min_strike_half_width_scan(symbol, settings, base)
         if symbol.upper() == "SENSEX":
-            return float(getattr(settings, "explosion_sensex_worst_day_scan_range", 500) or 500)
-        return float(getattr(settings, "explosion_worst_day_scan_range", 500) or 500)
+            base = float(getattr(settings, "explosion_sensex_worst_day_scan_range", 500) or 500)
+        else:
+            base = float(getattr(settings, "explosion_worst_day_scan_range", 500) or 500)
+        return _apply_min_strike_half_width_scan(symbol, settings, base)
 
     base = float(getattr(settings, "explosion_scan_range", 800) or 800)
     if symbol.upper() == "SENSEX":
@@ -1939,7 +1964,7 @@ def resolve_explosion_scan_range(
             base *= 1.15
     except Exception:
         pass
-    return base
+    return _apply_min_strike_half_width_scan(symbol, settings, base)
 
 
 def _expiry_open_near_atm_shallow_otm(

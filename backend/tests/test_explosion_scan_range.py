@@ -40,6 +40,22 @@ def test_sensex_scan_range_covers_76500_pe():
     assert resolve_explosion_scan_range("SENSEX", s) >= 1500
 
 
+def test_worst_day_scan_minimum_strike_half_width():
+    """Audit C5: SENSEX tight 500pt band must still cover ±10 strikes (1000pt)."""
+    s = _settings()
+    s.expiry_itm_monitor_enabled = False
+    s.explosion_worst_day_scan_range = 500
+    s.explosion_sensex_worst_day_scan_range = 500
+    s.explosion_scan_strike_half_width_min = 10
+    s.sensex_strike_step = 100.0
+    with patch("app.config.get_settings", return_value=s):
+        with patch(
+            "app.engines.expiry_day_guards.any_expiry_session_active",
+            return_value=True,
+        ):
+            assert resolve_explosion_scan_range("SENSEX", s, tight_scan=True) >= 1000
+
+
 def test_deep_otm_premium_bypass_disabled_when_atm_itm_only():
     s = _settings(atm_itm_only=True)
     # Sub-band premiums never scan when ATM+ITM-only is on.

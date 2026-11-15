@@ -31,7 +31,8 @@ def test_legacy_premium_band_and_otm_flags():
     assert s.max_option_premium_inr == 350.0
     assert s.explosion_max_premium_inr == 350.0
     assert s.explosion_shallow_otm_entry_enabled is False
-    assert s.explosion_shallow_otm_history_steps == 0
+    # Radar may track 1-step OTM for ATM rotation; entries remain ATM/ITM only.
+    assert s.explosion_shallow_otm_history_steps == 1
     assert s.best_trade_cheap_base_rank_priority_enabled is False
     assert s.near_base_session_capture_enabled is False
     assert s.put_slide_unlock_waive_expiry_otm is False
