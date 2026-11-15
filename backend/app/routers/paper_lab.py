@@ -3,8 +3,11 @@
 from fastapi import APIRouter
 
 from app.engines.paper_lab_base_rip import build_index_base_rip_monitor
-from app.engines.paper_lab_prod_feed import maybe_run_prod_snapshot_cycle, paper_lab_status
-from app.engines.paper_lab_prod_feed import fetch_prod_multi_snapshot
+from app.engines.paper_lab_prod_feed import (
+    fetch_prod_multi_snapshot,
+    maybe_run_prod_snapshot_cycle,
+    paper_lab_status,
+)
 
 router = APIRouter(prefix="/api/paper-lab", tags=["paper-lab"])
 
