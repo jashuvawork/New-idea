@@ -54,6 +54,28 @@ def _patch_live_close(closes: list[float], spot: float) -> list[float]:
     return out
 
 
+def _patch_forming_candle_ohlc(candles: list, spot: float) -> list:
+    """Extend forming bar high/low with live spot — avoids stale extremes from prior bar."""
+    if not candles or spot <= 0:
+        return candles
+    patched = [list(c) if isinstance(c, list) else dict(c) for c in candles]
+    last = patched[-1]
+    if isinstance(last, list) and len(last) >= 4:
+        hi = float(last[2] or 0)
+        lo = float(last[3] or 0)
+        last[2] = max(hi, spot) if hi > 0 else spot
+        last[3] = min(lo, spot) if lo > 0 else spot
+        if len(last) >= 5:
+            last[4] = spot
+    elif isinstance(last, dict):
+        hi = float(last.get("high") or 0)
+        lo = float(last.get("low") or 0)
+        last["high"] = max(hi, spot) if hi > 0 else spot
+        last["low"] = min(lo, spot) if lo > 0 else spot
+        last["close"] = spot
+    return patched
+
+
 def _indicator_closes(candles_5m: list, candles_1m: list | None) -> list[float]:
     """RSI/MACD input for the 5m spot chart.
 
@@ -95,6 +117,9 @@ def build_spot_chart(
     Index chart read from 5m candles: direction, EMA9/21, RSI, MACD.
     RSI/MACD use extended 5m series resampled from 1m when available (MACD warmup).
     """
+    candles_5m = _patch_forming_candle_ohlc(candles_5m, spot)
+    if indicator_candles_1m:
+        indicator_candles_1m = _patch_forming_candle_ohlc(indicator_candles_1m, spot)
     opens, _, _, closes = _candle_rows(candles_5m)
     ind_closes = _indicator_closes(candles_5m, indicator_candles_1m)
     closes = _patch_live_close(closes, spot)

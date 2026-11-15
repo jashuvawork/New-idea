@@ -174,9 +174,10 @@ async def _refresh_option_keys() -> list[str]:
 
 
 async def _subscription_refresh_loop(ws) -> None:
-    """Periodically add new option keys as chains update."""
+    """Periodically recentre ATM ±band: add new strikes, prune stale OTM keys."""
     global _subscription_keys, _subscribed_count
     settings = get_settings()
+    churn_chunk = 100
     while True:
         await asyncio.sleep(settings.upstox_ws_resubscribe_seconds)
         try:
@@ -185,13 +186,21 @@ async def _subscription_refresh_loop(ws) -> None:
             desired = base | set(option_keys)
             to_add = sorted(desired - _subscription_keys)
             if to_add:
-                # Upstox allows batched sub; chunk to avoid huge payloads
-                chunk = 100
-                for i in range(0, len(to_add), chunk):
-                    await _send_subscribe(ws, to_add[i : i + chunk])
+                for i in range(0, len(to_add), churn_chunk):
+                    await _send_subscribe(ws, to_add[i : i + churn_chunk])
                 _subscription_keys |= set(to_add)
                 _subscribed_count = len(_subscription_keys)
                 logger.info("WS subscribed +%d keys (total %d)", len(to_add), _subscribed_count)
+            if bool(getattr(settings, "upstox_ws_prune_outside_band_enabled", True)):
+                to_remove = sorted(
+                    k for k in _subscription_keys if k not in desired and k not in base
+                )
+                if to_remove:
+                    for i in range(0, len(to_remove), churn_chunk):
+                        await _send_unsubscribe(ws, to_remove[i : i + churn_chunk])
+                    _subscription_keys -= set(to_remove)
+                    _subscribed_count = len(_subscription_keys)
+                    logger.info("WS unsubscribed -%d keys (total %d)", len(to_remove), _subscribed_count)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -200,12 +209,12 @@ async def _subscription_refresh_loop(ws) -> None:
 
 async def _consume_loop(ws) -> None:
     global _last_message_mono, _decode_empty_count
-    stale_seconds = 90
+    stale_seconds = int(getattr(get_settings(), "upstox_ws_stale_seconds", 20) or 20)
     while True:
         try:
             raw = await asyncio.wait_for(ws.recv(), timeout=stale_seconds)
         except asyncio.TimeoutError:
-            raise RuntimeError("WS stale — no feed data in 90s")
+            raise RuntimeError(f"WS stale — no feed data in {stale_seconds}s")
         _last_message_mono = time.monotonic()
         if isinstance(raw, str):
             continue

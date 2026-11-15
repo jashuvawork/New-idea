@@ -260,7 +260,13 @@ class Settings(BaseSettings):
     upstox_ws_enabled: bool = True
     upstox_ws_mode: str = "ltpc"  # ltpc | full | full_d30 | option_greeks
     upstox_ws_reconnect_seconds: int = 5
-    upstox_ws_resubscribe_seconds: int = 30
+    upstox_ws_resubscribe_seconds: int = 60
+    # Reconnect when no WS bytes (audit: 90s stale hid fast rips; 20s default).
+    upstox_ws_stale_seconds: int = 20
+    # Drop option keys outside ATM±band when ATM recentres (keeps feed on live pad book).
+    upstox_ws_prune_outside_band_enabled: bool = True
+    # Minimum ATM ± strike count for radar scan + WS subscribe (NIFTY 50pt → 500pt floor).
+    explosion_scan_strike_half_width_min: int = 10
     tick_snapshot_seconds: int = 1  # legacy; tick_snapshot_interval_ms preferred
     market_poll_seconds_ws: int = 1  # legacy; market_poll_interval_ws_ms preferred
     sse_enabled: bool = True
@@ -2085,7 +2091,8 @@ class Settings(BaseSettings):
     # beyond the ATM band so a contract that rotates ATM does not lose its real base.
     # Deep OTM and sub-band premiums remain excluded.
     explosion_scan_atm_itm_only: bool = True
-    explosion_shallow_otm_history_steps: int = 0
+    # One shallow-OTM strike each side — ATM rotation still on radar before ITM pad (audit C5).
+    explosion_shallow_otm_history_steps: int = 1
     explosion_shallow_otm_history_min_volume: int = 25000
     explosion_shallow_otm_entry_enabled: bool = False
     explosion_shallow_otm_entry_steps: int = 0
