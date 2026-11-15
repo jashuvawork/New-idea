@@ -19,6 +19,7 @@ from app.routers import (
     execution,
     health,
     market,
+    paper_lab,
     playbook,
     signals,
     upstox_auth,
@@ -148,7 +149,10 @@ async def _background_monitor():
                     if ws_overlay_due():
                         await run_ws_overlay_cycle(broadcast=True)
                 elif not tick_driven and not is_ws_active():
-                    await get_multi_snapshot(broadcast=True, force=False)
+                    from app.engines.paper_lab_prod_feed import maybe_run_prod_snapshot_cycle
+
+                    if not await maybe_run_prod_snapshot_cycle(broadcast=True):
+                        await get_multi_snapshot(broadcast=True, force=False)
 
             if (
                 settings.composer_monitor_enabled
@@ -403,6 +407,7 @@ def create_app() -> FastAPI:
     app.include_router(ai.router)
     app.include_router(signals.router)
     app.include_router(playbook.router)
+    app.include_router(paper_lab.router)
 
     return app
 

@@ -859,6 +859,11 @@ class Settings(BaseSettings):
     # Paper should mirror live execution (broker flow + slippage) before going live
     paper_live_parity_enabled: bool = True
     paper_simulate_broker_orders: bool = True  # resolve instrument + paper order ids in parity mode
+    # Local paper lab: mirror EC2 tick stream via public prod snapshots (no second Upstox OAuth).
+    paper_lab_prod_api_base: str = ""
+    paper_lab_use_prod_snapshots: bool = False
+    lab_session_tag: str = ""
+    lab_experiment_notes: str = ""
 
     # Paper slippage — realistic fills for milestone / PnL (ignored on live broker fills)
     paper_slippage_enabled: bool = True
