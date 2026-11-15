@@ -33,6 +33,11 @@ def main() -> int:
     parser.add_argument("--to", default=date.today().isoformat())
     parser.add_argument("--out-dir", default="/opt/cursor/artifacts/upstox_prod_chunks")
     parser.add_argument("--pause", type=float, default=1.0)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip chunk file if chunk_NNN_{from}_{to}.json already exists",
+    )
     args = parser.parse_args()
 
     lo = date.fromisoformat(args.from_)
@@ -57,9 +62,30 @@ def main() -> int:
         )
         url = f"{base}/api/ai/years-index-analysis?{qs}"
         tag = f"{lo.isoformat()}_{hi.isoformat()}"
+        path = out_dir / f"chunk_{idx:03d}_{tag}.json"
+        if args.resume and path.is_file() and path.stat().st_size > 0:
+            try:
+                report = json.loads(path.read_text(encoding="utf-8"))
+                um = report.get("upstoxMinutes") or {}
+                chunk_reports.append(
+                    {
+                        "chunk": idx,
+                        "from": lo.isoformat(),
+                        "to": hi.isoformat(),
+                        "candleCount": um.get("candleCount"),
+                        "path": str(path),
+                        "skipped": True,
+                    }
+                )
+                print(json.dumps(chunk_reports[-1]))
+            except (json.JSONDecodeError, OSError):
+                pass
+            else:
+                idx += 1
+                lo = _add_days(hi, 1)
+                continue
         try:
             report = _get(url, timeout=180.0)
-            path = out_dir / f"chunk_{idx:03d}_{tag}.json"
             path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
             um = report.get("upstoxMinutes") or {}
             chunk_reports.append(
