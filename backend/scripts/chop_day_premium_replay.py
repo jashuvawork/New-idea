@@ -239,10 +239,33 @@ def _pick_contracts(zip_path: Path, symbol: str, max_keys: int = 6) -> list[str]
     return [k for k, _ in ranked[:max_keys]]
 
 
-def analyze_zip(zip_path: Path, symbol: str = "NIFTY", extra_keys: list[str] | None = None) -> dict[str, Any]:
+_index_day_types_cache: dict[tuple[str, str, str], dict[str, str]] = {}
+
+
+def _load_index_day_types(symbol: str, from_date: str, to_date: str) -> dict[str, str]:
+    key = (symbol, from_date, to_date)
+    if key in _index_day_types_cache:
+        return _index_day_types_cache[key]
+    from datetime import date as date_cls
+    from scripts.index_5y_daytype_study import daily_bars
+
+    lo, hi = date_cls.fromisoformat(from_date), date_cls.fromisoformat(to_date)
+    mapping = {b["date"]: b["dayType"] for b in daily_bars(symbol, lo, hi)}
+    _index_day_types_cache[key] = mapping
+    return mapping
+
+
+def analyze_zip(
+    zip_path: Path,
+    symbol: str = "NIFTY",
+    extra_keys: list[str] | None = None,
+    *,
+    index_day_types: dict[str, str] | None = None,
+) -> dict[str, Any]:
     date = zip_path.stem.replace("radar-", "")
     spots = load_symbol_spots(zip_path, symbol)
     day_meta = chop_day_heuristic(spots)
+    day_meta["indexDayType"] = (index_day_types or {}).get(date)
     spot_lo, spot_hi = day_meta.get("spotLow", 0), day_meta.get("spotHigh", 0)
     keys = list(dict.fromkeys((extra_keys or []) + _pick_contracts(zip_path, symbol)))
     per_key: list[dict[str, Any]] = []
@@ -309,8 +332,35 @@ def main() -> int:
     if not zips:
         parser.error("No radar ZIPs (use --zip or --zip-dir)")
 
-    reports = [analyze_zip(p, symbol=args.symbol, extra_keys=args.extra_key) for p in zips]
+    dates = sorted(p.stem.replace("radar-", "") for p in zips)
+    index_day_types = (
+        _load_index_day_types(args.symbol, dates[0], dates[-1]) if dates else {}
+    )
+    reports = [
+        analyze_zip(
+            p,
+            symbol=args.symbol,
+            extra_keys=args.extra_key,
+            index_day_types=index_day_types,
+        )
+        for p in zips
+    ]
     chop_days = [r for r in reports if r["dayMeta"].get("chopLikely")]
+    by_day_type: dict[str, dict[str, float]] = {}
+    for r in reports:
+        dt = r["dayMeta"].get("indexDayType") or "UNKNOWN"
+        row = by_day_type.setdefault(
+            dt,
+            {"days": 0, "chopScorePts": 0.0, "trendScorePts": 0.0, "chopMinusTrendPts": 0.0},
+        )
+        row["days"] += 1
+        row["chopScorePts"] += r["totals"]["chopScorePts"]
+        row["trendScorePts"] += r["totals"]["trendScorePts"]
+        row["chopMinusTrendPts"] += r["totals"]["chopMinusTrendPts"]
+    for row in by_day_type.values():
+        row["chopScorePts"] = round(row["chopScorePts"], 2)
+        row["trendScorePts"] = round(row["trendScorePts"], 2)
+        row["chopMinusTrendPts"] = round(row["chopMinusTrendPts"], 2)
     summary = {
         "zipCount": len(reports),
         "chopHeuristicDays": len(chop_days),
@@ -328,6 +378,7 @@ def main() -> int:
                 ),
             },
         },
+        "byIndexDayType": dict(sorted(by_day_type.items())),
         "days": reports,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
