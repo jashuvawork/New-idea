@@ -5,6 +5,12 @@ name: Arm Live EC2
 
 on:
   workflow_dispatch:
+    inputs:
+      capital_inr:
+        description: Live sizing book (FALLBACK_CAPITAL_INR / MAX_SIZING)
+        required: true
+        default: "30000"
+        type: string
 
 env:
   AWS_REGION: ap-south-1
@@ -39,7 +45,7 @@ jobs:
               \"git pull --ff-only origin main || git reset --hard origin/main\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/execution/stop || true\",
               \"curl -sf -X POST http://127.0.0.1:8000/api/auto-trader/purge-logs || true\",
-              \"sudo bash deploy/set-execution-mode.sh --live\",
+              \"sudo LIVE_CAPITAL_INR=${{ inputs.capital_inr }} bash deploy/set-execution-mode.sh --live\",
               \"curl -sf http://127.0.0.1:8000/api/deployment/status | python3 -m json.tool | head -40\"
             ]" \
             --query Command.CommandId \

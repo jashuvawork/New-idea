@@ -60,7 +60,12 @@ PIN_KEYS=(
   USE_UPSTOX_CAPITAL_FOR_SIZING
   LIVE_MATCH_PAPER_BOOK
   PAPER_SLIPPAGE_ENABLED
+  CAPITAL_TIER_ENTRY_SYMBOLS_ENABLED
+  CAPITAL_TIER_NIFTY_OOB_FALLBACK_ENABLED
 )
+
+# Optional: override template capital when arming live (e.g. LIVE_CAPITAL_INR=30000).
+LIVE_CAPITAL_INR="${LIVE_CAPITAL_INR:-}"
 
 MODE=""
 DRY_RUN=0
@@ -149,6 +154,12 @@ for key in "${PIN_KEYS[@]}"; do
   _set_env_key "$key" "$val"
 done
 
+if [ "$MODE" = "live" ] && [ -n "$LIVE_CAPITAL_INR" ]; then
+  echo "Applying live capital override: ₹${LIVE_CAPITAL_INR}"
+  _set_env_key FALLBACK_CAPITAL_INR "$LIVE_CAPITAL_INR"
+  _set_env_key MAX_SIZING_CAPITAL_INR "$LIVE_CAPITAL_INR"
+fi
+
 if [ "$MODE" = "live" ]; then
   echo "Arming live execution on the paper book..."
   _set_env_key ENABLE_LIVE_TRADING true
@@ -188,7 +199,7 @@ if [ -d "$REPO_DIR" ] && command -v docker >/dev/null 2>&1; then
 fi
 
 CAPITAL_INR="$(_template_value FALLBACK_CAPITAL_INR || true)"
-if [ "$MODE" = "live" ] && [ "$WAS_LIVE_ARMED" = "1" ] && grep -q '^FALLBACK_CAPITAL_INR=' "$ENV_FILE" 2>/dev/null; then
+if [ "$MODE" = "live" ] && grep -q '^FALLBACK_CAPITAL_INR=' "$ENV_FILE" 2>/dev/null; then
   CAPITAL_INR="$(grep '^FALLBACK_CAPITAL_INR=' "$ENV_FILE" | tail -1 | cut -d= -f2-)"
 fi
 if [ -n "$CAPITAL_INR" ]; then
