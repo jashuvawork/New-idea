@@ -1977,6 +1977,17 @@ def _post_win_extended_chase_blocked(
     if not post_session_win:
         return False, "", meta
 
+    from app.engines.paper_lab_base_rip import paper_lab_extended_chase_waive
+
+    if paper_lab_extended_chase_waive(
+        local_pad=float(local_pad or 0),
+        session_move=float(session_move or 0),
+        velocity_3s=float(v3 or 0),
+        settings=settings,
+    ):
+        meta["paperLabBaseRipChaseWaive"] = True
+        return False, "", meta
+
     snap = getattr(candidate, "snap", None)
     sym = str(getattr(candidate, "symbol", "") or "").upper()
     from app.engines.pe_win_ce_mirror import session_win_side_continuation_ok

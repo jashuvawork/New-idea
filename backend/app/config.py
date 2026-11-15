@@ -864,6 +864,15 @@ class Settings(BaseSettings):
     paper_lab_use_prod_snapshots: bool = False
     lab_session_tag: str = ""
     lab_experiment_notes: str = ""
+    # Paper lab: base → max-rip experiment (never on live).
+    paper_lab_base_rip_enabled: bool = False
+    paper_lab_base_rip_max_local_base_pct: float = 18.0
+    paper_lab_base_rip_min_velocity_3s: float = 1.5
+    paper_lab_base_rip_min_explosion_score: float = 55.0
+    paper_lab_base_rip_max_session_move_pct: float = 28.0
+    paper_lab_base_rip_rank_bonus: float = 22.0
+    paper_lab_base_rip_ladder_keep_ratio: float = 0.85
+    paper_lab_base_rip_hot_defer_velocity_3s: float = 1.6
 
     # Paper slippage — realistic fills for milestone / PnL (ignored on live broker fills)
     paper_slippage_enabled: bool = True

@@ -2401,7 +2401,16 @@ def unified_profit_ladder_exit_reason(
     mega_best = _cfg_float(settings, "stage_runner_mega_red_giveback_min_best_points", 28.0)
     if pnl_pts <= 0 and not (falling_under and float(best or 0) + 1e-6 >= mega_best):
         return None
-    if live_v3 >= _cfg_float(settings, "unified_profit_ladder_hot_defer_velocity_3s", 2.0):
+    hot_v3 = _cfg_float(settings, "unified_profit_ladder_hot_defer_velocity_3s", 2.0)
+    try:
+        from app.engines.paper_lab_base_rip import paper_lab_hot_defer_velocity
+
+        lab_v3 = paper_lab_hot_defer_velocity(settings)
+        if lab_v3 is not None:
+            hot_v3 = lab_v3
+    except Exception:
+        pass
+    if live_v3 >= hot_v3:
         return None
     if exit_near_best_hold_active(
         trade,

@@ -786,6 +786,14 @@ def profit_ladder_floor(
 
     gain_pct = best / entry * 100.0
     keep = min(0.95, max(0.5, _cfg_float(s, "unified_profit_ladder_keep_ratio", 0.75)))
+    try:
+        from app.engines.paper_lab_base_rip import paper_lab_ladder_keep_ratio
+
+        lab_keep = paper_lab_ladder_keep_ratio(s)
+        if lab_keep is not None:
+            keep = lab_keep
+    except Exception:
+        pass
     be_floor = entry * _cfg_float(s, "unified_profit_ladder_breakeven_lock_pct", 2.0) / 100.0
     peak_ltp = max(_safe_float(getattr(trade, "maxLtp", 0)), entry + best)
     arm_ratio = max(1.01, _cfg_float(s, "unified_profit_ladder_multiple_arm_ratio", 2.0))
