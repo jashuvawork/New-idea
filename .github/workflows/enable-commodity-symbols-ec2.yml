@@ -1,0 +1,95 @@
+name: Enable MCX commodity symbols on EC2
+
+on:
+  workflow_dispatch:
+    inputs:
+      commodity_symbols:
+        description: "COMMODITY_SYMBOLS value (comma-separated)"
+        required: false
+        default: "CRUDEOIL,NATURALGAS"
+  push:
+    branches: [main]
+    paths:
+      - deploy/set-commodity-symbols.sh
+      - deploy/env.production.template
+
+env:
+  AWS_REGION: ap-south-1
+  EC2_INSTANCE_ID: i-0f3f9e5e67815c21b
+
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set COMMODITY_SYMBOLS and restart backend via SSM
+        id: ssm
+        run: |
+          set -euo pipefail
+          SYMS="${{ github.event.inputs.commodity_symbols }}"
+          if [ -z "$SYMS" ]; then
+            SYMS="CRUDEOIL,NATURALGAS"
+          fi
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Enable COMMODITY_SYMBOLS=$SYMS" \
+            --parameters "commands=[
+              \"set -euo pipefail\",
+              \"cd /opt/nexusquant/New-idea\",
+              \"git fetch origin main\",
+              \"git checkout main\",
+              \"git pull --ff-only origin main || git reset --hard origin/main\",
+              \"COMMODITY_SYMBOLS=$SYMS ENV_FILE=/opt/nexusquant/env bash deploy/set-commodity-symbols.sh\"
+            ]" \
+            --query Command.CommandId \
+            --output text)
+          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSM
+        run: |
+          CMD_ID="${{ steps.ssm.outputs.command_id }}"
+          for i in $(seq 1 24); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
+              --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+              --query Status \
+              --output text 2>/dev/null || echo Pending)
+            echo "Attempt $i: $STATUS"
+            if [ "$STATUS" = "Success" ]; then
+              aws ssm get-command-invocation \
+                --command-id "$CMD_ID" \
+                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                --query StandardOutputContent \
+                --output text
+              exit 0
+            fi
+            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
+              aws ssm get-command-invocation \
+                --command-id "$CMD_ID" \
+                --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                --output json
+              exit 1
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Verify deployment status symbols
+        run: |
+          curl -sf --max-time 30 https://api.jashuvatrade.xyz/api/deployment/status | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          syms=d.get('symbols') or d.get('flags',{}).get('symbols') or []
+          print('symbols', syms)
+          assert 'CRUDEOIL' in syms, f'CRUDEOIL missing: {syms}'
+          "
