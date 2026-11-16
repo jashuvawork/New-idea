@@ -2653,6 +2653,16 @@ def stage_runner_mega_pullback_exit_reason(
     min_hole_giveback = _cfg_float(
         settings, "stage_runner_mega_hole_exit_min_giveback_frac", 0.45
     )
+    stage_size = float(ctx.get("stageSize") or plan.get("stageSize") or 75.0)
+    if best + 1e-6 < stage_size:
+        min_hole_giveback = max(
+            min_hole_giveback,
+            _cfg_float(
+                settings,
+                "stage_runner_mega_hole_pre_stage_min_giveback_frac",
+                0.78,
+            ),
+        )
     hole_giveback_frac = (giveback / best) if best > 0 else 0.0
     if (
         bool(getattr(settings, "stage_runner_mega_hole_exit_enabled", True))

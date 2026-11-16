@@ -260,3 +260,48 @@ def test_oct29_sensex_73000_shallow_hole_defers_stage_runner_hole_take(_mp):
             live_velocity_3s=-0.5,
         )
     assert reason == "explosion_stage_runner_hole_take"
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+def test_nov16_82200_pre_stage_pullback_defers_shallow_hole_take(_mp):
+    """Nov 16: +35pt best → +9pt on first dip — hold for stage-one / continuation rip."""
+    from app.config import Settings
+    from app.engines.explosion_profit import stage_runner_mega_pullback_exit_reason
+    from app.models.schemas import PaperTrade, Side, StrategyType
+
+    s = Settings()
+    entry = 595.5
+    best = 34.9
+    pnl = 9.0
+    trade = PaperTrade(
+        id="nov16-82200",
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=82200.0,
+        entryPremium=entry,
+        currentPremium=entry + pnl,
+        lots=2,
+        openedAt=datetime.now(IST) - timedelta(seconds=180),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=best,
+        maxLtp=entry + best,
+        maxLtpAt=datetime.now(IST) - timedelta(seconds=55),
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+            "exitPlan": {"projectedMaxTp": 800.0, "stageSize": 75.0},
+        },
+    )
+    with patch("app.engines.explosion_profit.get_settings", return_value=s), patch(
+        "app.engines.moment_stage_trail.get_settings", return_value=s
+    ):
+        reason = stage_runner_mega_pullback_exit_reason(
+            trade,
+            best=best,
+            pnl_pts=pnl,
+            hold_seconds=180,
+            live_velocity_3s=-0.5,
+        )
+    assert reason is None

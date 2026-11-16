@@ -116,6 +116,11 @@ class Settings(BaseSettings):
     # Sep08: armed-base launch on chop day below base window — hard block at entry wire.
     chop_live_block_armed_base_launch: bool = True
     chop_live_armed_base_max_local_pad_pct: float = 20.0
+    # ELITE displacement/volume rip with rising v3 — do not hold immature_local on chop days
+    # (Nov 16 SENSEX 82200 CE: radar 09:15, fill 09:50 after chop_live_immature_* stack).
+    chop_live_elite_vertical_immature_waiver_enabled: bool = True
+    chop_live_elite_vertical_immature_min_explosion_score: float = 72.0
+    chop_live_elite_vertical_immature_min_velocity_3s: float = 0.8
     # Sep08: second 23650 PE after morning loss — one explosion attempt per strike after loss.
     session_same_strike_loss_reentry_enabled: bool = True
     session_same_strike_loss_reentry_min_loss_inr: float = 500.0
@@ -1724,6 +1729,9 @@ class Settings(BaseSettings):
     # Shallow dips under the 75% line must not hole-take (Oct 29 SENSEX 73000 CE: +52pt
     # peak, +35pt exit, tape later 830+). Oct 21 73400 PE hole still qualifies (~78% GB).
     stage_runner_mega_hole_exit_min_giveback_frac: float = 0.45
+    # Before stage-one (default 75pt best), require a deeper hole before hole-take
+    # (Nov 16 82200 CE: +35pt best → +9pt on first pullback; chart to 650+).
+    stage_runner_mega_hole_pre_stage_min_giveback_frac: float = 0.78
     # Once a mega peak matured, do not ride a 75% hole into red — scratch near BE.
     stage_runner_mega_red_giveback_enabled: bool = True
     stage_runner_mega_red_giveback_min_best_points: float = 28.0

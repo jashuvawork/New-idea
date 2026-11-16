@@ -193,6 +193,60 @@ def test_chop_live_blocks_immature_local_base(mock_bullish, mock_imm_settings, m
 
 
 @patch("app.engines.chop_live_guards.get_settings")
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.bullish_local_base.bullish_local_base_prediction")
+def test_chop_live_elite_vertical_waives_immature_local_base_ce_pe(
+    mock_bullish, mock_imm_settings, mock_settings
+):
+    mock_settings.return_value = _settings(
+        chop_live_hard_block_worst_day=False,
+        chop_live_elite_vertical_immature_waiver_enabled=True,
+    )
+    mock_imm_settings.return_value = _settings()
+    mock_bullish.return_value = {"active": False}
+
+    for side in (Side.CALL, Side.PUT):
+        cand = _candidate(side=side, base_move=8.0, daily_move=30.0)
+        cand.explosion_event.tier = "ELITE"
+        cand.explosion_event.explosion_score = 85.0
+        cand.explosion_event.velocity_3s = 1.5
+        cand.alert = {"tier": "ELITE", "explosionScore": 85.0, "velocity3s": 1.5}
+        with patch(
+            "app.engines.explosion_entry_guards.effective_local_base_move_pct",
+            return_value=8.0,
+        ), patch(
+            "app.engines.explosion_entry_guards.trustworthy_local_base_move",
+            return_value=8.0,
+        ), patch(
+            "app.engines.ict_breakout_monitor.analyze_explosion_event_ict",
+            return_value=SimpleNamespace(
+                base_relative_move_pct=8.0,
+                local_swing_base=True,
+                flat_then_vertical=True,
+                displacement=True,
+                volume_awakening=True,
+                armed_base_launch=False,
+                v_rip_ready=True,
+            ),
+        ), patch(
+            "app.engines.worst_day_guard.identify_worst_day",
+            return_value=__import__(
+                "app.engines.worst_day_guard", fromlist=["WorstDayVerdict"]
+            ).WorstDayVerdict(False, 0.0, []),
+        ), patch(
+            "app.engines.chop_live_guards.chop_live_guard_day_active",
+            return_value=True,
+        ):
+            blocked, reason, _ = chop_live_entry_blocked(
+                cand,
+                _snap(),
+                _state(),
+                snapshots={"NIFTY": _snap()},
+            )
+        assert not blocked or "chop_live_immature" not in (reason or "")
+
+
+@patch("app.engines.chop_live_guards.get_settings")
 def test_broker_adopted_bad_row_blocks_profit_exit(mock_settings):
     mock_settings.return_value = _settings()
     trade = PaperTrade(
