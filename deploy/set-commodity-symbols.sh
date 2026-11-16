@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Enable MCX commodity option underlyings on EC2 (merged into SYMBOLS at runtime).
+# Set MCX commodity option underlyings on EC2 (merged into SYMBOLS at runtime).
+# Default empty (MCX off). Example: COMMODITY_SYMBOLS=CRUDEOIL,NATURALGAS bash deploy/set-commodity-symbols.sh
 set -euo pipefail
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 COMPOSE_FILE="${COMPOSE_FILE:-/opt/nexusquant/New-idea/docker-compose.prod.yml}"
-COMMODITY_SYMBOLS="${COMMODITY_SYMBOLS:-CRUDEOIL,NATURALGAS}"
+COMMODITY_SYMBOLS="${COMMODITY_SYMBOLS:-}"
 
 touch "$ENV_FILE"
 if grep -q '^COMMODITY_SYMBOLS=' "$ENV_FILE"; then

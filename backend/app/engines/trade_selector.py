@@ -1837,11 +1837,11 @@ def find_best_entry(
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
             continue
-        if not symbol_entry_market_live(symbol):
-            continue
         if evening_commodity_only:
             from app.services.instrument_registry import is_commodity
 
+            if not symbol_entry_market_live(symbol):
+                continue
             if not is_commodity(symbol):
                 continue
         if entry_symbols and str(symbol or "").upper() not in entry_symbols:
