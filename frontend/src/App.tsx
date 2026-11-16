@@ -19,12 +19,16 @@ import { AuditShell, type AuditPage } from './components/audit/AuditShell';
 import { ProfitsLossPage } from './pages/ProfitsLossPage';
 import { AnalysisPage } from './pages/AnalysisPage';
 
-const SYMBOLS = ['NIFTY', 'SENSEX'] as const;
+import { symbolsFromDeployment } from './symbols';
 
-function pickSnap(data: MultiSnapshot | null, activeSymbol: string): SymbolSnapshot | undefined {
+function pickSnap(
+  data: MultiSnapshot | null,
+  activeSymbol: string,
+  symbols: readonly string[],
+): SymbolSnapshot | undefined {
   return (
     data?.snapshots?.[activeSymbol] ??
-    SYMBOLS.map((s) => data?.snapshots?.[s]).find((s) => s?.dataAvailable)
+    symbols.map((s) => data?.snapshots?.[s]).find((s) => s?.dataAvailable)
   );
 }
 
@@ -41,7 +45,8 @@ export default function App() {
 
   const lastGoodSnapRef = useRef<SymbolSnapshot | undefined>(undefined);
   const dashboardUnlockedRef = useRef(false);
-  const liveSnap = pickSnap(data, activeSymbol);
+  const configuredSymbols = symbolsFromDeployment(deployment);
+  const liveSnap = pickSnap(data, activeSymbol, configuredSymbols);
   if (liveSnap?.dataAvailable) {
     lastGoodSnapRef.current = liveSnap;
   }

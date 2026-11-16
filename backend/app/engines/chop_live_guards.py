@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.engines.capital_allocator import lot_multiplier
 from app.models.schemas import AutoTraderState, Side, SymbolSnapshot
+from app.services.instrument_registry import all_specs, broker_symbol_pattern, strike_bounds
 
 IST = ZoneInfo("Asia/Kolkata")
 logger = logging.getLogger(__name__)
@@ -24,25 +25,25 @@ logger = logging.getLogger(__name__)
 # Prevent re-adopting the same broker leg after a phantom close in one session.
 _adopted_instrument_keys_session: set[str] = set()
 
+_SYM_ALT = broker_symbol_pattern()
+
 _OPTION_SYMBOL_RE = re.compile(
-    r"^(?P<symbol>NIFTY|SENSEX|BANKNIFTY)\s*(?P<strike>\d+(?:\.\d+)?)\s*(?P<side>CE|PE)$",
+    rf"^(?P<symbol>{_SYM_ALT})\s*(?P<strike>\d+(?:\.\d+)?)\s*(?P<side>CE|PE)$",
     re.IGNORECASE,
 )
 # Upstox compact: NIFTY2690124050PE → NIFTY + 5-digit expiry token + 5-digit strike.
 _OPTION_UPSTOX_COMPACT_RE = re.compile(
-    r"^(?P<symbol>NIFTY|SENSEX|BANKNIFTY)(?P<expiry>\d{5})(?P<strike>\d{5})(?P<side>CE|PE)$",
+    rf"^(?P<symbol>{_SYM_ALT})(?P<expiry>\d{{5}})(?P<strike>\d{{5}})(?P<side>CE|PE)$",
     re.IGNORECASE,
 )
 # Legacy compact without expiry token (heatmap-style keys only).
 _OPTION_COMPACT_RE = re.compile(
-    r"^(?P<symbol>NIFTY|SENSEX|BANKNIFTY)(?P<strike>\d{4,5})(?P<side>CE|PE)$",
+    rf"^(?P<symbol>{_SYM_ALT})(?P<strike>\d{{4,6}})(?P<side>CE|PE)$",
     re.IGNORECASE,
 )
 
 _STRIKE_BOUNDS: dict[str, tuple[float, float]] = {
-    "NIFTY": (15_000.0, 35_000.0),
-    "BANKNIFTY": (30_000.0, 70_000.0),
-    "SENSEX": (60_000.0, 90_000.0),
+    sym: spec.strike_bounds for sym, spec in all_specs().items()
 }
 
 
@@ -57,9 +58,10 @@ def _side_val(side: Side | str) -> str:
 
 
 def _strike_sane(symbol: str, strike: float) -> bool:
-    bounds = _STRIKE_BOUNDS.get(str(symbol or "").upper())
+    sym = str(symbol or "").upper()
+    bounds = _STRIKE_BOUNDS.get(sym) or strike_bounds(sym)
     if not bounds:
-        return 10_000.0 <= strike <= 100_000.0
+        return 10.0 <= strike <= 200_000.0
     lo, hi = bounds
     return lo <= strike <= hi
 

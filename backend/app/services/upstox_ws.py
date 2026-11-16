@@ -125,8 +125,14 @@ async def _send_unsubscribe(ws, instrument_keys: list[str]) -> None:
 
 
 async def _base_subscription_keys() -> list[str]:
-    """Index keys always subscribed."""
-    return [_norm_key(k) for k in INDEX_KEYS.values()]
+    """Subscribe spot/underlying keys for configured symbols only."""
+    settings = get_settings()
+    keys: list[str] = []
+    for sym in settings.symbols:
+        ik = INDEX_KEYS.get(str(sym).upper())
+        if ik:
+            keys.append(_norm_key(ik))
+    return keys
 
 
 async def _refresh_option_keys() -> list[str]:

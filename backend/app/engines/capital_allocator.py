@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.models.schemas import AutoTraderState, StrategyType
+from app.services.instrument_registry import fallback_lot_size, known_symbol
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -18,6 +19,9 @@ FALLBACK_LOT_SIZES: dict[str, int] = {
     "NIFTY": 65,
     "BANKNIFTY": 30,
     "SENSEX": 20,
+    "CRUDEOIL": 100,
+    "NATURALGAS": 1250,
+    "GOLDM": 100,
 }
 
 _lot_sizes: dict[str, int] = {}
@@ -28,11 +32,18 @@ _lot_sizes_last_mono: float = 0.0
 
 def _configured_lot_sizes() -> dict[str, int]:
     settings = get_settings()
-    return {
+    base = {
         "NIFTY": settings.lot_size_nifty,
         "BANKNIFTY": settings.lot_size_banknifty,
         "SENSEX": settings.lot_size_sensex,
+        "CRUDEOIL": settings.lot_size_crudeoil,
+        "NATURALGAS": settings.lot_size_naturalgas,
+        "GOLDM": settings.lot_size_goldm,
     }
+    for sym in settings.symbols:
+        if sym not in base and known_symbol(sym):
+            base[sym] = fallback_lot_size(sym)
+    return base
 
 
 def _seed_lot_sizes_from_config() -> None:

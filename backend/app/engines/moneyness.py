@@ -14,16 +14,21 @@ Moneyness = str  # "ITM" | "ATM" | "OTM"
 
 
 def strike_step(symbol: str) -> float:
-    """Listed strike interval per index — NIFTY 50, SENSEX/BANKNIFTY 100 (config-driven)."""
+    """Listed strike interval — config overrides for indices, registry for commodities."""
+    from app.services.instrument_registry import get_spec, strike_step as registry_strike_step
+
     settings = get_settings()
     sym = symbol.upper()
+    spec = get_spec(sym)
+    if spec is not None and spec.kind.value == "commodity":
+        return registry_strike_step(sym)
     if sym == "SENSEX":
         return float(getattr(settings, "sensex_strike_step", 100.0) or 100.0)
     if sym == "BANKNIFTY":
         return float(getattr(settings, "banknifty_strike_step", 100.0) or 100.0)
     if sym == "NIFTY":
         return float(getattr(settings, "nifty_strike_step", 50.0) or 50.0)
-    return 50.0
+    return registry_strike_step(sym)
 
 
 def atm_strike(spot: float, symbol: str) -> float:

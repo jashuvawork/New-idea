@@ -11,18 +11,15 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from app.config import get_settings
+from app.services.instrument_registry import get_spec, index_keys_map, option_segments_map
 from app.services.redis_store import get_upstox_token
 
 logger = logging.getLogger(__name__)
 
 IST = ZoneInfo("Asia/Kolkata")
 
-# Upstox instrument keys for indices
-INDEX_KEYS = {
-    "NIFTY": "NSE_INDEX|Nifty 50",
-    "BANKNIFTY": "NSE_INDEX|Nifty Bank",
-    "SENSEX": "BSE_INDEX|SENSEX",
-}
+# Upstox instrument keys — equity indices + MCX commodity underlyings
+INDEX_KEYS: dict[str, str] = index_keys_map()
 
 # India VIX — market-wide volatility gauge for the day-type regime.
 INDIA_VIX_KEY = "NSE_INDEX|India VIX"
@@ -70,12 +67,7 @@ def parse_india_vix_quote(quote: dict[str, Any]) -> Optional[dict[str, float]]:
     except (TypeError, ValueError):
         return None
 
-# Option chain segment mapping
-OPTION_SEGMENTS = {
-    "NIFTY": "NSE_FO",
-    "BANKNIFTY": "NSE_FO",
-    "SENSEX": "BSE_FO",
-}
+OPTION_SEGMENTS: dict[str, str] = option_segments_map()
 
 # Global throttle + response cache (shared across UpstoxClient instances)
 _throttle_lock = asyncio.Lock()
@@ -821,11 +813,33 @@ class UpstoxClient:
             return body.get("data", body) if isinstance(body, dict) else body
 
 
+def _nearest_monthly_expiry_candidate(now: datetime) -> str:
+    """Rough MCX monthly probe — resolved via /option/contract when chain loads."""
+    from calendar import monthrange
+
+    year, month = now.year, now.month
+    for _ in range(4):
+        last_dom = monthrange(year, month)[1]
+        day = min(19, last_dom)
+        cand = datetime(year, month, day, tzinfo=IST).date()
+        if cand >= now.date():
+            return cand.strftime("%Y-%m-%d")
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+    return (now + timedelta(days=14)).strftime("%Y-%m-%d")
+
+
 def get_nearest_expiry(symbol: str) -> str:
-    """Return nearest weekly expiry (Tuesday NIFTY/BANKNIFTY, Thursday SENSEX)."""
+    """Nearest listed expiry — weekly indices; monthly MCX commodity options."""
+    sym = str(symbol or "").upper()
+    spec = get_spec(sym)
     now = datetime.now(IST)
-    # Mon=0 … Tue=1 (NIFTY), Thu=3 (SENSEX)
-    target_dow = 3 if symbol == "SENSEX" else 1
+    if spec is not None and not spec.weekly_expiry:
+        return _nearest_monthly_expiry_candidate(now)
+    # Mon=0 … Tue=1 (NIFTY/BANKNIFTY), Thu=3 (SENSEX)
+    target_dow = 3 if sym == "SENSEX" else 1
     days_ahead = (target_dow - now.weekday()) % 7
     if days_ahead == 0 and now.hour >= 15:
         days_ahead = 7

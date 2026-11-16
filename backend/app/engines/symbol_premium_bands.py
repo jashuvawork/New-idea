@@ -12,9 +12,17 @@ def _symbol_u(symbol: Any) -> str:
 
 
 def symbol_premium_scale(symbol: Any, settings: Any | None = None) -> float:
-    """Multiplier vs NIFTY defaults (SENSEX/BANKNIFTY ≈ 3×)."""
+    """Multiplier vs NIFTY defaults (SENSEX/BANKNIFTY ≈ 3×; commodities use smaller scales)."""
+    from app.services.instrument_registry import is_commodity, premium_scale as registry_scale
+
     s = settings or get_settings()
     sym = _symbol_u(symbol)
+    if is_commodity(sym):
+        attr = f"symbol_premium_scale_{sym.lower()}"
+        override = getattr(s, attr, None)
+        if override is not None and float(override) > 0:
+            return max(0.05, float(override))
+        return max(0.05, registry_scale(sym))
     if sym == "SENSEX":
         return max(
             1.0,

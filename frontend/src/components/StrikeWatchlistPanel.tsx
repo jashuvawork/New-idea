@@ -120,9 +120,13 @@ function sideWatch(snap: SymbolSnapshot, side: Side, perSide: number): StrikeWat
   return merged;
 }
 
+function snapshotSymbols(snapshots: Record<string, SymbolSnapshot>): string[] {
+  return Object.keys(snapshots || {}).filter((k) => snapshots[k]).sort();
+}
+
 function buildLiveWatchlist(snapshots: Record<string, SymbolSnapshot>, perSide = 3): StrikeWatchRow[] {
   const rows: StrikeWatchRow[] = [];
-  for (const sym of ['NIFTY', 'SENSEX']) {
+  for (const sym of snapshotSymbols(snapshots)) {
     const snap = snapshots[sym];
     if (!snap?.dataAvailable) continue;
     rows.push(...sideWatch(snap, 'CALL', perSide));
@@ -224,10 +228,7 @@ export function StrikeWatchlistPanel({
   const showNext = nextDayRows.length > 0;
 
   const byIndex = useMemo(() => {
-    const map: Record<string, { calls: StrikeWatchRow[]; puts: StrikeWatchRow[] }> = {
-      NIFTY: { calls: [], puts: [] },
-      SENSEX: { calls: [], puts: [] },
-    };
+    const map: Record<string, { calls: StrikeWatchRow[]; puts: StrikeWatchRow[] }> = {};
     for (const r of liveRows) {
       const bucket = map[r.symbol] || (map[r.symbol] = { calls: [], puts: [] });
       if (r.side === 'CALL') bucket.calls.push(r);
@@ -235,6 +236,8 @@ export function StrikeWatchlistPanel({
     }
     return map;
   }, [liveRows]);
+
+  const displaySymbols = useMemo(() => Object.keys(byIndex).sort(), [byIndex]);
 
   return (
     <Panel
@@ -247,7 +250,7 @@ export function StrikeWatchlistPanel({
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
-        {(['NIFTY', 'SENSEX'] as const).map((sym) => {
+        {displaySymbols.map((sym) => {
           const block = byIndex[sym];
           const snap = snapshots[sym];
           return (
