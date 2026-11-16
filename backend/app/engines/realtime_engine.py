@@ -44,7 +44,7 @@ from app.engines.premarket_engine import (
 )
 from app.engines.ml_engine import get_ml_engine
 from app.services.tick_store import get_index_spot, overlay_chain_ltps, overlay_index_ltp
-from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase
+from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase_for_symbol
 from app.services.upstox_ws import is_ws_active
 
 logger = logging.getLogger(__name__)
@@ -516,7 +516,7 @@ async def build_symbol_snapshot(
     news_sentiment: str = "NEUTRAL",
 ) -> SymbolSnapshot:
     """Full pipeline for one symbol. Returns waiting state if no real data."""
-    phase_str = get_market_phase()
+    phase_str = get_market_phase_for_symbol(symbol)
     phase = MarketPhase(phase_str) if phase_str in MarketPhase.__members__ else MarketPhase.CLOSED
     now = datetime.now(IST)
 

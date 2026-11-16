@@ -18,7 +18,11 @@ from app.config import get_settings
 from app.proto import MarketDataFeed_pb2 as pb
 from app.services.redis_store import get_upstox_token, has_upstox_token
 from app.services.tick_store import clear as clear_ticks, collect_option_keys_from_chain, record_tick
-from app.services.upstox import INDEX_KEYS, UpstoxClient, get_market_phase
+from app.services.upstox import (
+    INDEX_KEYS,
+    UpstoxClient,
+    effective_market_phase_for_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +289,7 @@ async def _ws_loop() -> None:
     backoff = settings.upstox_ws_reconnect_seconds
 
     while True:
-        if get_market_phase() == "CLOSED":
+        if effective_market_phase_for_session() == "CLOSED":
             _connected = False
             await asyncio.sleep(30)
             continue
