@@ -164,3 +164,81 @@ def test_elite_waives_v_rip_shallow_when_post_win_fresh_base_in_pad():
         )
     assert ok is True, reason
     assert assessment.get("sameStrikePostWinFreshBase") is True
+
+
+def _seed_sensex_midday_hist(
+    *,
+    closed_at: datetime,
+    base_premium: float = 398.0,
+    lift_premium: float = 402.0,
+) -> None:
+    key = _open_key("SENSEX", 82200.0, Side.CALL)
+    _local_base_hist[key] = deque(maxlen=5000)
+    t0 = closed_at + timedelta(minutes=5)
+    for i in range(270):
+        ts = t0 + timedelta(seconds=10 * i)
+        prem = base_premium + (0.2 if i % 5 == 0 else 0.0)
+        _local_base_hist[key].append((ts, prem))
+    now = t0 + timedelta(seconds=10 * 270)
+    for j in range(6):
+        ts = now + timedelta(seconds=3 * j)
+        step = (lift_premium - base_premium) * (j + 1) / 6.0
+        _local_base_hist[key].append((ts, base_premium + step))
+
+
+def test_same_strike_fresh_base_midday_armed_coil_waives_zero_velocity():
+    closed = datetime(2026, 11, 16, 9, 55, 37, tzinfo=IST)
+    check_at = datetime(2026, 11, 16, 12, 12, 0, tzinfo=IST)
+    _seed_sensex_midday_hist(closed_at=closed, base_premium=398.0, lift_premium=402.0)
+    win = PaperTrade(
+        id="nov16-sensex-82200-win",
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=82200.0,
+        entryPremium=595.5,
+        currentPremium=620.0,
+        lots=1,
+        openedAt=closed - timedelta(minutes=5),
+        closedAt=closed,
+        status="CLOSED",
+        exitReason="explosion_stage_runner_hole_take",
+        strategyType=StrategyType.EXPLOSIVE,
+        pnlInr=360.0,
+        entryContext={"selectionMode": "explosion", "ictArmedBaseLaunch": True},
+    )
+    settings = Settings(
+        post_win_fresh_base_midday_min_age_seconds=1800.0,
+        post_win_fresh_base_midday_armed_coil_waive_velocity=True,
+    )
+    state = AutoTraderState(closedPaperTrades=[win], openPaperTrades=[])
+    alert = {
+        "midSessionArmedCoil": True,
+        "ictBaseArmed": True,
+        "tier": "ELITE",
+        "vRipReady": True,
+    }
+
+    with patch("app.engines.session_mode_feedback.get_settings", return_value=settings):
+        with patch(
+            "app.engines.explosion_detector.post_close_base_reacceleration",
+            return_value=(False, {"newBaseReacceleration": False}),
+        ):
+            with patch(
+                "app.engines.session_mode_feedback.datetime"
+            ) as mock_dt:
+                mock_dt.now.return_value = check_at
+                mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
+                ok, meta = same_strike_post_win_fresh_base_reentry(
+                    state,
+                    symbol="SENSEX",
+                    side=Side.CALL,
+                    strike=82200.0,
+                    premium=402.0,
+                    velocity_3s=0.0,
+                    alert=alert,
+                )
+    assert ok is True
+    assert meta["reason"] == "fresh_base_midday_armed_coil"
+    assert meta.get("middayArmedCoilPreLift") is True
+    assert alert.get("firstLift") is True
+    _local_base_hist.clear()

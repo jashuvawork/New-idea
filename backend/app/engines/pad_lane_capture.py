@@ -108,6 +108,8 @@ def pad_lane_cold_velocity_ok(
         return True
     if evidence.get("buildingCoilPad") and -0.8 <= v3 <= 1.5:
         return True
+    if evidence.get("midSessionArmedCoil") and -1.5 <= v3 <= 1.5:
+        return True
     if evidence.get("coldTroughPad") and -0.8 <= v3 <= 1.5:
         return True
     if evidence.get("vRipReady") and -1.2 <= v3 <= 1.5 and v9 >= -0.8:

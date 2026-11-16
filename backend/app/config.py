@@ -2064,6 +2064,10 @@ class Settings(BaseSettings):
     post_win_fresh_base_midday_min_reacceleration_pct: float = 6.0
     post_win_fresh_base_midday_base_cluster_tolerance_pct: float = 8.0
     post_win_fresh_base_midday_consolidation_min_span_seconds: float = 90.0
+    # Midday coil at session base after a same-strike win: qualify on consolidation +
+    # mid-session armed coil radar even before the lift prints positive v3 (Nov 16 SENSEX 82200).
+    post_win_fresh_base_midday_armed_coil_waive_velocity: bool = True
+    post_win_fresh_base_midday_armed_coil_max_pad_pct: float = 22.0
     post_win_fresh_base_waive_v_rip_shallow_enabled: bool = True
     post_win_fresh_base_elite_explosion_score_floor: float = 42.0
     # One adjacent ITM leg after a profitable peak-keep exit on the parent strike (Oct 29:
