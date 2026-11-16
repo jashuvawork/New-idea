@@ -62,6 +62,7 @@ async def deployment_status():
         "status": "ok",
         "commit": settings.commit_sha,
         "environment": settings.environment,
+        "symbols": settings.symbols,
         "loopWatchdog": watchdog_status(),
         "radarHealth": health_status(),
         "upstox": {

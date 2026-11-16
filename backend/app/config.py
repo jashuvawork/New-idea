@@ -4,7 +4,7 @@ import os
 from functools import lru_cache
 from typing import Any, Literal
 
-from pydantic import Field, computed_field
+from pydantic import AliasChoices, Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Cadence presets — explicit env vars (e.g. ENTRY_SCAN_INTERVAL_MS) override preset values.
@@ -554,6 +554,9 @@ class Settings(BaseSettings):
     symbol_premium_scale_nifty: float = 1.0
     symbol_premium_scale_sensex: float = 3.0
     symbol_premium_scale_banknifty: float = 3.0
+    symbol_premium_scale_crudeoil: float = 0.45
+    symbol_premium_scale_naturalgas: float = 0.35
+    symbol_premium_scale_goldm: float = 0.55
     # Near-base entry helpers (take trades) — on; distinct from Sep21 blockers.
     chop_rally_structure_bypass_enabled: bool = True
     chop_rally_structure_bypass_symbols_csv: str = "NIFTY,SENSEX,BANKNIFTY"
@@ -4158,6 +4161,9 @@ class Settings(BaseSettings):
     lot_size_nifty: int = 65
     lot_size_banknifty: int = 30
     lot_size_sensex: int = 20
+    lot_size_crudeoil: int = 100
+    lot_size_naturalgas: int = 1250
+    lot_size_goldm: int = 100
     use_upstox_lot_sizes: bool = False  # when false, env values above are authoritative
 
     simple_max_lots: int = 0  # unused when max_lots_per_trade=0; sizing is capital-derived
@@ -4201,11 +4207,25 @@ class Settings(BaseSettings):
     edge_macd_fade_exit_enabled: bool = True
 
     symbols_csv: str = Field(default="NIFTY,SENSEX", validation_alias="SYMBOLS")
+    # MCX commodity option underlyings (merged into `symbols` when set). Example: CRUDEOIL,NATURALGAS
+    commodity_symbols_csv: str = Field(
+        default="",
+        validation_alias=AliasChoices("commodity_symbols_csv", "COMMODITY_SYMBOLS"),
+    )
 
     @computed_field
     @property
     def symbols(self) -> list[str]:
-        return [s.strip().upper() for s in self.symbols_csv.split(",") if s.strip()]
+        merged: list[str] = []
+        seen: set[str] = set()
+        for raw in (self.symbols_csv, self.commodity_symbols_csv):
+            for part in str(raw or "").split(","):
+                sym = part.strip().upper()
+                if not sym or sym in seen:
+                    continue
+                seen.add(sym)
+                merged.append(sym)
+        return merged
 
     # Persistence
     trade_store_dir: str = "/tmp/nexusquant/trades"

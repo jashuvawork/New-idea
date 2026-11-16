@@ -46,7 +46,7 @@ import { LiveTradingGate, MorningChecklist } from '../components/LiveTradingGate
 import { FutureSignalsPanel } from '../components/FutureSignalsPanel';
 import { IndexSessionMonitoringPanel } from '../components/IndexSessionMonitoringPanel';
 
-const SYMBOLS = ['NIFTY', 'SENSEX'] as const;
+import { symbolsFromDeployment } from '../symbols';
 
 function SystemSnapshot({
   auto,
@@ -330,7 +330,12 @@ export function AnalysisPage(props: {
               <AnalysisReportsPanel />
             </div>
             <div className="col-span-12 lg:col-span-3">
-              <DayModePanel auto={auto} snapshots={data.snapshots} symbols={SYMBOLS} chopEnabled={chopEnabled} />
+              <DayModePanel
+                auto={auto}
+                snapshots={data.snapshots}
+                symbols={symbolsFromDeployment(deployment)}
+                chopEnabled={chopEnabled}
+              />
             </div>
             <div className="col-span-12 lg:col-span-3">
               <StrategyRouter snap={snap} />

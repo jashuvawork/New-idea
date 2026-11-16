@@ -7,7 +7,7 @@ import type { StreamMetrics } from '../../types';
 
 export type AuditPage = 'pnl' | 'analysis';
 
-const SYMBOLS = ['NIFTY', 'SENSEX'] as const;
+import { symbolsFromDeployment } from '../../symbols';
 
 export function AuditShell({
   page,
@@ -81,8 +81,8 @@ export function AuditShell({
           {navLink('analysis', 'Analysis')}
         </div>
 
-        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 pb-2 flex gap-1">
-          {SYMBOLS.map((s) => (
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 pb-2 flex gap-1 flex-wrap">
+          {symbolsFromDeployment(deployment).map((s) => (
             <button
               key={s}
               type="button"

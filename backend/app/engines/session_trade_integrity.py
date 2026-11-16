@@ -7,20 +7,20 @@ from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
 from app.models.schemas import AutoTraderState, PaperTrade
+from app.services.instrument_registry import all_specs, strike_bounds
 
 IST = ZoneInfo("Asia/Kolkata")
 
 _STRIKE_BOUNDS: dict[str, tuple[float, float]] = {
-    "NIFTY": (15_000.0, 35_000.0),
-    "BANKNIFTY": (30_000.0, 70_000.0),
-    "SENSEX": (60_000.0, 90_000.0),
+    sym: spec.strike_bounds for sym, spec in all_specs().items()
 }
 
 
 def _strike_sane(symbol: str, strike: float) -> bool:
-    bounds = _STRIKE_BOUNDS.get(str(symbol or "").upper())
+    sym = str(symbol or "").upper()
+    bounds = _STRIKE_BOUNDS.get(sym) or strike_bounds(sym)
     if not bounds:
-        return 10_000.0 <= strike <= 100_000.0
+        return 10.0 <= strike <= 200_000.0
     lo, hi = bounds
     return lo <= strike <= hi
 

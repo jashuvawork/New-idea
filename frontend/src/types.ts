@@ -1215,6 +1215,7 @@ export interface DeploymentStatus {
   status: string;
   commit: string;
   environment: string;
+  symbols?: string[];
   upstox: DailyTokenStatus;
   flags: Record<string, boolean | number>;
   tradeLog?: TradeLogStatus;
