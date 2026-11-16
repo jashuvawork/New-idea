@@ -1125,6 +1125,58 @@ def mid_rip_armed_coil(
     return True
 
 
+def mid_session_armed_coil_radar_retain(
+    *,
+    symbol: str,
+    premium: float,
+    armed_samples: int,
+    armed_range_pct: float,
+    base_relative_move_pct: float,
+    session_peak: float = 0.0,
+    settings: Any = None,
+) -> bool:
+    """Keep a flat ICT armed coil on BUILDING radar outside the momentum-rally window."""
+    settings = settings or __import__("app.config", fromlist=["get_settings"]).get_settings()
+    if not bool(getattr(settings, "mid_session_armed_coil_radar_enabled", True)):
+        return False
+    min_samples = int(
+        getattr(settings, "mid_session_armed_coil_min_samples", 6) or 6
+    )
+    if armed_samples < min_samples:
+        return False
+    max_range = float(
+        getattr(settings, "mid_session_armed_coil_max_armed_range_pct", 8.0) or 8.0
+    )
+    if armed_range_pct > max_range + 1e-6:
+        return False
+    try:
+        from app.engines.premium_filter import premium_in_band
+
+        if not premium_in_band(symbol, float(premium), settings=settings):
+            return False
+    except Exception:
+        return False
+    pad_lo = float(
+        getattr(settings, "building_armed_prelaunch_min_base_rel_pct", 5.0) or 5.0
+    )
+    pad_hi = float(
+        getattr(settings, "mid_session_armed_coil_max_local_move_pct", 18.0) or 18.0
+    )
+    base_rel = float(base_relative_move_pct or 0)
+    pad_ok = pad_lo <= base_rel <= pad_hi + 1e-6
+    peak = float(session_peak or 0)
+    live = float(premium or 0)
+    pullback_ok = False
+    if peak > live > 0:
+        pullback = (peak - live) / peak * 100.0
+        min_pb = float(
+            getattr(settings, "mid_session_armed_coil_min_peak_pullback_pct", 22.0)
+            or 22.0
+        )
+        pullback_ok = pullback >= min_pb
+    return pad_ok or pullback_ok
+
+
 def mid_rip_false_early_pad(
     *,
     session_low: float,
@@ -2806,6 +2858,40 @@ def scan_chain_explosions(
                                     or 18.0
                                 ))
                                 reason_parts_open.append("momentumRallyArmedCoil")
+                    if not retain_coil and keep_armed_base and ict_probe is not None:
+                        sess_peak = float(_session_peak.get(vel_key) or 0)
+                        armed_samples = int(
+                            getattr(ict_probe, "armed_base_samples", 0) or 0
+                        )
+                        armed_range = float(
+                            getattr(ict_probe, "armed_base_range_pct", 0) or 0
+                        )
+                        base_rel = float(
+                            getattr(ict_probe, "base_relative_move_pct", 0) or 0
+                        )
+                        if mid_session_armed_coil_radar_retain(
+                            symbol=symbol,
+                            premium=float(premium),
+                            armed_samples=armed_samples,
+                            armed_range_pct=armed_range,
+                            base_relative_move_pct=base_rel,
+                            session_peak=sess_peak,
+                            settings=settings,
+                        ):
+                            retain_coil = True
+                            tier = "BUILDING"
+                            score = max(
+                                score,
+                                float(
+                                    getattr(
+                                        settings,
+                                        "mid_session_armed_coil_min_score",
+                                        22.0,
+                                    )
+                                    or 22.0
+                                ),
+                            )
+                            reason_parts_open.append("midSessionArmedCoil")
                     if not retain_coil:
                         keep_armed_base = False
                 if (
@@ -3339,6 +3425,12 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     if stamp_early_radar_pad_capture(alert_out, snap):
         tradeable = True
         alert_out["tradeable"] = True
+    from app.engines.early_radar_pad_capture import building_armed_prelaunch_pad_lane
+
+    if building_armed_prelaunch_pad_lane(alert_out, _settings):
+        tradeable = True
+        alert_out["tradeable"] = True
+        alert_out["buildingArmedPrelaunchPad"] = True
     from app.engines.index_confirmed_local_base import stamp_index_confirmed_local_base
 
     if snap is not None:

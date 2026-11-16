@@ -191,6 +191,32 @@ def _should_append_detection_milestone(
     seen_at: str,
 ) -> bool:
     """Retain causal tradeable moments even when an older alert has a higher rank."""
+    prev_alert = previous.get("alert") if isinstance(previous.get("alert"), dict) else previous
+    prev_milestones = list(previous.get("milestones") or [])
+    last_milestone = prev_milestones[-1] if prev_milestones else prev_alert
+    prev_armed = bool(
+        (last_milestone or {}).get("ictBaseArmed")
+        or (prev_alert or {}).get("ictBaseArmed")
+    )
+    cur_armed = bool(alert.get("ictBaseArmed"))
+    cur_moment = str(alert.get("momentType") or "")
+    if cur_armed and (
+        not prev_armed
+        or (
+            cur_moment == "ict_base_armed"
+            and str((last_milestone or {}).get("momentType") or "") != cur_moment
+        )
+    ):
+        milestones = prev_milestones
+        if milestones:
+            try:
+                current = datetime.fromisoformat(seen_at)
+                prior = datetime.fromisoformat(str(milestones[-1].get("seenAt")))
+                if (current - prior).total_seconds() < 30.0:
+                    return False
+            except (TypeError, ValueError):
+                pass
+        return True
     if not (
         alert.get("tradeable")
         or alert.get("ictFirstLift")
