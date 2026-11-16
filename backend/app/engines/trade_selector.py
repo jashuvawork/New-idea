@@ -1831,9 +1831,19 @@ def find_best_entry(
     from app.engines.capital_allocator import effective_entry_symbols_with_snapshots
 
     entry_symbols = effective_entry_symbols_with_snapshots(settings, snapshots)
+    from app.engines.session_timing import commodity_paper_evening_active, symbol_entry_market_live
+
+    evening_commodity_only = commodity_paper_evening_active()
     for symbol, snap in snapshots.items():
         if not snap.dataAvailable:
             continue
+        if not symbol_entry_market_live(symbol):
+            continue
+        if evening_commodity_only:
+            from app.services.instrument_registry import is_commodity
+
+            if not is_commodity(symbol):
+                continue
         if entry_symbols and str(symbol or "").upper() not in entry_symbols:
             continue
         if settings.explosion_capture_mode and scalp_open < max_scalp_slots:

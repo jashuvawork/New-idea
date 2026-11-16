@@ -31,26 +31,79 @@ def open_setup_start_minutes() -> int:
     return h * 60 + m
 
 
+def _commodity_session_start_minutes() -> int:
+    settings = get_settings()
+    return int(settings.commodity_session_start_hour) * 60 + int(
+        settings.commodity_session_start_minute
+    )
+
+
+def any_configured_commodity_live() -> bool:
+    from app.services.instrument_registry import is_commodity
+    from app.services.upstox import get_market_phase_for_symbol
+
+    settings = get_settings()
+    for sym in settings.symbols or []:
+        sym_u = str(sym or "").strip().upper()
+        if is_commodity(sym_u) and get_market_phase_for_symbol(sym_u) == "LIVE_MARKET":
+            return True
+    return False
+
+
+def commodity_paper_evening_active() -> bool:
+    """True when paper may enter on MCX only — equity session is closed."""
+    settings = get_settings()
+    if not bool(getattr(settings, "commodity_paper_entries_enabled", True)):
+        return False
+    if not bool(settings.paper_trading):
+        return False
+    if get_market_phase() == "LIVE_MARKET":
+        return False
+    return any_configured_commodity_live()
+
+
+def symbol_entry_market_live(symbol: str) -> bool:
+    """Per-symbol session clock — MCX commodities vs equity indices."""
+    from app.services.instrument_registry import is_commodity
+    from app.services.upstox import get_market_phase_for_symbol
+
+    sym_u = str(symbol or "").strip().upper()
+    if is_commodity(sym_u):
+        return get_market_phase_for_symbol(sym_u) == "LIVE_MARKET"
+    return get_market_phase() == "LIVE_MARKET"
+
+
 def entries_allowed_now() -> tuple[bool, str]:
     """False until configured IST time (default 09:45) during live market."""
     phase = get_market_phase()
-    if phase != "LIVE_MARKET":
-        return False, "market_not_live"
+    if phase == "LIVE_MARKET":
+        current = _minutes_now()
+        earliest = entry_earliest_minutes()
+        if current < earliest:
+            settings = get_settings()
+            label = f"{settings.entry_earliest_hour:02d}:{settings.entry_earliest_minute:02d}"
+            return False, f"before_entry_window_{label}_IST"
+        return True, "ok"
 
-    current = _minutes_now()
-    earliest = entry_earliest_minutes()
-    if current < earliest:
-        settings = get_settings()
-        label = f"{settings.entry_earliest_hour:02d}:{settings.entry_earliest_minute:02d}"
-        return False, f"before_entry_window_{label}_IST"
-    return True, "ok"
+    if commodity_paper_evening_active():
+        current = _minutes_now()
+        start = _commodity_session_start_minutes()
+        if current < start:
+            return False, "before_commodity_session_IST"
+        return True, "commodity_paper_evening"
+
+    return False, "market_not_live"
 
 
 def explosion_entries_allowed_now() -> tuple[bool, str]:
     """Explosion orders before the general clock. Empty when both clocks are 09:15."""
     settings = get_settings()
     if not settings.explosion_open_entry_enabled:
+        if commodity_paper_evening_active():
+            return True, "commodity_paper_explosion"
         return False, "explosion_open_entry_disabled"
+    if commodity_paper_evening_active():
+        return True, "commodity_paper_explosion"
     if get_market_phase() != "LIVE_MARKET":
         return False, "market_not_live"
 
@@ -65,6 +118,8 @@ def explosion_entries_allowed_now() -> tuple[bool, str]:
 
 def in_open_caution_window() -> bool:
     """Open setup entry window (default 09:15–09:45 IST); stricter rank gates while range forms."""
+    if commodity_paper_evening_active():
+        return False
     if get_market_phase() != "LIVE_MARKET":
         return False
     current = _minutes_now()
@@ -87,6 +142,8 @@ def in_open_premium_window_at(when: datetime) -> bool:
 
 def in_open_premium_window() -> bool:
     """09:15–09:45 IST — session-open premium explosion detection."""
+    if commodity_paper_evening_active():
+        return False
     if get_market_phase() != "LIVE_MARKET":
         return False
     settings = get_settings()
@@ -123,6 +180,8 @@ def min_explosion_score_now() -> int:
 
 def in_midday_chop_window() -> bool:
     """11:30–13:30 IST — low-quality range; block scalp entries in sure-shot mode."""
+    if commodity_paper_evening_active():
+        return False
     if get_market_phase() != "LIVE_MARKET":
         return False
     settings = get_settings()
@@ -139,6 +198,8 @@ def in_regular_explosion_session_window() -> bool:
     allowed, _ = entries_allowed_now()
     if not allowed:
         return False
+    if commodity_paper_evening_active():
+        return True
     return _minutes_now() < 15 * 60 + 30
 
 

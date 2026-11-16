@@ -4241,6 +4241,14 @@ class Settings(BaseSettings):
             "COMMODITY_SESSION_END_MINUTE",
         ),
     )
+    # Paper book only: allow MCX entries when NSE/BSE cash is closed but commodities are live.
+    commodity_paper_entries_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "commodity_paper_entries_enabled",
+            "COMMODITY_PAPER_ENTRIES_ENABLED",
+        ),
+    )
 
     @computed_field
     @property
