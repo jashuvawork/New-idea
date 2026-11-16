@@ -1838,7 +1838,11 @@ def elite_entry_allowed(
                 return False, f"elite_score_below_{min_score:g}", assessment
         elif fresh_base_reentry:
             fb_meta = assessment.get("sameStrikePostWinFreshBaseMeta") or {}
-            pad_ok = post_win_fresh_base_pad_in_capture_band(fb_meta, settings=settings)
+            pad_ok = post_win_fresh_base_pad_in_capture_band(
+                fb_meta,
+                settings=settings,
+                midday_armed_coil=bool(fb_meta.get("middayArmedCoilNoVelocity")),
+            )
             floor = float(
                 getattr(settings, "post_win_fresh_base_elite_explosion_score_floor", 42.0)
                 or 42.0
@@ -1922,6 +1926,11 @@ def elite_entry_allowed(
             and post_win_fresh_base_pad_in_capture_band(
                 assessment.get("sameStrikePostWinFreshBaseMeta") or {},
                 settings=settings,
+                midday_armed_coil=bool(
+                    (assessment.get("sameStrikePostWinFreshBaseMeta") or {}).get(
+                        "middayArmedCoilNoVelocity"
+                    )
+                ),
             )
         )
     ):
@@ -1950,6 +1959,11 @@ def elite_entry_allowed(
         and post_win_fresh_base_pad_in_capture_band(
             assessment.get("sameStrikePostWinFreshBaseMeta") or {},
             settings=settings,
+            midday_armed_coil=bool(
+                (assessment.get("sameStrikePostWinFreshBaseMeta") or {}).get(
+                    "middayArmedCoilNoVelocity"
+                )
+            ),
         )
     ):
         assessment = {**assessment, "side": resolved_side, "mustTake": must_take}

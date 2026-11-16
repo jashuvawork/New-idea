@@ -23,6 +23,9 @@ _ENABLE_LIVE_ALLOWLIST: tuple[str, ...] = (
     "app/routers/health.py",
     "app/routers/execution.py",
     "app/config.py",
+    # Paper-lab desktop stack: refuse to run when live is armed (parity experiment only).
+    "app/engines/paper_lab_base_rip.py",
+    "app/engines/paper_lab_prod_feed.py",
 )
 
 # Settings that must match paper/Oct1 book when ``live_match_paper_book`` (template pins these).

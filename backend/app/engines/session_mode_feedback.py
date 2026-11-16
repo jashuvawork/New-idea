@@ -542,10 +542,27 @@ def _alert_premium_already_fading(
     return False
 
 
+def _midday_armed_coil_alert_ready(alert: Optional[dict[str, Any]]) -> bool:
+    """Radar retention stamp: quiet midday coil after peak pullback (CE/PE symmetric)."""
+    if not isinstance(alert, dict):
+        return False
+    if bool(alert.get("midSessionArmedCoil")):
+        return True
+    if bool(alert.get("ictBaseArmed")) and str(alert.get("tier") or "").upper() in {
+        "ELITE",
+        "EXPLODING",
+    }:
+        return True
+    if bool(alert.get("buildingArmedPrelaunchPad")) and bool(alert.get("vRipReady")):
+        return True
+    return False
+
+
 def post_win_fresh_base_pad_in_capture_band(
     meta: Mapping[str, Any] | None,
     *,
     settings: Any = None,
+    midday_armed_coil: bool = False,
 ) -> bool:
     """True when lift off the post-win base sits inside the allowed pad band."""
     from app.config import get_settings
@@ -563,6 +580,16 @@ def post_win_fresh_base_pad_in_capture_band(
     max_pad = float(
         getattr(settings, "post_win_new_local_base_max_pad_pct", 22.0) or 22.0
     )
+    if midday_armed_coil:
+        max_pad = float(
+            getattr(
+                settings,
+                "post_win_fresh_base_midday_armed_coil_max_pad_pct",
+                max_pad,
+            )
+            or max_pad
+        )
+        return 0.0 <= pad <= max_pad + 1e-6
     return min_pad <= pad <= max_pad + 1e-6
 
 
@@ -639,9 +666,6 @@ def same_strike_post_win_fresh_base_reentry(
     if legs_after >= 1:
         meta["reason"] = "reentry_already_taken"
         return False, meta
-    if _alert_premium_already_fading(alert, velocity_3s):
-        meta["reason"] = "premium_fading"
-        return False, meta
 
     from app.engines.explosion_detector import (
         post_close_base_reacceleration,
@@ -653,6 +677,20 @@ def same_strike_post_win_fresh_base_reentry(
     )
     midday_mode = age >= midday_min_age - 1e-6
     meta["postWinMiddayBaseMode"] = midday_mode
+    armed_coil_pre = bool(
+        midday_mode
+        and bool(
+            getattr(
+                settings,
+                "post_win_fresh_base_midday_armed_coil_waive_velocity",
+                True,
+            )
+        )
+        and _midday_armed_coil_alert_ready(alert)
+    )
+    if _alert_premium_already_fading(alert, velocity_3s) and not armed_coil_pre:
+        meta["reason"] = "premium_fading"
+        return False, meta
 
     min_v3 = float(
         getattr(settings, "explosion_post_peak_reentry_min_velocity_3s", 1.5) or 1.5
@@ -684,6 +722,7 @@ def same_strike_post_win_fresh_base_reentry(
         )
         cluster_tol = 5.0
 
+    armed_coil = False
     reset, reset_meta = post_close_base_reacceleration(
         symbol,
         strike,
@@ -719,21 +758,48 @@ def same_strike_post_win_fresh_base_reentry(
             base_cluster_tolerance_pct=cluster_tol,
         )
         meta["postCloseConsolidation"] = cons_meta
-        if cons_ok and float(velocity_3s or 0) >= min_v3 - 1e-6:
-            reset = True
-            reset_meta = dict(cons_meta)
+        if cons_ok:
+            if float(velocity_3s or 0) >= min_v3 - 1e-6:
+                reset = True
+                reset_meta = dict(cons_meta)
+            elif bool(
+                getattr(
+                    settings,
+                    "post_win_fresh_base_midday_armed_coil_waive_velocity",
+                    True,
+                )
+            ) and _midday_armed_coil_alert_ready(alert):
+                reset = True
+                reset_meta = {
+                    **dict(cons_meta),
+                    "middayArmedCoilNoVelocity": True,
+                }
+                armed_coil = True
+                meta["middayArmedCoilPreLift"] = True
 
     if not reset:
         meta["reason"] = "no_fresh_base"
         return False, meta
-    if float(velocity_3s or 0) < min_v3 - 1e-6:
+    if float(velocity_3s or 0) < min_v3 - 1e-6 and not bool(
+        reset_meta.get("middayArmedCoilNoVelocity")
+    ):
         meta["reason"] = "velocity_below_min"
         return False, meta
-    if not post_win_fresh_base_pad_in_capture_band(reset_meta, settings=settings):
+    pad_meta = reset_meta
+    armed_coil = armed_coil or bool(reset_meta.get("middayArmedCoilNoVelocity"))
+    if not post_win_fresh_base_pad_in_capture_band(
+        pad_meta,
+        settings=settings,
+        midday_armed_coil=armed_coil,
+    ):
         meta["reason"] = "above_fresh_base_pad"
         return False, meta
     meta["sameStrikePostWinFreshBase"] = True
-    meta["reason"] = "fresh_base_reentry"
+    meta["reason"] = (
+        "fresh_base_midday_armed_coil" if armed_coil else "fresh_base_reentry"
+    )
+    if isinstance(alert, dict) and armed_coil:
+        stamp_post_win_fresh_base_lift_alert(alert, pad_meta)
     return True, meta
 
 
