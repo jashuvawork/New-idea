@@ -105,6 +105,45 @@ async def commodity_futures_instrument_key(
     return resolved
 
 
+def list_option_expiries_from_master(
+    rows: list[dict[str, Any]],
+    futures_asset_symbol: str,
+    *,
+    as_of: Optional[datetime] = None,
+    limit: int = 8,
+) -> list[str]:
+    """Distinct YYYY-MM-DD option expiries for an MCX mini asset (instrument-master fallback)."""
+    now = as_of or datetime.now(IST)
+    today = now.date().isoformat()
+    asset = str(futures_asset_symbol or "").strip().upper()
+    if not asset:
+        return []
+    expiries: set[str] = set()
+    for row in rows:
+        if row.get("segment") != "MCX_FO":
+            continue
+        if str(row.get("instrument_type") or "").upper() not in ("CE", "PE"):
+            continue
+        if str(row.get("asset_symbol") or "").upper() != asset:
+            continue
+        exp = _ms_to_date(row.get("expiry"))
+        if exp is None:
+            continue
+        iso = exp.date().isoformat()
+        if iso >= today:
+            expiries.add(iso)
+    return sorted(expiries)[: max(1, limit)]
+
+
+async def commodity_option_expiries(
+    futures_asset_symbol: str,
+    *,
+    limit: int = 8,
+) -> list[str]:
+    rows = await _fetch_rows()
+    return list_option_expiries_from_master(rows, futures_asset_symbol, limit=limit)
+
+
 def invalidate_instrument_cache() -> None:
     """Test hook — clear downloaded master + resolved keys."""
     global _rows, _loaded_at
