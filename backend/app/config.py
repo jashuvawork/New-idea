@@ -4163,7 +4163,19 @@ class Settings(BaseSettings):
     lot_size_sensex: int = 20
     lot_size_crudeoil: int = 100
     lot_size_naturalgas: int = 1250
-    lot_size_goldm: int = 100
+    lot_size_gold: int = Field(
+        default=100,
+        validation_alias=AliasChoices(
+            "lot_size_gold",
+            "lot_size_goldm",
+            "LOT_SIZE_GOLD",
+            "LOT_SIZE_GOLDM",
+        ),
+    )
+    lot_size_silver: int = Field(
+        default=5,
+        validation_alias=AliasChoices("lot_size_silver", "LOT_SIZE_SILVER"),
+    )
     use_upstox_lot_sizes: bool = False  # when false, env values above are authoritative
 
     simple_max_lots: int = 0  # unused when max_lots_per_trade=0; sizing is capital-derived

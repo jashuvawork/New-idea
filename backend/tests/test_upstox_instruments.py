@@ -35,6 +35,15 @@ def test_resolve_nearest_mcx_futures_key_picks_earliest_live_contract():
     assert resolve_nearest_mcx_futures_key(rows, "NATGASMINI", as_of=as_of) == "MCX_FO|gas"
 
 
+def test_resolve_silverm_futures_key():
+    rows = [
+        _fut_row("SILVERM", "MCX_FO|old", 2026, 10, 1),
+        _fut_row("SILVERM", "MCX_FO|live", 2026, 11, 24),
+    ]
+    as_of = datetime(2026, 11, 16, 12, 0, tzinfo=IST)
+    assert resolve_nearest_mcx_futures_key(rows, "SILVERM", as_of=as_of) == "MCX_FO|live"
+
+
 def test_commodity_registry_uses_mcx_fo_not_futcom():
     from app.services.instrument_registry import get_spec
 

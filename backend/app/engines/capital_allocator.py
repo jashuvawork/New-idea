@@ -19,9 +19,10 @@ FALLBACK_LOT_SIZES: dict[str, int] = {
     "NIFTY": 65,
     "BANKNIFTY": 30,
     "SENSEX": 20,
-    "CRUDEOIL": 100,
-    "NATURALGAS": 1250,
-    "GOLDM": 100,
+    "CRUDEOIL": 10,
+    "NATURALGAS": 250,
+    "GOLD": 100,
+    "SILVER": 5,
 }
 
 _lot_sizes: dict[str, int] = {}
@@ -48,7 +49,8 @@ def _configured_lot_sizes() -> dict[str, int]:
         "SENSEX": _lot_from_settings(settings, "lot_size_sensex", "SENSEX"),
         "CRUDEOIL": _lot_from_settings(settings, "lot_size_crudeoil", "CRUDEOIL"),
         "NATURALGAS": _lot_from_settings(settings, "lot_size_naturalgas", "NATURALGAS"),
-        "GOLDM": _lot_from_settings(settings, "lot_size_goldm", "GOLDM"),
+        "GOLD": _lot_from_settings(settings, "lot_size_gold", "GOLD"),
+        "SILVER": _lot_from_settings(settings, "lot_size_silver", "SILVER"),
     }
     symbols = getattr(settings, "symbols", None) or []
     for sym in symbols:

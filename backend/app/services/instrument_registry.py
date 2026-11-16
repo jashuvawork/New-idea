@@ -25,6 +25,8 @@ class UnderlyingSpec:
     weekly_expiry: bool
     # MCX mini futures symbol in Upstox master (rolling chain key via nearest FUT).
     futures_asset_symbol: Optional[str] = None
+    # Upstox trading_symbol prefix → maps to `symbol` in parsers (e.g. GOLDM → GOLD).
+    broker_aliases: tuple[str, ...] = ()
 
 
 # Upstox option-chain /option/contract keys (underlying refs, not rolling fut legs).
@@ -86,17 +88,31 @@ _REGISTRY: dict[str, UnderlyingSpec] = {
         weekly_expiry=False,
         futures_asset_symbol="NATGASMINI",
     ),
-    "GOLDM": UnderlyingSpec(
-        symbol="GOLDM",
+    "GOLD": UnderlyingSpec(
+        symbol="GOLD",
         instrument_key="MCX_FO|575011",
         option_segment="MCX_FO",
-        strike_step=100.0,
-        strike_bounds=(40_000.0, 90_000.0),
+        strike_step=500.0,
+        strike_bounds=(100_000.0, 200_000.0),
         fallback_lot_size=100,
         premium_scale=0.55,
         kind=UnderlyingKind.COMMODITY,
         weekly_expiry=False,
         futures_asset_symbol="GOLDM",
+        broker_aliases=("GOLDM",),
+    ),
+    "SILVER": UnderlyingSpec(
+        symbol="SILVER",
+        instrument_key="MCX_FO|483080",
+        option_segment="MCX_FO",
+        strike_step=1000.0,
+        strike_bounds=(130_000.0, 420_000.0),
+        fallback_lot_size=5,
+        premium_scale=0.35,
+        kind=UnderlyingKind.COMMODITY,
+        weekly_expiry=False,
+        futures_asset_symbol="SILVERM",
+        broker_aliases=("SILVERM",),
     ),
 }
 
@@ -158,5 +174,20 @@ def premium_scale(symbol: str) -> float:
 
 def broker_symbol_pattern() -> str:
     """Alternation of registered symbols for regex (longest first)."""
-    names = sorted(_REGISTRY.keys(), key=len, reverse=True)
+    tokens: list[str] = []
+    for sym, spec in _REGISTRY.items():
+        tokens.append(sym)
+        tokens.extend(spec.broker_aliases)
+    names = sorted(set(tokens), key=len, reverse=True)
     return "|".join(names)
+
+
+def canonical_symbol(broker_token: str) -> str:
+    """Map Upstox option root (e.g. GOLDM) to configured symbol (GOLD)."""
+    token = str(broker_token or "").strip().upper()
+    if token in _REGISTRY:
+        return token
+    for sym, spec in _REGISTRY.items():
+        if token in {a.upper() for a in spec.broker_aliases}:
+            return sym
+    return token

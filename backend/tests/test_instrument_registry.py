@@ -45,6 +45,13 @@ def test_parse_broker_crudeoil_option():
     assert _OPTION_SYMBOL_RE.match("NATURALGAS 280 PE") is not None
 
 
+def test_parse_broker_gold_silver_aliases():
+    assert parse_broker_option_symbol("GOLDM 129000 CE") == ("GOLD", 129000.0, Side.CALL)
+    assert parse_broker_option_symbol("SILVERM 243000 PE") == ("SILVER", 243000.0, Side.PUT)
+    assert "GOLD" in COMMODITY_SYMBOLS
+    assert "SILVER" in COMMODITY_SYMBOLS
+
+
 def test_monthly_expiry_candidate():
     exp = get_nearest_expiry("CRUDEOIL")
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", exp)

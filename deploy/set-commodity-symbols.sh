@@ -3,7 +3,7 @@
 set -euo pipefail
 ENV_FILE="${ENV_FILE:-/opt/nexusquant/env}"
 COMPOSE_FILE="${COMPOSE_FILE:-/opt/nexusquant/New-idea/docker-compose.prod.yml}"
-COMMODITY_SYMBOLS="${COMMODITY_SYMBOLS:-CRUDEOIL,NATURALGAS}"
+COMMODITY_SYMBOLS="${COMMODITY_SYMBOLS:-CRUDEOIL,NATURALGAS,GOLD,SILVER}"
 
 touch "$ENV_FILE"
 if grep -q '^COMMODITY_SYMBOLS=' "$ENV_FILE"; then

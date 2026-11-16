@@ -17,7 +17,12 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.engines.capital_allocator import lot_multiplier
 from app.models.schemas import AutoTraderState, Side, SymbolSnapshot
-from app.services.instrument_registry import all_specs, broker_symbol_pattern, strike_bounds
+from app.services.instrument_registry import (
+    all_specs,
+    broker_symbol_pattern,
+    canonical_symbol,
+    strike_bounds,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 logger = logging.getLogger(__name__)
@@ -76,7 +81,7 @@ def parse_broker_option_symbol(trading_symbol: str) -> tuple[str, float, Side] |
     # Upstox compact first — spaced regex would mis-parse expiry+strike blob as strike.
     match = _OPTION_UPSTOX_COMPACT_RE.match(compact)
     if match:
-        symbol = match.group("symbol").upper()
+        symbol = canonical_symbol(match.group("symbol").upper())
         strike = float(match.group("strike"))
         side = Side.CALL if match.group("side").upper() == "CE" else Side.PUT
         if _strike_sane(symbol, strike):
@@ -85,7 +90,7 @@ def parse_broker_option_symbol(trading_symbol: str) -> tuple[str, float, Side] |
 
     match = _OPTION_SYMBOL_RE.match(raw)
     if match:
-        symbol = match.group("symbol").upper()
+        symbol = canonical_symbol(match.group("symbol").upper())
         strike = float(match.group("strike"))
         side = Side.CALL if match.group("side").upper() == "CE" else Side.PUT
         if _strike_sane(symbol, strike):
@@ -94,7 +99,7 @@ def parse_broker_option_symbol(trading_symbol: str) -> tuple[str, float, Side] |
 
     match = _OPTION_COMPACT_RE.match(compact)
     if match:
-        symbol = match.group("symbol").upper()
+        symbol = canonical_symbol(match.group("symbol").upper())
         strike = float(match.group("strike"))
         side = Side.CALL if match.group("side").upper() == "CE" else Side.PUT
         if _strike_sane(symbol, strike):
