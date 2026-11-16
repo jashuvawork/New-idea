@@ -132,8 +132,13 @@ async def _base_subscription_keys() -> list[str]:
     """Subscribe spot/underlying keys for configured symbols only."""
     settings = get_settings()
     keys: list[str] = []
+    client = UpstoxClient()
     for sym in settings.symbols:
-        ik = INDEX_KEYS.get(str(sym).upper())
+        sym_u = str(sym).upper()
+        try:
+            ik = await client.underlying_instrument_key(sym_u)
+        except Exception:
+            ik = INDEX_KEYS.get(sym_u)
         if ik:
             keys.append(_norm_key(ik))
     return keys

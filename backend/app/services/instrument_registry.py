@@ -23,6 +23,8 @@ class UnderlyingSpec:
     premium_scale: float
     kind: UnderlyingKind
     weekly_expiry: bool
+    # MCX mini futures symbol in Upstox master (rolling chain key via nearest FUT).
+    futures_asset_symbol: Optional[str] = None
 
 
 # Upstox option-chain /option/contract keys (underlying refs, not rolling fut legs).
@@ -62,29 +64,31 @@ _REGISTRY: dict[str, UnderlyingSpec] = {
     ),
     "CRUDEOIL": UnderlyingSpec(
         symbol="CRUDEOIL",
-        instrument_key="MCX_FUTCOM|294",
+        instrument_key="MCX_FO|573423",
         option_segment="MCX_FO",
         strike_step=50.0,
         strike_bounds=(3_000.0, 15_000.0),
-        fallback_lot_size=100,
+        fallback_lot_size=10,
         premium_scale=0.45,
         kind=UnderlyingKind.COMMODITY,
         weekly_expiry=False,
+        futures_asset_symbol="CRUDEOILM",
     ),
     "NATURALGAS": UnderlyingSpec(
         symbol="NATURALGAS",
-        instrument_key="MCX_FUTCOM|401",
+        instrument_key="MCX_FO|574320",
         option_segment="MCX_FO",
         strike_step=5.0,
         strike_bounds=(50.0, 1_200.0),
-        fallback_lot_size=1250,
+        fallback_lot_size=250,
         premium_scale=0.35,
         kind=UnderlyingKind.COMMODITY,
         weekly_expiry=False,
+        futures_asset_symbol="NATGASMINI",
     ),
     "GOLDM": UnderlyingSpec(
         symbol="GOLDM",
-        instrument_key="MCX_FUTCOM|117",
+        instrument_key="MCX_FO|575011",
         option_segment="MCX_FO",
         strike_step=100.0,
         strike_bounds=(40_000.0, 90_000.0),
@@ -92,6 +96,7 @@ _REGISTRY: dict[str, UnderlyingSpec] = {
         premium_scale=0.55,
         kind=UnderlyingKind.COMMODITY,
         weekly_expiry=False,
+        futures_asset_symbol="GOLDM",
     ),
 }
 

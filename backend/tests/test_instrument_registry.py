@@ -19,7 +19,7 @@ from app.services.upstox import get_nearest_expiry
 
 def test_commodity_specs_registered():
     assert "CRUDEOIL" in index_keys_map()
-    assert index_keys_map()["CRUDEOIL"].startswith("MCX_")
+    assert index_keys_map()["CRUDEOIL"].startswith("MCX_FO|")
     assert get_spec("NATURALGAS") is not None
     assert is_commodity("CRUDEOIL")
     assert not is_commodity("NIFTY")

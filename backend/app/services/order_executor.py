@@ -130,9 +130,7 @@ async def _resolve_from_contracts(
     side: Side,
     expiry: str,
 ) -> tuple[str, str, int]:
-    index_key = INDEX_KEYS.get(symbol)
-    if not index_key:
-        raise UpstoxError(f"Unknown symbol: {symbol}")
+    index_key = await client.underlying_instrument_key(symbol)
 
     contracts = await client._get(
         "/option/contract",
