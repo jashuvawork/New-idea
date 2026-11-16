@@ -2997,6 +2997,14 @@ class Settings(BaseSettings):
     momentum_rally_armed_coil_max_premium: float = 45.0
     momentum_rally_armed_coil_min_samples: int = 4
     momentum_rally_armed_coil_min_score: float = 18.0
+    # Mid-session flat armed coil on radar (SENSEX/NIFTY bands) after peak pullback — not
+    # limited to momentum-rally window or ₹18–45 premium band (Nov16 82200 CE ~11:47).
+    mid_session_armed_coil_radar_enabled: bool = True
+    mid_session_armed_coil_min_samples: int = 6
+    mid_session_armed_coil_min_score: float = 22.0
+    mid_session_armed_coil_max_armed_range_pct: float = 8.0
+    mid_session_armed_coil_min_peak_pullback_pct: float = 22.0
+    mid_session_armed_coil_max_local_move_pct: float = 18.0
     eod_replay_early_pad_rank_penalty: float = 12.0
     eod_replay_counter_side_rank_penalty: float = 35.0
     # Coil-pad expansion: prefer near-strike (ATM / 1-step OTM) over deep ITM.
