@@ -104,7 +104,7 @@ def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
     assert "10000" not in text
 
 
-def test_live_deploy_refresh_preserves_intentional_capital_sleeve(tmp_path):
+def test_live_arm_live_capital_inr_override(tmp_path):
     env_file = tmp_path / "env"
     env_file.write_text(
         "\n".join(
@@ -125,6 +125,7 @@ def test_live_deploy_refresh_preserves_intentional_capital_sleeve(tmp_path):
             "ENV_FILE": str(env_file),
             "REPO_DIR": str(ROOT),
             "SKIP_RESTART": "1",
+            "LIVE_CAPITAL_INR": "50000",
         },
         cwd=ROOT,
     )
