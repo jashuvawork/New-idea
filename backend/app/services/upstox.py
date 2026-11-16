@@ -11,7 +11,12 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from app.config import get_settings
-from app.services.instrument_registry import get_spec, index_keys_map, option_segments_map
+from app.services.instrument_registry import (
+    UnderlyingKind,
+    get_spec,
+    index_keys_map,
+    option_segments_map,
+)
 from app.services.redis_store import get_upstox_token
 
 logger = logging.getLogger(__name__)
@@ -318,6 +323,24 @@ class UpstoxClient:
     def __init__(self):
         self.settings = get_settings()
 
+    async def underlying_instrument_key(self, symbol: str) -> str:
+        """Index key for quotes/chains — rolling MCX FUT for commodities."""
+        sym = str(symbol or "").upper()
+        spec = get_spec(sym)
+        if spec and spec.kind == UnderlyingKind.COMMODITY and spec.futures_asset_symbol:
+            from app.services.upstox_instruments import commodity_futures_instrument_key
+
+            resolved = await commodity_futures_instrument_key(
+                spec.futures_asset_symbol,
+                fallback=spec.instrument_key,
+            )
+            if resolved:
+                return resolved
+        key = INDEX_KEYS.get(sym)
+        if not key:
+            raise UpstoxError(f"Unknown symbol: {sym}")
+        return key
+
     async def _headers(self) -> dict[str, str]:
         token = await get_upstox_token()
         if not token:
@@ -470,9 +493,7 @@ class UpstoxClient:
         if cached is not None:
             return float(cached)
 
-        key = INDEX_KEYS.get(symbol)
-        if not key:
-            raise UpstoxError(f"Unknown symbol: {symbol}")
+        key = await self.underlying_instrument_key(symbol)
         data = await self._get("/market-quote/ltp", params={"instrument_key": key})
         if isinstance(data, dict):
             data = normalize_quotes_map(data)
@@ -540,9 +561,7 @@ class UpstoxClient:
             if cached is not None:
                 return cached
 
-        key = INDEX_KEYS.get(symbol)
-        if not key:
-            raise UpstoxError(f"Unknown symbol: {symbol}")
+        key = await self.underlying_instrument_key(symbol)
         data = await self._get("/market-quote/quotes", params={"instrument_key": key})
         if isinstance(data, dict):
             data = normalize_quotes_map(data)
@@ -559,9 +578,7 @@ class UpstoxClient:
         if cached is not None:
             return cached
 
-        key = INDEX_KEYS.get(symbol)
-        if not key:
-            raise UpstoxError(f"Unknown symbol: {symbol}")
+        key = await self.underlying_instrument_key(symbol)
         data = await self._get("/option/contract", params={"instrument_key": key})
         if not isinstance(data, list):
             return []
@@ -580,9 +597,7 @@ class UpstoxClient:
         if cached is not None:
             return int(cached)
 
-        key = INDEX_KEYS.get(sym)
-        if not key:
-            raise UpstoxError(f"Unknown symbol: {sym}")
+        key = await self.underlying_instrument_key(sym)
 
         data = await self._get("/option/contract", params={"instrument_key": key})
         if not isinstance(data, list) or not data:
@@ -609,9 +624,7 @@ class UpstoxClient:
         if cached is not None:
             return cached
 
-        key = INDEX_KEYS.get(symbol)
-        if not key:
-            raise UpstoxError(f"Unknown symbol: {symbol}")
+        key = await self.underlying_instrument_key(symbol)
         data = await self._get(
             "/option/chain",
             params={"instrument_key": key, "expiry_date": expiry},
@@ -667,9 +680,7 @@ class UpstoxClient:
     async def get_candles(
         self, symbol: str, interval: str = "1minute", count: int = 60, *, force_refresh: bool = False,
     ) -> list[dict[str, Any]]:
-        key = INDEX_KEYS.get(symbol)
-        if not key:
-            raise UpstoxError(f"Unknown symbol: {symbol}")
+        key = await self.underlying_instrument_key(symbol)
         return await self.get_historical_candles(
             key, interval=interval, count=count, force_refresh=force_refresh,
         )
