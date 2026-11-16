@@ -124,6 +124,7 @@ def _process_patches(state, candidate, events, opener):
         "get_settings": lambda: settings,
         "_process_open_trades": AsyncMock(return_value=[]),
         "get_market_phase": lambda: "LIVE_MARKET",
+        "effective_market_phase_for_session": lambda: "LIVE_MARKET",
         "update_daily_profit_gate": lambda *_a, **_k: profit_gate,
         "get_capital_snapshot": lambda: capital,
         "get_lot_sizes_meta": lambda: {},
