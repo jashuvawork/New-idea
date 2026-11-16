@@ -30,19 +30,31 @@ _lot_sizes_fetched_at: Optional[str] = None
 _lot_sizes_last_mono: float = 0.0
 
 
+def _lot_from_settings(settings: Any, attr: str, sym: str) -> int:
+    default = FALLBACK_LOT_SIZES.get(sym.upper(), 65)
+    raw = getattr(settings, attr, default)
+    try:
+        lot = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return lot if lot > 0 else default
+
+
 def _configured_lot_sizes() -> dict[str, int]:
     settings = get_settings()
     base = {
-        "NIFTY": settings.lot_size_nifty,
-        "BANKNIFTY": settings.lot_size_banknifty,
-        "SENSEX": settings.lot_size_sensex,
-        "CRUDEOIL": settings.lot_size_crudeoil,
-        "NATURALGAS": settings.lot_size_naturalgas,
-        "GOLDM": settings.lot_size_goldm,
+        "NIFTY": _lot_from_settings(settings, "lot_size_nifty", "NIFTY"),
+        "BANKNIFTY": _lot_from_settings(settings, "lot_size_banknifty", "BANKNIFTY"),
+        "SENSEX": _lot_from_settings(settings, "lot_size_sensex", "SENSEX"),
+        "CRUDEOIL": _lot_from_settings(settings, "lot_size_crudeoil", "CRUDEOIL"),
+        "NATURALGAS": _lot_from_settings(settings, "lot_size_naturalgas", "NATURALGAS"),
+        "GOLDM": _lot_from_settings(settings, "lot_size_goldm", "GOLDM"),
     }
-    for sym in settings.symbols:
-        if sym not in base and known_symbol(sym):
-            base[sym] = fallback_lot_size(sym)
+    symbols = getattr(settings, "symbols", None) or []
+    for sym in symbols:
+        sym_u = str(sym or "").strip().upper()
+        if sym_u and sym_u not in base and known_symbol(sym_u):
+            base[sym_u] = fallback_lot_size(sym_u)
     return base
 
 
