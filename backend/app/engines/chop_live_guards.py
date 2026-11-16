@@ -160,6 +160,72 @@ def _known_broker_instrument_keys(state: AutoTraderState) -> set[str]:
     return keys
 
 
+def _chop_live_elite_vertical_immature_waived(
+    candidate: Any,
+    snap: SymbolSnapshot,
+) -> bool:
+    """Allow ELITE displacement/volume vertical rips past immature local-base % on chop days."""
+    settings = get_settings()
+    if not bool(
+        getattr(settings, "chop_live_elite_vertical_immature_waiver_enabled", True)
+    ):
+        return False
+    event = getattr(candidate, "explosion_event", None)
+    if event is None:
+        return False
+    alert = getattr(candidate, "alert", None)
+    tier = str(
+        (alert.get("tier") if isinstance(alert, dict) else None)
+        or getattr(event, "tier", "")
+        or ""
+    ).upper()
+    if tier != "ELITE":
+        return False
+    try:
+        score = float(
+            getattr(event, "explosion_score", 0)
+            or (alert.get("explosionScore") if isinstance(alert, dict) else 0)
+            or 0
+        )
+    except (TypeError, ValueError):
+        score = 0.0
+    min_score = float(
+        getattr(settings, "chop_live_elite_vertical_immature_min_explosion_score", 72.0)
+        or 72.0
+    )
+    if score + 1e-6 < min_score:
+        return False
+    try:
+        v3 = float(
+            getattr(event, "velocity_3s", 0)
+            or (
+                alert.get("velocity3s") or alert.get("velocity_3s")
+                if isinstance(alert, dict)
+                else 0
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        v3 = 0.0
+    min_v3 = float(
+        getattr(settings, "chop_live_elite_vertical_immature_min_velocity_3s", 0.8)
+        or 0.8
+    )
+    if v3 + 1e-6 < min_v3:
+        return False
+
+    from app.engines.ict_breakout_monitor import analyze_explosion_event_ict
+
+    ict = analyze_explosion_event_ict(event, snap)
+    return bool(
+        getattr(ict, "displacement", False)
+        or getattr(ict, "volume_awakening", False)
+        or getattr(ict, "armed_base_launch", False)
+        or getattr(ict, "v_rip_ready", False)
+        or getattr(ict, "flat_then_vertical", False)
+    )
+
+
 def _immature_local_base_hard_block(
     candidate: Any,
     snap: SymbolSnapshot,
@@ -167,6 +233,8 @@ def _immature_local_base_hard_block(
     """Immature local-base check without elite / must-take bypass."""
     event = getattr(candidate, "explosion_event", None)
     if event is None:
+        return False, ""
+    if _chop_live_elite_vertical_immature_waived(candidate, snap):
         return False, ""
 
     from app.engines.explosion_entry_guards import immature_explosion_blocked
