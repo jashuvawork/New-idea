@@ -15,6 +15,7 @@ from app.services.instrument_registry import (
     UnderlyingKind,
     get_spec,
     index_keys_map,
+    is_commodity,
     option_segments_map,
 )
 from app.services.redis_store import get_upstox_token
@@ -295,6 +296,36 @@ def normalize_option_leg(leg: dict[str, Any]) -> dict[str, Any]:
             "iv": greeks_src.get("iv"),
         },
     }
+
+
+def parse_contract_expiry_date(raw: Any) -> Optional[str]:
+    """Normalize Upstox contract expiry to YYYY-MM-DD (IST calendar date)."""
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        try:
+            ms = int(raw)
+            if ms < 10_000_000_000:
+                ms *= 1000
+            return datetime.fromtimestamp(ms / 1000.0, tz=IST).date().isoformat()
+        except (TypeError, ValueError, OSError):
+            return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%d"):
+        try:
+            parsed = datetime.strptime(text.replace("Z", "+0000")[:26], fmt)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=IST)
+            return parsed.astimezone(IST).date().isoformat()
+        except ValueError:
+            continue
+    if text.isdigit():
+        return parse_contract_expiry_date(int(text))
+    return None
 
 
 def normalize_option_chain(chain: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -581,13 +612,30 @@ class UpstoxClient:
         key = await self.underlying_instrument_key(symbol)
         data = await self._get("/option/contract", params={"instrument_key": key})
         if not isinstance(data, list):
-            return []
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-        expiries = sorted(
-            {str(c.get("expiry")) for c in data if isinstance(c, dict) and c.get("expiry") and str(c["expiry"]) >= today}
-        )
-        _cache_set(cache_key, expiries)
-        return expiries
+            data = []
+        today = datetime.now(IST).date().isoformat()
+        expiries: set[str] = set()
+        for contract in data:
+            if not isinstance(contract, dict):
+                continue
+            parsed = parse_contract_expiry_date(
+                contract.get("expiry") or contract.get("expiry_date")
+            )
+            if parsed and parsed >= today:
+                expiries.add(parsed)
+        if not expiries and is_commodity(symbol):
+            spec = get_spec(symbol)
+            if spec and spec.futures_asset_symbol:
+                from app.services.upstox_instruments import commodity_option_expiries
+
+                try:
+                    for exp in await commodity_option_expiries(spec.futures_asset_symbol):
+                        expiries.add(exp)
+                except Exception as e:
+                    logger.debug("Instrument-master expiries failed for %s: %s", symbol, e)
+        out = sorted(expiries)
+        _cache_set(cache_key, out)
+        return out
 
     async def get_lot_size(self, symbol: str) -> int:
         """Units per lot for an index — from Upstox option contract metadata."""
@@ -641,34 +689,42 @@ class UpstoxClient:
         if cached is not None:
             return cached
 
+        sym = str(symbol or "").upper()
+        listed = await self.get_option_expiries(sym)
         candidates: list[str] = []
-        sticky = _resolved_expiry.get(symbol)
+        sticky = _resolved_expiry.get(sym)
         if sticky:
             candidates.append(sticky)
-        candidates.append(get_nearest_expiry(symbol))
-
-        expiries = await self.get_option_expiries(symbol)
-        for exp in expiries[: settings.upstox_max_expiry_probes]:
+        for exp in listed:
             if exp not in candidates:
                 candidates.append(exp)
+        guess = get_nearest_expiry(sym)
+        if guess not in candidates:
+            candidates.append(guess)
+
+        max_probes = max(2, int(settings.upstox_max_expiry_probes))
+        if is_commodity(sym):
+            max_probes = max(max_probes, 6)
 
         seen: set[str] = set()
         best_chain: list[dict[str, Any]] = []
-        best_expiry = candidates[0] if candidates else get_nearest_expiry(symbol)
+        best_expiry = candidates[0] if candidates else guess
 
         for expiry in candidates:
             if expiry in seen:
                 continue
             seen.add(expiry)
-            chain = await self.get_option_chain(symbol, expiry)
+            chain = await self.get_option_chain(sym, expiry)
             if not chain:
+                if len(seen) >= max_probes:
+                    break
                 continue
             if not best_chain or len(chain) > len(best_chain):
                 best_chain = chain
                 best_expiry = expiry
             if len(chain) >= 40:
                 break
-            if len(seen) >= settings.upstox_max_expiry_probes:
+            if len(seen) >= max_probes:
                 break
 
         result = (best_chain, best_expiry)
