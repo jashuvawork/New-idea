@@ -4212,6 +4212,35 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("commodity_symbols_csv", "COMMODITY_SYMBOLS"),
     )
+    # MCX commodity options session (IST). Equity indices use 09:15–15:45 via power_hour_end_*.
+    commodity_session_start_hour: int = Field(
+        default=9,
+        validation_alias=AliasChoices(
+            "commodity_session_start_hour",
+            "COMMODITY_SESSION_START_HOUR",
+        ),
+    )
+    commodity_session_start_minute: int = Field(
+        default=0,
+        validation_alias=AliasChoices(
+            "commodity_session_start_minute",
+            "COMMODITY_SESSION_START_MINUTE",
+        ),
+    )
+    commodity_session_end_hour: int = Field(
+        default=23,
+        validation_alias=AliasChoices(
+            "commodity_session_end_hour",
+            "COMMODITY_SESSION_END_HOUR",
+        ),
+    )
+    commodity_session_end_minute: int = Field(
+        default=30,
+        validation_alias=AliasChoices(
+            "commodity_session_end_minute",
+            "COMMODITY_SESSION_END_MINUTE",
+        ),
+    )
 
     @computed_field
     @property

@@ -855,6 +855,32 @@ def _regular_session_end_minute() -> int:
     return int(settings.power_hour_end_hour) * 60 + int(settings.power_hour_end_minute)
 
 
+def _commodity_session_window_minutes() -> tuple[int, int]:
+    from app.config import get_settings
+
+    settings = get_settings()
+    start = int(settings.commodity_session_start_hour) * 60 + int(
+        settings.commodity_session_start_minute
+    )
+    end = int(settings.commodity_session_end_hour) * 60 + int(
+        settings.commodity_session_end_minute
+    )
+    return start, end
+
+
+def _commodity_market_phase() -> str:
+    now = datetime.now(IST)
+    if now.weekday() >= 5:
+        return "CLOSED"
+    start, end = _commodity_session_window_minutes()
+    t = now.hour * 60 + now.minute
+    if t < start:
+        return "CLOSED"
+    if t < end:
+        return "LIVE_MARKET"
+    return "CLOSED"
+
+
 def get_market_phase() -> str:
     now = datetime.now(IST)
     if now.weekday() >= 5:
@@ -869,3 +895,27 @@ def get_market_phase() -> str:
     if t < 16 * 60:
         return "POST_MARKET"
     return "CLOSED"
+
+
+def get_market_phase_for_symbol(symbol: str) -> str:
+    """Equity index calendar, or MCX commodity session when configured."""
+    from app.services.instrument_registry import is_commodity
+
+    if is_commodity(symbol):
+        return _commodity_market_phase()
+    return get_market_phase()
+
+
+def effective_market_phase_for_session() -> str:
+    """WS / background loops: LIVE when equity or any configured MCX symbol is open."""
+    phase = get_market_phase()
+    if phase in ("LIVE_MARKET", "PREMARKET", "POST_MARKET"):
+        return phase
+    from app.config import get_settings
+    from app.services.instrument_registry import is_commodity
+
+    settings = get_settings()
+    for sym in settings.symbols or []:
+        if is_commodity(sym) and get_market_phase_for_symbol(sym) == "LIVE_MARKET":
+            return "LIVE_MARKET"
+    return phase

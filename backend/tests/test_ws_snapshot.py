@@ -15,7 +15,10 @@ IST = ZoneInfo("Asia/Kolkata")
 @patch("app.engines.ws_snapshot.get_settings")
 @patch("app.engines.ws_snapshot.rate_limit_active", return_value=True)
 @patch("app.engines.ws_snapshot.rate_limit_cooldown_remaining", return_value=12.0)
-@patch("app.engines.ws_snapshot.get_market_phase", return_value="LIVE_MARKET")
+@patch(
+    "app.engines.ws_snapshot.get_market_phase_for_symbol",
+    return_value="LIVE_MARKET",
+)
 @patch("app.engines.ws_snapshot.get_state")
 def test_build_ws_index_snapshot_during_cooldown(
     mock_state,

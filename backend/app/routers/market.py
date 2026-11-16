@@ -512,9 +512,10 @@ def snapshot_chain_ready(snap: SymbolSnapshot) -> bool:
 
 def snapshot_needs_chain_rebuild(snap: SymbolSnapshot) -> bool:
     """Premarket / index-only cache must not survive into LIVE_MARKET."""
-    from app.services.upstox import get_market_phase
+    from app.services.upstox import get_market_phase_for_symbol
 
-    if get_market_phase() != "LIVE_MARKET":
+    sym = str(getattr(snap, "symbol", "") or "")
+    if get_market_phase_for_symbol(sym) != "LIVE_MARKET":
         return False
     phase = getattr(snap, "marketPhase", None)
     phase_s = phase.value if hasattr(phase, "value") else str(phase or "")

@@ -247,7 +247,9 @@ async def deployment_readiness():
         pass
 
     if not market_live:
-        market_live = get_market_phase() == "LIVE_MARKET"
+        from app.services.upstox import effective_market_phase_for_session
+
+        market_live = effective_market_phase_for_session() == "LIVE_MARKET"
 
     beat_age = watchdog.get("lastBeatAgeSeconds")
     loop_healthy = (

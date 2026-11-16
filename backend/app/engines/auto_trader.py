@@ -120,7 +120,12 @@ from app.services.order_executor import (
     place_exit_order,
 )
 from app.services.paper_broker import simulate_entry_order, simulate_exit_order
-from app.services.upstox import UpstoxClient, UpstoxError, get_market_phase
+from app.services.upstox import (
+    UpstoxClient,
+    UpstoxError,
+    effective_market_phase_for_session,
+    get_market_phase,
+)
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
@@ -4650,7 +4655,7 @@ async def _process_locked(
 
     skipped.extend(await _process_open_trades(state, snapshots, client))
 
-    market_live = get_market_phase() == "LIVE_MARKET"
+    market_live = effective_market_phase_for_session() == "LIVE_MARKET"
     profit_gate = update_daily_profit_gate(state, snapshots)
     cap_snap = get_capital_snapshot()
     state.capitalAllocation = {
