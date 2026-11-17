@@ -471,8 +471,13 @@ class Settings(BaseSettings):
     symmetric_near_base_premium_fade_max_drawdown_pct: float = -1.2
     symmetric_structural_near_miss_waive_enabled: bool = True
     symmetric_chop_counter_trend_guard_enabled: bool = False
-    chop_post_win_afternoon_block_enabled: bool = False
+    chop_post_win_afternoon_block_enabled: bool = True
     chop_post_win_afternoon_min_win_inr: float = 2000.0
+    # Plain chop (not CHOP+RALLY / momentum): hard afternoon stand-down after cutoff.
+    plain_chop_afternoon_standdown_enabled: bool = True
+    plain_chop_afternoon_standdown_after_minute: int = 13 * 60 + 30
+    plain_chop_day_modes_csv: str = "CHOP DAY,CHOP (PRE-10)"
+    chop_rally_day_modes_csv: str = "CHOP + RALLY,MOMENTUM RALLY"
     # Midday chop window + post-win + different strike: block explosion ladder; waive fresh sudden lift / #866 / adjacent peak-keep.
     chop_midday_post_win_different_strike_block_enabled: bool = True
     chop_midday_post_win_min_win_inr: float = 2000.0
@@ -1969,7 +1974,7 @@ class Settings(BaseSettings):
     fake_explosion_trap_post_win_afternoon_latch_seconds: int = 300
     fake_explosion_trap_post_win_expiry_only: bool = True
     # Sep21 CHOP+RALLY: extend post-win afternoon hard-block beyond expiry-only sessions.
-    fake_explosion_trap_chop_post_win_afternoon_enabled: bool = False
+    fake_explosion_trap_chop_post_win_afternoon_enabled: bool = True
     # Post-win re-entry only when top-rank / full-sleeve OR hot re-acceleration — no 8-lot FOMO probes.
     fake_explosion_trap_post_win_require_top_confidence: bool = True
     fake_explosion_trap_post_win_hc_min_velocity_3s: float = 2.0
@@ -3447,8 +3452,9 @@ class Settings(BaseSettings):
     # only when daily_loss_stop_capital_pct <= 0. Halts new entries, not a loss target.
     daily_loss_stop_capital_pct: float = 0.35
     daily_loss_stop_inr: float = 0.0
-    daily_max_trades_chop: int = 20
-    daily_max_trades_pre10_chop: int = 5
+    daily_max_trades_chop: int = 3
+    daily_max_trades_pre10_chop: int = 3
+    daily_max_trades_chop_rally: int = 10
     pre10_chop_min_rank_score: float = 60.0
     # Pause after 2 losses — Jul20 burned 6 before the old 3-loss pause helped.
     loss_streak_pause_count: int = 2

@@ -550,6 +550,53 @@ def before_primary_window() -> bool:
     return _minutes_now() < start
 
 
+def _day_modes_from_csv(csv: str) -> frozenset[str]:
+    return frozenset(
+        part.strip().upper()
+        for part in str(csv or "").split(",")
+        if part.strip()
+    )
+
+
+def _plain_chop_day_modes(settings: Any = None) -> frozenset[str]:
+    settings = settings or get_settings()
+    return _day_modes_from_csv(
+        getattr(settings, "plain_chop_day_modes_csv", "CHOP DAY,CHOP (PRE-10)")
+    )
+
+
+def _chop_rally_day_modes(settings: Any = None) -> frozenset[str]:
+    settings = settings or get_settings()
+    return _day_modes_from_csv(
+        getattr(settings, "chop_rally_day_modes_csv", "CHOP + RALLY,MOMENTUM RALLY")
+    )
+
+
+def plain_chop_afternoon_standdown_active(
+    snapshots: dict[str, SymbolSnapshot],
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Block new entries on plain chop after cutoff (keeps CHOP+RALLY / momentum active)."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "plain_chop_afternoon_standdown_enabled", True)):
+        return False, "ok", meta
+    if not settings.chop_day_guards_enabled:
+        return False, "ok", meta
+    mode = resolve_session_day_mode(snapshots).strip().upper()
+    meta["dayMode"] = mode
+    if mode not in _plain_chop_day_modes(settings):
+        return False, "ok", meta
+    after = int(
+        getattr(settings, "plain_chop_afternoon_standdown_after_minute", 810) or 810
+    )
+    if _minutes_now() < after:
+        return False, "ok", meta
+    meta["standdownAfterMinute"] = after
+    return True, "plain_chop_afternoon_standdown", meta
+
+
 def daily_trade_cap(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]) -> tuple[int, str]:
     """Max closed trades allowed today under chop / expiry rules."""
     from app.engines.expiry_day_guards import expiry_trade_cap, is_expiry_session
@@ -560,6 +607,9 @@ def daily_trade_cap(state: AutoTraderState, snapshots: dict[str, SymbolSnapshot]
     settings = get_settings()
     if not settings.chop_day_guards_enabled or not is_chop_session(snapshots):
         return 999, "normal"
+    mode = resolve_session_day_mode(snapshots).strip().upper()
+    if mode in _chop_rally_day_modes(settings):
+        return int(getattr(settings, "daily_max_trades_chop_rally", 10) or 10), "chop_rally"
     if before_primary_window():
         return settings.daily_max_trades_pre10_chop, "pre10_chop"
     return settings.daily_max_trades_chop, "chop_day"
@@ -882,10 +932,19 @@ def chop_guard_summary(state: AutoTraderState, snapshots: dict[str, SymbolSnapsh
     effective_cap, cap_source = resolve_effective_daily_trade_cap(state, snapshots)
     from app.engines.session_trade_integrity import real_session_closed_count
 
+    standdown, standdown_reason, standdown_meta = plain_chop_afternoon_standdown_active(
+        snapshots,
+    )
+
     return {
         "chopSession": chop,
         "dailyTradeCap": cap,
         "dailyTradeCapLabel": cap_label,
+        "plainChopAfternoonStanddown": standdown,
+        "plainChopAfternoonStanddownReason": (
+            standdown_reason if standdown else None
+        ),
+        "plainChopAfternoonStanddownMeta": standdown_meta if standdown else {},
         "closedTrades": real_session_closed_count(state),
         "tradeCapReached": cap_hit,
         "tradeCapMessage": cap_msg if cap_hit else None,
@@ -987,7 +1046,6 @@ def __elite_trade_budget_summary(state: AutoTraderState) -> dict[str, Any]:
 _CHOP_POST_WIN_DAY_MODES = frozenset({
     "CHOP DAY",
     "CHOP (PRE-10)",
-    "CHOP + RALLY",
 })
 
 

@@ -4746,6 +4746,7 @@ async def _process_locked(
         and profit_gate.newEntriesAllowed
         and (entries_ok or explosion_early_ok)
     ):
+        standdown = False
         paused, pause_reason, pause_meta = resolve_session_entry_pause(snapshots)
         loss_streak_elite_only = bool(pause_meta.get("lossStreakEliteOnly"))
         large_loss_elite_only = bool(pause_meta.get("largeLossPauseBypass"))
@@ -4770,6 +4771,17 @@ async def _process_locked(
                 "symbol": "SESSION",
                 "reason": bypass_reason,
                 "message": bypass_msg,
+            })
+        from app.engines.chop_day_guards import plain_chop_afternoon_standdown_active
+
+        standdown, standdown_reason, _standdown_meta = plain_chop_afternoon_standdown_active(
+            snapshots,
+        )
+        if standdown:
+            skipped.append({
+                "symbol": "SESSION",
+                "reason": standdown_reason,
+                "message": "Plain chop afternoon stand-down — no new entries",
             })
         cap_hit, cap_reason, cap_meta = resolve_daily_trade_cap(state, snapshots)
         cap_elite_only = bool(cap_meta.get("dailyCapEliteOnly"))
@@ -4867,7 +4879,7 @@ async def _process_locked(
                 "message": "Power hour (15:00+) — top FTV/V/ELITE/explosives only",
             })
         session_entries_ok = (
-            not paused and not cap_hit and not ctrl_cap and not last_n_paused
+            not paused and not standdown and not cap_hit and not ctrl_cap and not last_n_paused
             and not whipsaw_paused
             and (expiry_ok or session_lift)
             and (power_ok or session_lift)

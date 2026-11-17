@@ -32,7 +32,8 @@ def test_audit_session_discipline_defaults():
 def test_sep21_soft_blockers_still_off_by_default():
     s = Settings()
     assert s.symmetric_chop_counter_trend_guard_enabled is False
-    assert s.chop_post_win_afternoon_block_enabled is False
+    assert s.chop_post_win_afternoon_block_enabled is True
+    assert s.plain_chop_afternoon_standdown_enabled is True
 
 
 def test_post_sep17_hard_gates_off_for_sep9_17_profile():
