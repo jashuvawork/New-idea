@@ -57,6 +57,29 @@ def test_allows_when_within_chase_cap_put():
     assert meta.get("localBasePullbackFill") == "within_chase_cap"
 
 
+def test_allows_armed_base_launch_above_chase_cap_ce_pe():
+    settings = _settings()
+    for side in (Side.CALL, Side.PUT):
+        cand = _candidate(
+            side=side,
+            premium=57.0,
+            alert={
+                "ictBaseArmed": True,
+                "ictArmedBaseLaunch": True,
+                "ictBasePremium": 52.8,
+            },
+        )
+        with patch(
+            "app.engines.local_base_pullback_entry.get_settings", return_value=settings,
+        ):
+            blocked, reason, meta = local_base_pullback_blocks_entry(
+                cand, None, settings=settings,
+            )
+        assert blocked is False
+        assert reason == "ok"
+        assert meta.get("localBasePullbackFill") == "armed_base_launch_waiver"
+
+
 def test_allows_after_pullback_from_session_high_ce():
     settings = _settings()
     chart = PremiumChart(
