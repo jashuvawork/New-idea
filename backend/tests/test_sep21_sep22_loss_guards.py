@@ -238,7 +238,7 @@ def test_chop_post_win_afternoon_fomo_after_large_trail_win():
         fake_explosion_trap_chop_post_win_afternoon_enabled=True,
     )
     state = MagicMock(
-        dailyStrategy={"dayMode": "CHOP + RALLY"},
+        dailyStrategy={"dayMode": "CHOP DAY"},
     )
     with patch(
         "app.engines.explosion_entry_guards._post_session_win",
@@ -249,7 +249,7 @@ def test_chop_post_win_afternoon_fomo_after_large_trail_win():
     ):
         fomo, reasons = chop_post_win_afternoon_fomo_risk(
             state,
-            day_mode="CHOP + RALLY",
+            day_mode="CHOP DAY",
             settings=settings,
         )
     assert fomo is True
@@ -316,7 +316,7 @@ def test_sep21_chop_post_win_afternoon_hard_blocks(mock_money, mock_settings):
         blocked, reason, meta = detect_fake_explosion_trap(
             cand,
             snap,
-            state=MagicMock(dailyStrategy={"dayMode": "CHOP + RALLY"}),
+            state=MagicMock(dailyStrategy={"dayMode": "CHOP DAY"}),
             ict=MagicMock(base_relative_move_pct=18.0),
         )
 
