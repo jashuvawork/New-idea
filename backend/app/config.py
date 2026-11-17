@@ -972,6 +972,12 @@ class Settings(BaseSettings):
     premium_vertical_chase_max_drawdown_from_high_pct: float = 8.0
     premium_vertical_chase_min_momentum5_pct: float = 35.0
     premium_vertical_chase_min_session_range_position: float = 0.78
+    # Armed-base explosion: wait for pullback when fill chases too far above ICT base (CE/PE).
+    local_base_pullback_entry_enabled: bool = True
+    local_base_pullback_max_chase_inr: float = 20.0
+    local_base_pullback_max_chase_pct: float = 7.0
+    local_base_pullback_min_drawdown_from_high_pct: float = 3.0
+    local_base_pullback_tiers_csv: str = "ELITE,EXPLODING"
     # Nov 3 23550 CE — near_base_v bypass at ₹180/session-top after open rip.
     premium_extended_session_chase_block_enabled: bool = True
     premium_extended_session_afternoon_only: bool = True
