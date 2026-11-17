@@ -4,7 +4,7 @@
 # - If /opt/nexusquant/env has ENABLE_LIVE_TRADING=true → set-execution-mode --live
 # - Else → set-execution-mode --paper
 #
-# set-execution-mode already preserves live capital overrides when arming live.
+# set-execution-mode pins capital from deploy/env.production.template (use LIVE_CAPITAL_INR to override live arm).
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-/opt/nexusquant/New-idea}"
@@ -23,3 +23,6 @@ else
   echo "Live not armed — setting PAPER after deploy"
   sudo ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" bash "$REPO_DIR/deploy/set-execution-mode.sh" --paper
 fi
+
+echo "Syncing capital book from production template..."
+sudo ENV_FILE="$ENV_FILE" REPO_DIR="$REPO_DIR" bash "$REPO_DIR/deploy/set-capital-book.sh"

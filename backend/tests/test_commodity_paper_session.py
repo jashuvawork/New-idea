@@ -83,6 +83,10 @@ def test_symbol_entry_market_live_commodity_vs_index():
 
 def test_explosion_and_regular_window_in_commodity_paper_evening():
     with patch("app.engines.session_timing.commodity_paper_evening_active", return_value=True):
-        exp_ok, _ = explosion_entries_allowed_now()
-        assert exp_ok
-        assert in_regular_explosion_session_window()
+        with patch(
+            "app.engines.session_timing.entries_allowed_now",
+            return_value=(True, "commodity_paper_evening"),
+        ):
+            exp_ok, _ = explosion_entries_allowed_now()
+            assert exp_ok
+            assert in_regular_explosion_session_window()
