@@ -19,6 +19,27 @@ def _alert_dict(candidate: Any) -> dict[str, Any]:
     return dict(alert) if isinstance(alert, dict) else {}
 
 
+def _armed_base_launch_confirmed(candidate: Any, snap: Optional[SymbolSnapshot]) -> bool:
+    alert = _alert_dict(candidate)
+    if alert.get("ictArmedBaseLaunch"):
+        return True
+    pre = getattr(candidate, "pretrade_meta", None) or {}
+    rank = pre.get("causalRanking") if isinstance(pre, dict) else {}
+    if isinstance(rank, dict) and rank.get("ictArmedBaseLaunch"):
+        return True
+    event = getattr(candidate, "explosion_event", None)
+    if snap is None or event is None:
+        return False
+    from app.engines.ict_breakout_monitor import (
+        analyze_explosion_event_ict,
+        merge_alert_ict_stamps,
+    )
+
+    ict = analyze_explosion_event_ict(event, snap)
+    ict = merge_alert_ict_stamps(ict, alert or None)
+    return bool(getattr(ict, "armed_base_launch", False))
+
+
 def _ict_base_armed(candidate: Any, snap: Optional[SymbolSnapshot]) -> bool:
     alert = _alert_dict(candidate)
     if alert.get("ictBaseArmed") or alert.get("ictArmedBaseLaunch"):
@@ -132,6 +153,10 @@ def local_base_pullback_blocks_entry(
         return False, "ok", meta
 
     if not _ict_base_armed(candidate, snap):
+        return False, "ok", meta
+
+    if _armed_base_launch_confirmed(candidate, snap):
+        meta["localBasePullbackFill"] = "armed_base_launch_waiver"
         return False, "ok", meta
 
     try:
