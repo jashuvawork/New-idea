@@ -271,6 +271,17 @@ def live_entry_score_blocks_entry(
     meta.update(chase_meta)
     if chase_blocked:
         return True, chase_reason, meta
+    from app.engines.local_base_pullback_entry import local_base_pullback_blocks_entry
+
+    pullback_blocked, pullback_reason, pullback_meta = local_base_pullback_blocks_entry(
+        candidate,
+        snap,
+        premium_chart=premium_chart,
+        settings=settings,
+    )
+    meta.update(pullback_meta)
+    if pullback_blocked:
+        return True, pullback_reason, meta
     tier = str(getattr(candidate, "tier", "") or _alert_dict(candidate).get("tier") or "")
     live = float(getattr(candidate, "liveEntryScore", 0) or meta.get("liveEntryScore") or 0)
     min_live = live_entry_score_min_for_tier(tier, settings=settings)
