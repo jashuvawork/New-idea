@@ -535,6 +535,24 @@ def validate_open_setup_entry(
         )
         meta.update(waiver_meta)
         if not waived:
+            from app.engines.chart_structure_entry import chart_structure_open_reclaim_ok
+
+            if align_reason in (
+                "open_caution_call_on_bearish_open",
+                "open_caution_put_on_bullish_open",
+            ):
+                reclaim_ok, reclaim_meta = chart_structure_open_reclaim_ok(
+                    sym,
+                    side,
+                    snap,
+                    settings=settings,
+                    when=when,
+                )
+                meta.update(reclaim_meta)
+                if reclaim_ok:
+                    meta["openChartStructureReclaimWaiver"] = True
+                    waived = True
+        if not waived:
             return False, align_reason, meta
 
     if bool(getattr(settings, "open_caution_non_lane_index_blocked", True)) and index:
