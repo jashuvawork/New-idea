@@ -112,10 +112,11 @@ def index_continuation_rally_near_miss_waive(
         symbol=bucket,
         atm=float(getattr(snap, "atmStrike", 0) or 0) or None,
     )
-    allow_otm = bool(
-        getattr(settings, "index_continuation_rally_allow_otm", False)
-    )
+    # Expiry book: ATM+ITM only for CE and PE — never OTM (`allow_otm` stays off).
+    allow_otm = bool(getattr(settings, "index_continuation_rally_allow_otm", False))
     if money == "OTM" and not allow_otm:
+        return False
+    if money not in ("ITM", "ATM") and not (money == "OTM" and allow_otm):
         return False
 
     score_floor = float(

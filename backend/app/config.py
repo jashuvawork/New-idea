@@ -1244,6 +1244,7 @@ class Settings(BaseSettings):
     index_continuation_rally_min_premium_inr: float = 18.0
     index_continuation_rally_max_premium_inr: float = 600.0
     index_continuation_rally_min_explosion_score: float = 5.0
+    # Near-miss waiver: ATM+ITM only (CE/PE), never OTM — matches expiry ATM/ITM book.
     index_continuation_rally_allow_otm: bool = False
     # Deep session trough — mom5 still negative but recovering vs mom15 (Sep01 morning CALLs).
     index_trough_deep_recovery_enabled: bool = True

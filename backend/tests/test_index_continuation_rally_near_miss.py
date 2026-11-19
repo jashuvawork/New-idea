@@ -56,6 +56,23 @@ def test_sensex_ce_waives_atm_itm_in_continuation_band(mock_lift):
 
 
 @patch("app.engines.ce_rally_lift_timing.ce_rally_lift_ready", return_value=(True, "ok", {}))
+def test_atm_allowed_itm_or_atm_only(mock_lift):
+    s = Settings(index_continuation_rally_allow_otm=False)
+    snap = _snap(spot=82_000.0, atm=82_000.0)
+    alert = {
+        "symbol": "SENSEX",
+        "side": "CALL",
+        "tier": "ELITE",
+        "strike": 82_000.0,
+        "premium": 200.0,
+        "explosionScore": 90.0,
+    }
+    assert index_continuation_rally_near_miss_waive(
+        alert, snap=snap, settings=s,
+    )
+
+
+@patch("app.engines.ce_rally_lift_timing.ce_rally_lift_ready", return_value=(True, "ok", {}))
 def test_otm_rejected_when_allow_otm_false(mock_lift):
     s = Settings(index_continuation_rally_allow_otm=False)
     snap = _snap()
