@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from app.config import Settings
 from app.engines.index_continuation_rally_near_miss import (
+    index_continuation_rally_elite_chase_waive_active,
     index_continuation_rally_near_miss_waive,
     index_continuation_rally_premium_bypass_active,
     index_continuation_rally_premium_ok,
@@ -240,4 +241,40 @@ def test_explosion_near_miss_live_v3_ignition(mock_lift, _win):
         snap=snap,
         readiness_reason="first_lift_live_velocity_negative",
         settings=s,
+    )
+
+
+def test_elite_chase_waive_requires_stamp_and_chop_rally_atm():
+    s = Settings()
+    snap = _snap(spot=82_100.0, atm=82_100.0)
+    ev = {
+        "symbol": "SENSEX",
+        "side": "CALL",
+        "strike": 82_100.0,
+        "premium": 220.0,
+        "indexContinuationRallyNearMissWaive": True,
+    }
+    assert index_continuation_rally_elite_chase_waive_active(
+        ev, day_mode="CHOP + RALLY", settings=s, snap=snap,
+    )
+    assert not index_continuation_rally_elite_chase_waive_active(
+        {**ev, "strike": 81_900.0}, day_mode="CHOP + RALLY", settings=s, snap=snap,
+    )
+    assert not index_continuation_rally_elite_chase_waive_active(
+        ev, day_mode="CHOP", settings=s, snap=snap,
+    )
+
+
+def test_elite_chase_waive_pe_atm_chop_rally():
+    s = Settings()
+    snap = _snap(spot=82_000.0, atm=82_000.0)
+    ev = {
+        "symbol": "SENSEX",
+        "side": "PUT",
+        "strike": 82_000.0,
+        "premium": 180.0,
+        "indexContinuationRallyNearMissWaive": True,
+    }
+    assert index_continuation_rally_elite_chase_waive_active(
+        ev, day_mode="MOMENTUM RALLY", settings=s, snap=snap,
     )

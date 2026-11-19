@@ -560,6 +560,36 @@ def test_elite_entry_blocks_chase():
     assert reason == "elite_chase_past_local_base_window"
 
 
+def test_elite_entry_waives_chase_with_index_continuation_chop_rally_atm():
+    from unittest.mock import MagicMock
+
+    from app.config import Settings
+
+    snap = MagicMock(
+        symbol="SENSEX",
+        spot=82_100.0,
+        atmStrike=82_100.0,
+    )
+    s = Settings(elite_trade_engine_enabled=True)
+    ok, reason, assessment = elite_entry_allowed(
+        _v_evidence(
+            symbol="SENSEX",
+            side="CALL",
+            strike=82_100.0,
+            premium=220.0,
+            localBaseMovePct=35.0,
+            explosionScore=90.0,
+            indexContinuationRallyNearMissWaive=True,
+        ),
+        _ranking(rankScore=95.0, grade="S"),
+        settings=s,
+        day_mode="CHOP + RALLY",
+        snapshots={"SENSEX": snap},
+    )
+    assert ok is True, reason
+    assert assessment.get("indexContinuationRallyEliteChaseWaive") is True
+
+
 def test_elite_entry_blocks_call_past_tight_local_cap():
     from app.config import Settings
 
