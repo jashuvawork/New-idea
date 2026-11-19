@@ -2446,6 +2446,17 @@ def first_lift_entry_readiness(
     v3 = max(v3, float(persisted.get("velocity3s") or 0))
     v9 = max(v9, float(persisted.get("velocity9s") or 0))
     if live_v3 < 0:
+        from app.engines.index_continuation_rally_near_miss import (
+            index_continuation_rally_near_miss_waive,
+        )
+
+        if index_continuation_rally_near_miss_waive(
+            alert if isinstance(alert, dict) else row,
+            snap=snap,
+            readiness_reason="first_lift_live_velocity_negative",
+            settings=settings,
+        ):
+            return True, "index_continuation_momentum_ignition_waive"
         return False, "first_lift_live_velocity_negative"
     if v_rip_lane:
         min_v3 = float(

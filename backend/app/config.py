@@ -1246,6 +1246,10 @@ class Settings(BaseSettings):
     index_continuation_rally_min_explosion_score: float = 5.0
     # Near-miss waiver: ATM+ITM only (CE/PE), never OTM — matches expiry ATM/ITM book.
     index_continuation_rally_allow_otm: bool = False
+    # CHOP+RALLY / momentum window: one-tick negative live v3 at volume ignition while index mom5 turns.
+    index_continuation_momentum_ignition_enabled: bool = True
+    index_continuation_momentum_ignition_min_mom5_pct: float = 0.02
+    index_continuation_momentum_ignition_requires_rally_window: bool = True
     # Deep session trough — mom5 still negative but recovering vs mom15 (Sep01 morning CALLs).
     index_trough_deep_recovery_enabled: bool = True
     index_trough_deep_recovery_max_mom15_pct: float = -0.20
