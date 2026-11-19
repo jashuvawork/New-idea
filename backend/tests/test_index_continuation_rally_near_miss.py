@@ -6,6 +6,7 @@ from unittest.mock import patch
 from app.config import Settings
 from app.engines.index_continuation_rally_near_miss import (
     index_continuation_rally_near_miss_waive,
+    index_continuation_rally_premium_bypass_active,
     index_continuation_rally_premium_ok,
 )
 from app.models.schemas import Side
@@ -121,6 +122,27 @@ def test_explosion_near_miss_waive_calls_index_continuation(mock_cont):
     ):
         assert explosion_near_miss_waive(alert, snap=snap) is True
     mock_cont.assert_called_once()
+
+
+@patch("app.engines.ce_rally_lift_timing.ce_rally_lift_ready", return_value=(True, "ok", {}))
+def test_premium_bypass_active_stamps_and_reuses_flag(mock_lift):
+    s = Settings()
+    snap = _snap()
+    alert = {
+        "symbol": "SENSEX",
+        "side": "CALL",
+        "tier": "ELITE",
+        "strike": 81_900.0,
+        "premium": 180.0,
+        "explosionScore": 90.0,
+    }
+    assert index_continuation_rally_premium_bypass_active(
+        alert, snap, settings=s,
+    )
+    assert alert.get("indexContinuationRallyNearMissWaive")
+    assert index_continuation_rally_premium_bypass_active(
+        alert, snap, settings=s,
+    )
 
 
 @patch("app.engines.ce_rally_lift_timing.ce_rally_lift_ready", return_value=(True, "ok", {}))

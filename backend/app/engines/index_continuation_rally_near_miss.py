@@ -57,6 +57,29 @@ def _readiness_blocks_waive(readiness_reason: str) -> bool:
     )
 
 
+def index_continuation_rally_premium_bypass_active(
+    alert: Optional[Mapping[str, Any]],
+    snap: Optional[SymbolSnapshot],
+    *,
+    readiness_reason: str = "",
+    settings: Any = None,
+) -> bool:
+    """Whether explosion premium_in_band may use the ₹18–₹600 continuation sleeve (stamps alert)."""
+    settings = settings or get_settings()
+    if not isinstance(alert, dict):
+        return False
+    if alert.get("indexContinuationRallyNearMissWaive"):
+        return index_continuation_rally_premium_ok(
+            alert.get("premium"), settings=settings,
+        )
+    return index_continuation_rally_near_miss_waive(
+        alert,
+        snap=snap,
+        readiness_reason=readiness_reason,
+        settings=settings,
+    )
+
+
 def index_continuation_rally_near_miss_waive(
     alert: Optional[Mapping[str, Any]],
     *,
