@@ -533,7 +533,21 @@ def explosion_near_miss_waive(
         alert, snap=snap, ranking=ranking, settings=settings,
     ):
         return True
-    return armed_base_pad_near_miss_waive(alert, snap=snap, settings=settings)
+    if armed_base_pad_near_miss_waive(alert, snap=snap, settings=settings):
+        return True
+    if snap is not None:
+        from app.engines.index_continuation_rally_near_miss import (
+            index_continuation_rally_near_miss_waive,
+        )
+
+        if index_continuation_rally_near_miss_waive(
+            alert,
+            snap=snap,
+            readiness_reason=readiness_reason,
+            settings=s,
+        ):
+            return True
+    return False
 
 
 def near_strike_armed_near_miss_waive(

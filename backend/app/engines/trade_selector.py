@@ -344,6 +344,7 @@ def _explosion_candidates(
 
             pad_lane_waive = explosion_near_miss_waive(
                 alert if isinstance(alert, dict) else None,
+                snap=snap,
                 readiness_reason=first_lift_readiness_reason,
             )
         if not pad_lane_waive:
@@ -471,11 +472,23 @@ def _explosion_candidates(
             )
         if not alert.get("tradeable") and not lift_ready and not chop_rally_capture:
             continue
+        from app.engines.index_continuation_rally_near_miss import (
+            index_continuation_rally_premium_ok,
+        )
+
+        _cont_waive = bool(
+            isinstance(alert, dict) and alert.get("indexContinuationRallyNearMissWaive")
+        )
         if not premium_in_band(
             alert.get("premium"),
             mode="explosion",
             peak_move_pct=float(alert.get("peakMovePct") or 0),
             snap=snap,
+        ) and not (
+            _cont_waive
+            and index_continuation_rally_premium_ok(
+                alert.get("premium"), settings=settings,
+            )
         ):
             continue
         side_v = str(alert.get("side") or "").upper()
@@ -2780,6 +2793,14 @@ def diagnose_missed_entries(
                     alert, readiness_reason=readiness_reason, snap=snap,
                 )
             if not pad_lane_waive:
+                from app.engines.rally_capture import explosion_near_miss_waive
+
+                pad_lane_waive = explosion_near_miss_waive(
+                    alert,
+                    snap=snap,
+                    readiness_reason=readiness_reason,
+                )
+            if not pad_lane_waive:
                 from app.engines.nifty_expiry_flip_capture import nifty_expiry_flip_near_miss_waive
 
                 pad_lane_waive = nifty_expiry_flip_near_miss_waive(
@@ -2974,7 +2995,19 @@ def diagnose_missed_entries(
                         and not index_turn_ok
                     ):
                         blockers.append("chart_not_aligned")
-            if not premium_in_band(prem, mode="explosion", peak_move_pct=peak_move, snap=snap):
+            from app.engines.index_continuation_rally_near_miss import (
+                index_continuation_rally_premium_ok,
+            )
+
+            _cont_waive = bool(
+                isinstance(alert, dict) and alert.get("indexContinuationRallyNearMissWaive")
+            )
+            if not premium_in_band(
+                prem, mode="explosion", peak_move_pct=peak_move, snap=snap,
+            ) and not (
+                _cont_waive
+                and index_continuation_rally_premium_ok(prem, settings=settings)
+            ):
                 blockers.append("premium_out_of_band")
             if score < min_score:
                 blockers.append(f"explosion_score<{min_score:.0f}")
