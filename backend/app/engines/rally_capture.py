@@ -512,6 +512,21 @@ def explosion_near_miss_waive(
     settings: Any = None,
 ) -> bool:
     """Unified near-miss waiver for explosion first-lift / quality / tier lag."""
+    s = settings or get_settings()
+    # Index continuation (ATM/ITM, ₹18–₹600) must run before mid-rip / base-move latches.
+    if snap is not None:
+        from app.engines.index_continuation_rally_near_miss import (
+            index_continuation_rally_near_miss_waive,
+        )
+
+        if index_continuation_rally_near_miss_waive(
+            alert,
+            snap=snap,
+            readiness_reason=readiness_reason,
+            settings=s,
+        ):
+            return True
+
     rr = str(readiness_reason or "").lower()
     if rr.startswith(
         (
@@ -521,7 +536,6 @@ def explosion_near_miss_waive(
         )
     ):
         return False
-    s = settings or get_settings()
     if isinstance(alert, dict) and bool(
         getattr(s, "live_entry_best_trade_capture_waives_near_miss", True)
     ):
@@ -535,18 +549,6 @@ def explosion_near_miss_waive(
         return True
     if armed_base_pad_near_miss_waive(alert, snap=snap, settings=settings):
         return True
-    if snap is not None:
-        from app.engines.index_continuation_rally_near_miss import (
-            index_continuation_rally_near_miss_waive,
-        )
-
-        if index_continuation_rally_near_miss_waive(
-            alert,
-            snap=snap,
-            readiness_reason=readiness_reason,
-            settings=s,
-        ):
-            return True
     return False
 
 

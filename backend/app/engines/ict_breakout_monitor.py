@@ -1764,6 +1764,16 @@ def first_lift_entry_readiness(
         else {}
     )
     if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
+        from app.engines.index_continuation_rally_near_miss import (
+            index_continuation_rally_near_miss_waive,
+        )
+
+        if index_continuation_rally_near_miss_waive(
+            alert if isinstance(alert, dict) else row,
+            snap=snap,
+            settings=settings,
+        ):
+            return True, "index_continuation_mid_rip_waive"
         return False, "mid_rip_armed_coil_rejected"
 
     # BUILDING bullish-rip sleeve — mid-rip OK while still expanding to max.
