@@ -1248,6 +1248,9 @@ class Settings(BaseSettings):
     index_continuation_rally_allow_otm: bool = False
     index_continuation_rally_elite_chase_waive_enabled: bool = True
     index_continuation_rally_elite_chase_atm_only: bool = True
+    index_continuation_chart_structure_waive_enabled: bool = True
+    index_continuation_chart_structure_until_hour: int = 12
+    index_continuation_chart_structure_until_minute: int = 0
     # CHOP+RALLY / momentum window: one-tick negative live v3 at volume ignition while index mom5 turns.
     index_continuation_momentum_ignition_enabled: bool = True
     index_continuation_momentum_ignition_min_mom5_pct: float = 0.02
@@ -3359,6 +3362,11 @@ class Settings(BaseSettings):
     open_caution_structural_waiver_rally_frac: float = 0.5
     open_caution_structural_waiver_min_range_position: float = 0.30
     open_caution_structural_waiver_near_extreme_pct: float = 0.15
+    open_caution_chart_structure_reclaim_waiver_enabled: bool = True
+    open_caution_chart_reclaim_earliest_hour: int = 9
+    open_caution_chart_reclaim_earliest_minute: int = 25
+    open_caution_call_reclaim_min_range_position: float = 0.60
+    open_caution_put_reclaim_max_range_position: float = 0.40
     # Open side-align (spot vs cash open) ends 09:30; other open guards run until 09:45 (#ABC-A).
     open_caution_side_align_until_hour: int = 9
     open_caution_side_align_until_minute: int = 30

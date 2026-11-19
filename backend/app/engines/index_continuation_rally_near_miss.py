@@ -262,17 +262,30 @@ def index_continuation_rally_near_miss_waive(
     if score < score_floor - 1e-6:
         return False
 
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    _when = datetime.now(ZoneInfo("Asia/Kolkata"))
+    index_leg_ready = False
+    chart_structure = False
     if side_u == "CALL":
         from app.engines.ce_rally_lift_timing import ce_rally_lift_ready
 
-        ready, _, _ = ce_rally_lift_ready(bucket, snap, settings=settings)
-        if not ready:
-            return False
+        index_leg_ready, _, _ = ce_rally_lift_ready(bucket, snap, settings=settings)
     else:
         from app.engines.pe_slide_breakdown_timing import pe_slide_breakdown_ready
 
-        ready, _, _ = pe_slide_breakdown_ready(bucket, snap, settings=settings)
-        if not ready:
+        index_leg_ready, _, _ = pe_slide_breakdown_ready(bucket, snap, settings=settings)
+
+    if not index_leg_ready:
+        from app.engines.chart_structure_entry import index_continuation_chart_structure_ok
+
+        chart_structure, cmeta = index_continuation_chart_structure_ok(
+            side_u, snap, settings=settings, when=_when,
+        )
+        if isinstance(alert, dict) and chart_structure:
+            alert["indexContinuationChartStructureWaive"] = cmeta
+        if not chart_structure:
             return False
 
     if isinstance(alert, dict):
