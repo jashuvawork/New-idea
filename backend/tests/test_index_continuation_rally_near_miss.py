@@ -145,6 +145,54 @@ def test_premium_bypass_active_stamps_and_reuses_flag(mock_lift):
     )
 
 
+@patch("app.engines.chop_day_guards.in_momentum_rally_window", return_value=True)
+@patch("app.engines.ce_rally_lift_timing.ce_rally_lift_ready", return_value=(True, "ok", {}))
+def test_momentum_ignition_waives_live_v3_negative(mock_lift, _momentum_window):
+    s = Settings()
+    snap = _snap()
+    alert = {
+        "symbol": "SENSEX",
+        "side": "CALL",
+        "tier": "ELITE",
+        "strike": 82_000.0,
+        "premium": 95.0,
+        "explosionScore": 90.0,
+        "volumeAwaken": True,
+        "velocity3s": -0.4,
+        "velocity9s": 0.6,
+    }
+    assert index_continuation_rally_near_miss_waive(
+        alert,
+        snap=snap,
+        readiness_reason="first_lift_live_velocity_negative",
+        settings=s,
+    )
+    assert alert.get("indexContinuationRallyNearMissWaive") is True
+
+
+@patch("app.engines.chop_day_guards.in_momentum_rally_window", return_value=True)
+@patch("app.engines.ce_rally_lift_timing.ce_rally_lift_ready", return_value=(True, "ok", {}))
+def test_momentum_ignition_rejects_without_volume_signal(mock_lift, _momentum_window):
+    s = Settings()
+    snap = _snap()
+    alert = {
+        "symbol": "SENSEX",
+        "side": "CALL",
+        "tier": "ELITE",
+        "strike": 82_000.0,
+        "premium": 95.0,
+        "explosionScore": 90.0,
+        "velocity3s": -0.4,
+        "velocity9s": 0.0,
+    }
+    assert not index_continuation_rally_near_miss_waive(
+        alert,
+        snap=snap,
+        readiness_reason="first_lift_live_velocity_negative",
+        settings=s,
+    )
+
+
 @patch("app.engines.ce_rally_lift_timing.ce_rally_lift_ready", return_value=(True, "ok", {}))
 def test_explosion_near_miss_waive_mid_rip_not_hard_blocked(mock_lift):
     """Afternoon mid-rip coil must not block index continuation near-miss waiver."""
@@ -167,3 +215,29 @@ def test_explosion_near_miss_waive_mid_rip_not_hard_blocked(mock_lift):
         settings=s,
     )
     assert alert.get("indexContinuationRallyNearMissWaive") is True
+
+
+@patch("app.engines.chop_day_guards.in_momentum_rally_window", return_value=True)
+@patch("app.engines.ce_rally_lift_timing.ce_rally_lift_ready", return_value=(True, "ok", {}))
+def test_explosion_near_miss_live_v3_ignition(mock_lift, _win):
+    from app.engines.rally_capture import explosion_near_miss_waive
+
+    s = Settings()
+    snap = _snap()
+    alert = {
+        "symbol": "SENSEX",
+        "side": "CALL",
+        "tier": "ELITE",
+        "strike": 82_000.0,
+        "premium": 120.0,
+        "explosionScore": 88.0,
+        "volumeAwaken": True,
+        "velocity3s": -0.2,
+        "velocity9s": 1.1,
+    }
+    assert explosion_near_miss_waive(
+        alert,
+        snap=snap,
+        readiness_reason="first_lift_live_velocity_negative",
+        settings=s,
+    )

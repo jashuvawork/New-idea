@@ -47,14 +47,62 @@ def _readiness_blocks_waive(readiness_reason: str) -> bool:
     rr = str(readiness_reason or "").lower()
     if not rr:
         return False
+    if rr == "first_lift_live_velocity_negative":
+        return False
     return rr.startswith(
         (
             "first_lift_velocity",
             "first_lift_quality",
             "first_lift_score",
-            "first_lift_live_velocity_negative",
         )
     )
+
+
+def index_continuation_momentum_ignition_ok(
+    alert: Optional[Mapping[str, Any]],
+    snap: Optional[SymbolSnapshot],
+    *,
+    settings: Any = None,
+) -> bool:
+    """Volume/index ignition with briefly negative live v3 (chop-rally lift start)."""
+    settings = settings or get_settings()
+    if not bool(
+        getattr(settings, "index_continuation_momentum_ignition_enabled", True)
+    ):
+        return False
+    if not isinstance(alert, dict) or snap is None:
+        return False
+    vol_awake = bool(
+        alert.get("volumeAwaken") or alert.get("ictVolumeAwakening")
+    )
+    try:
+        v9 = float(alert.get("velocity9s") or alert.get("velocity_9s") or 0)
+    except (TypeError, ValueError):
+        v9 = 0.0
+    if not vol_awake and v9 <= 0:
+        return False
+    chart = getattr(snap, "spotChart", None)
+    if chart is None:
+        return False
+    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0)
+    min_mom = float(
+        getattr(settings, "index_continuation_momentum_ignition_min_mom5_pct", 0.02)
+        or 0.02
+    )
+    if mom5 < min_mom - 1e-6:
+        return False
+    if bool(
+        getattr(
+            settings,
+            "index_continuation_momentum_ignition_requires_rally_window",
+            True,
+        )
+    ):
+        from app.engines.chop_day_guards import in_momentum_rally_window
+
+        if not in_momentum_rally_window():
+            return False
+    return True
 
 
 def index_continuation_rally_premium_bypass_active(
@@ -98,6 +146,11 @@ def index_continuation_rally_near_miss_waive(
     ):
         return False
     if _readiness_blocks_waive(readiness_reason):
+        return False
+    rr = str(readiness_reason or "").lower()
+    if rr == "first_lift_live_velocity_negative" and not index_continuation_momentum_ignition_ok(
+        alert, snap, settings=settings,
+    ):
         return False
     if not isinstance(alert, dict) or snap is None:
         return False
