@@ -121,3 +121,27 @@ def test_explosion_near_miss_waive_calls_index_continuation(mock_cont):
     ):
         assert explosion_near_miss_waive(alert, snap=snap) is True
     mock_cont.assert_called_once()
+
+
+@patch("app.engines.ce_rally_lift_timing.ce_rally_lift_ready", return_value=(True, "ok", {}))
+def test_explosion_near_miss_waive_mid_rip_not_hard_blocked(mock_lift):
+    """Afternoon mid-rip coil must not block index continuation near-miss waiver."""
+    from app.engines.rally_capture import explosion_near_miss_waive
+
+    s = Settings()
+    snap = _snap()
+    alert = {
+        "symbol": "SENSEX",
+        "side": "CALL",
+        "tier": "ELITE",
+        "strike": 82_000.0,
+        "premium": 220.0,
+        "explosionScore": 88.0,
+    }
+    assert explosion_near_miss_waive(
+        alert,
+        snap=snap,
+        readiness_reason="mid_rip_armed_coil_rejected",
+        settings=s,
+    )
+    assert alert.get("indexContinuationRallyNearMissWaive") is True
