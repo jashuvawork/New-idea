@@ -1239,6 +1239,12 @@ class Settings(BaseSettings):
     index_confirmed_local_base_premium_fade: bool = True
     # Armed first-lift at pad + agreeing breadth — index mom5 turn may lag mom15 (Sep01).
     index_confirmed_local_base_armed_pad_bypass: bool = True
+    # Index continuation leg live — waive explosion_near_miss for ATM/ITM (premium band below).
+    index_continuation_rally_near_miss_enabled: bool = True
+    index_continuation_rally_min_premium_inr: float = 18.0
+    index_continuation_rally_max_premium_inr: float = 600.0
+    index_continuation_rally_min_explosion_score: float = 5.0
+    index_continuation_rally_allow_otm: bool = False
     # Deep session trough — mom5 still negative but recovering vs mom15 (Sep01 morning CALLs).
     index_trough_deep_recovery_enabled: bool = True
     index_trough_deep_recovery_max_mom15_pct: float = -0.20
