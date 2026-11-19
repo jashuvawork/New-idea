@@ -1790,8 +1790,23 @@ def elite_entry_allowed(
             or 48.0
         )
         flip_chase_waive = 0 < _flip_local <= _flip_chase_cap + 1e-6
+    from app.engines.index_continuation_rally_near_miss import (
+        index_continuation_rally_elite_chase_waive_active,
+    )
+
+    index_cont_elite_chase = index_continuation_rally_elite_chase_waive_active(
+        dict(evidence) if isinstance(evidence, Mapping) else evidence,
+        day_mode=resolved_mode,
+        settings=settings,
+        snap=mirror_snap,
+    )
+    if index_cont_elite_chase:
+        assessment = {**assessment, "indexContinuationRallyEliteChaseWaive": True}
     continuation_waive = (
-        fresh_base_reentry or adjacent_continuation or flip_chase_waive
+        fresh_base_reentry
+        or adjacent_continuation
+        or flip_chase_waive
+        or index_cont_elite_chase
     )
     from app.engines.session_mode_feedback import post_win_fresh_base_pad_in_capture_band
 

@@ -128,6 +128,63 @@ def index_continuation_rally_premium_bypass_active(
     )
 
 
+def index_continuation_rally_elite_chase_waive_active(
+    evidence: Optional[Mapping[str, Any]],
+    *,
+    day_mode: str = "",
+    settings: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+) -> bool:
+    """
+    After index continuation clears explosion_near_miss, waive elite local-base / FVQ chase
+    gates on CHOP+RALLY ATM legs (82100 CE class). CE/PE symmetric; does not touch #676 pad.
+    """
+    settings = settings or get_settings()
+    if not bool(
+        getattr(settings, "index_continuation_rally_elite_chase_waive_enabled", True)
+    ):
+        return False
+    if not isinstance(evidence, dict):
+        return False
+    if not evidence.get("indexContinuationRallyNearMissWaive"):
+        return False
+    if not index_continuation_rally_premium_ok(evidence.get("premium"), settings=settings):
+        return False
+    from app.engines.chop_day_guards import _chop_rally_day_modes
+
+    mode = str(day_mode or evidence.get("dayMode") or "").strip().upper()
+    allowed = {str(m).strip().upper() for m in _chop_rally_day_modes(settings)}
+    if mode not in allowed:
+        return False
+    if not bool(getattr(settings, "index_continuation_rally_elite_chase_atm_only", True)):
+        return True
+    if snap is None:
+        return False
+    side_u = str(evidence.get("side") or "").upper()
+    if side_u not in ("CALL", "PUT"):
+        return False
+    try:
+        strike = float(evidence.get("strike") or 0)
+    except (TypeError, ValueError):
+        return False
+    spot = float(getattr(snap, "spot", 0) or 0)
+    if strike <= 0 or spot <= 0:
+        return False
+    bucket = _index_bucket(str(evidence.get("symbol") or getattr(snap, "symbol", "") or ""))
+    if bucket not in ("SENSEX", "NIFTY"):
+        return False
+    from app.engines.moneyness import classify_moneyness
+
+    money = classify_moneyness(
+        Side(side_u),
+        strike,
+        spot,
+        symbol=bucket,
+        atm=float(getattr(snap, "atmStrike", 0) or 0) or None,
+    )
+    return money == "ATM"
+
+
 def index_continuation_rally_near_miss_waive(
     alert: Optional[Mapping[str, Any]],
     *,

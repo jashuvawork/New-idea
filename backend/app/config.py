@@ -1246,6 +1246,8 @@ class Settings(BaseSettings):
     index_continuation_rally_min_explosion_score: float = 5.0
     # Near-miss waiver: ATM+ITM only (CE/PE), never OTM — matches expiry ATM/ITM book.
     index_continuation_rally_allow_otm: bool = False
+    index_continuation_rally_elite_chase_waive_enabled: bool = True
+    index_continuation_rally_elite_chase_atm_only: bool = True
     # CHOP+RALLY / momentum window: one-tick negative live v3 at volume ignition while index mom5 turns.
     index_continuation_momentum_ignition_enabled: bool = True
     index_continuation_momentum_ignition_min_mom5_pct: float = 0.02
