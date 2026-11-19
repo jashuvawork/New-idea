@@ -473,23 +473,21 @@ def _explosion_candidates(
         if not alert.get("tradeable") and not lift_ready and not chop_rally_capture:
             continue
         from app.engines.index_continuation_rally_near_miss import (
-            index_continuation_rally_premium_ok,
+            index_continuation_rally_premium_bypass_active,
         )
 
-        _cont_waive = bool(
-            isinstance(alert, dict) and alert.get("indexContinuationRallyNearMissWaive")
+        _cont_prem = index_continuation_rally_premium_bypass_active(
+            alert if isinstance(alert, dict) else None,
+            snap,
+            readiness_reason=first_lift_readiness_reason,
+            settings=settings,
         )
         if not premium_in_band(
             alert.get("premium"),
             mode="explosion",
             peak_move_pct=float(alert.get("peakMovePct") or 0),
             snap=snap,
-        ) and not (
-            _cont_waive
-            and index_continuation_rally_premium_ok(
-                alert.get("premium"), settings=settings,
-            )
-        ):
+        ) and not _cont_prem:
             continue
         side_v = str(alert.get("side") or "").upper()
         tier_u = str(alert.get("tier") or "").upper()
@@ -2996,18 +2994,18 @@ def diagnose_missed_entries(
                     ):
                         blockers.append("chart_not_aligned")
             from app.engines.index_continuation_rally_near_miss import (
-                index_continuation_rally_premium_ok,
+                index_continuation_rally_premium_bypass_active,
             )
 
-            _cont_waive = bool(
-                isinstance(alert, dict) and alert.get("indexContinuationRallyNearMissWaive")
+            _cont_prem = index_continuation_rally_premium_bypass_active(
+                alert,
+                snap,
+                readiness_reason=readiness_reason,
+                settings=settings,
             )
             if not premium_in_band(
                 prem, mode="explosion", peak_move_pct=peak_move, snap=snap,
-            ) and not (
-                _cont_waive
-                and index_continuation_rally_premium_ok(prem, settings=settings)
-            ):
+            ) and not _cont_prem:
                 blockers.append("premium_out_of_band")
             if score < min_score:
                 blockers.append(f"explosion_score<{min_score:.0f}")

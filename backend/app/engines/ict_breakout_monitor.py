@@ -330,6 +330,16 @@ def building_rip_bullish_readiness(
         return False, "building_rip_tier_not_building"
 
     if bool(row.get("ictMidRipCoil") or row.get("midRipCoil")):
+        from app.engines.index_continuation_rally_near_miss import (
+            index_continuation_rally_near_miss_waive,
+        )
+
+        if index_continuation_rally_near_miss_waive(
+            row if isinstance(row, dict) else None,
+            snap=snap,
+            settings=settings,
+        ):
+            return True, "index_continuation_building_rip_mid_rip_waive"
         return False, "building_rip_mid_rip_coil_rejected"
 
     # Strongly helper-confirmed BUILDING FTV — the "suddenly something is helping" catch.
@@ -2242,6 +2252,16 @@ def first_lift_entry_readiness(
             if not grade_a_lane and not top_ftv_v_lane:
                 min_move = min(min_move, bd_floors["minMove"])
     if not (min_move <= base_move <= max_move):
+        from app.engines.index_continuation_rally_near_miss import (
+            index_continuation_rally_near_miss_waive,
+        )
+
+        if index_continuation_rally_near_miss_waive(
+            alert if isinstance(alert, dict) else row,
+            snap=snap,
+            settings=settings,
+        ):
+            return True, "index_continuation_base_move_waive"
         return False, f"first_lift_base_move_outside_{min_move:g}_{max_move:g}"
 
     # Option-led lane: a strong ATM/ITM option can lead before the 5m index chart turns
