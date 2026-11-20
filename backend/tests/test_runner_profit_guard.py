@@ -227,3 +227,52 @@ def test_oct29_nifty_vbase_micro_pullback_defers_guard_through_retest(side):
     )
     assert _guard(trade, s, v3=0.0) is None
     assert "runnerGuardBelowSince" not in trade.entryContext
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_nov20_nifty_25600_tier2_pullback_defers_guard_until_tp_rung(side):
+    """Nov 20 NIFTY 25600 CE: +14% peak (tier 2), pullback to +3.7pt — guard must not scratch."""
+    s = Settings()
+    entry, best = 88.9, 12.6
+    assert best < s.tp_rung_ladder_min_best_to_arm_exits
+    ctx = {
+        "maxProfitCapture": True,
+        "momentStageLadder": True,
+        "projectedMaxTp": 359.0,
+        "stageSize": 75.0,
+        "exitPlan": {
+            "projectedMaxTp": 359.0,
+            "stageSize": 75.0,
+            "stopPoints": 16.0,
+        },
+    }
+    trade = PaperTrade(
+        id=f"nov20-25600-{side.value}",
+        symbol="NIFTY",
+        side=side,
+        strike=25600.0,
+        entryPremium=entry,
+        currentPremium=entry + 3.7,
+        lots=5,
+        openedAt=datetime.now(IST) - timedelta(minutes=16),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=best,
+        maxLtp=entry + best,
+        entryContext={
+            **ctx,
+            "runnerGuardBelowSince": (
+                datetime.now(IST) - timedelta(seconds=s.runner_profit_guard_confirm_seconds + 5)
+            ).isoformat(),
+        },
+    )
+    assert _guard(trade, s, v3=0.0) is None
+    assert "runnerGuardBelowSince" not in trade.entryContext
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_pre_rung_defer_stops_once_best_reaches_tp_rung_arm(side):
+    s = Settings()
+    entry, best = 88.9, 30.0
+    trade = _runner(side, entry=entry, best=best, pnl=8.0, below_for=120)
+    trade.entryContext["projectedMaxTp"] = 359.0
+    assert _guard(trade, s, v3=0.0) == "explosion_runner_profit_guard"
