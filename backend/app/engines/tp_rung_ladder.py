@@ -351,9 +351,14 @@ def tp_rung_exit_reason(
     gb_frac = _cfg_float(s, "tp_rung_ladder_fade_min_giveback_frac_of_best", 0.10)
     effective_giveback = max(min_giveback, best * gb_frac)
 
+    from app.engines.moment_capture_tp_anchor import moment_capture_anchor_hold_active
+
+    anchor_hold = moment_capture_anchor_hold_active(trade, best, settings=s)
+
     # Between rungs: tried the next TP, fading — bank at last confirmed rung (100→28,36,33).
     if (
         not skip_between_fade
+        and not anchor_hold
         and falling
         and _attempted_next_rung(best, confirmed, rungs, s, trade=trade)
         and (best - pnl_pts) + 1e-6 >= effective_giveback

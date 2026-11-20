@@ -2621,9 +2621,20 @@ def runner_profit_guard_exit_reason(
     floor_pts = runner_profit_guard_floor(trade, settings=settings, pnl_pts=pnl_pts)
     ctx = trade.entryContext if trade.entryContext is not None else {}
     pnl = float(pnl_pts or 0)
-    if _defer_runner_profit_guard_for_vbase_runner(
-        trade, best=best, settings=settings
-    ) or _defer_runner_profit_guard_pre_tp_rung(trade, best=best, settings=settings):
+    from app.engines.moment_capture_tp_anchor import moment_capture_anchor_hold_active
+
+    entry = float(trade.entryPremium or 0)
+    gain_pct = (float(best or 0) / entry * 100.0) if entry > 0 else 0.0
+    tier2 = _cfg_float(settings, "runner_profit_guard_defer_pre_rung_min_tier_gain_pct", 12.0)
+    anchor_tier2 = (
+        moment_capture_anchor_hold_active(trade, best, settings=settings)
+        and gain_pct + 1e-6 >= tier2
+    )
+    if (
+        _defer_runner_profit_guard_for_vbase_runner(trade, best=best, settings=settings)
+        or _defer_runner_profit_guard_pre_tp_rung(trade, best=best, settings=settings)
+        or anchor_tier2
+    ):
         ctx.pop("runnerGuardBelowSince", None)
         trade.entryContext = ctx
         return None
@@ -2735,6 +2746,10 @@ def stage_runner_mega_pullback_exit_reason(
             ),
         )
     hole_giveback_frac = (giveback / best) if best > 0 else 0.0
+    from app.engines.moment_capture_tp_anchor import moment_capture_anchor_hold_active
+
+    if moment_capture_anchor_hold_active(trade, best, settings=settings):
+        return None
     if _stage_runner_mega_hole_defer_green_pullback(
         trade, best=best, pnl_pts=pnl_pts, settings=settings
     ):

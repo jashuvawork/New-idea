@@ -465,6 +465,18 @@ def build_moment_stage_plan(
         )
         out["tpRungLadder"] = True
         out["tpRungsPts"] = rungs
+    from app.engines.moment_capture_tp_anchor import stamp_moment_capture_tp_anchor_on_context
+
+    if max_profit and out.get("momentStageLadder"):
+        merged = {**out, "exitPlan": exit_plan or {}}
+        stamp_moment_capture_tp_anchor_on_context(
+            merged,
+            entry_premium=float(entry_premium or 0),
+            settings=s,
+        )
+        if merged.get("momentCaptureTpAnchorPts") is not None:
+            out["momentCaptureTpAnchorPts"] = merged["momentCaptureTpAnchorPts"]
+            out["momentCaptureTpAnchorMeta"] = merged.get("momentCaptureTpAnchorMeta")
     return out
 
 

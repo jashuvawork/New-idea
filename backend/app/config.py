@@ -1876,6 +1876,13 @@ class Settings(BaseSettings):
     stage_runner_mega_hole_defer_green_pullback_enabled: bool = True
     stage_runner_mega_hole_defer_min_remain_frac_of_peak: float = 0.20
     stage_runner_mega_hole_defer_max_giveback_frac: float = 0.792
+    # Moment capture TP anchor — hold through pullbacks until anchor pts (then rung/ladder own exits).
+    moment_capture_tp_anchor_enabled: bool = True
+    moment_capture_tp_anchor_entry_multiple: float = 2.0
+    moment_capture_tp_anchor_2x_max_entry_premium_inr: float = 150.0
+    moment_capture_tp_anchor_projected_frac: float = 0.35
+    moment_capture_tp_anchor_stage_frac: float = 0.5
+    moment_capture_tp_anchor_max_projected_cap_frac: float = 0.85
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.
