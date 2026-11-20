@@ -1,11 +1,10 @@
-"""Near session high/low entry blocks (Nov20 25700 CE CE @ HOD)."""
+"""Index near session extreme detection for scoped TP anchor (no entry block)."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from app.engines.index_lift_turn_guards import (
     index_lift_turn_blocks_side,
     index_near_extreme_chase_active,
-    index_near_extreme_entry_waiver,
 )
 from app.models.schemas import Side, SpotChart, SymbolSnapshot
 
@@ -46,62 +45,18 @@ def test_nov20_near_hod_call_chase_detected(mock_metrics):
 
 
 @patch("app.engines.index_lift_turn_guards.index_rally_metrics")
-def test_near_hod_blocks_call_without_waiver(mock_metrics):
-    mock_metrics.return_value = {
-        "sessionHigh": 25739.2,
-        "sessionLow": 25345.2,
-        "spot": 25727.0,
-        "rallyPoints": 381.8,
-        "slidePoints": 12.2,
-    }
-    event = MagicMock()
-    event.tier = "ELITE"
-    event.velocity_3s = 1.34
-    blocked, reason, _ = index_lift_turn_blocks_side(
-        "NIFTY",
-        Side.CALL,
-        _snap(),
-        explosion_event=event,
-        alert={"momentType": "building_local_base_lift", "tier": "ELITE"},
-    )
-    assert blocked is True
-    assert reason == "index_near_session_high_blocks_call"
-
-
-@patch("app.engines.index_lift_turn_guards.index_rally_metrics")
-def test_first_lift_waives_near_hod_block(mock_metrics):
+def test_near_hod_does_not_block_pretrade_path(mock_metrics):
     mock_metrics.return_value = {
         "rallyPoints": 381.8,
         "slidePoints": 12.2,
     }
-    ok, reason, _ = index_near_extreme_entry_waiver(
-        Side.CALL,
-        _snap(),
-        meta=mock_metrics.return_value,
-        alert={"evidence": {"firstLift": True}},
-    )
-    assert ok is True
-    assert "first_lift" in reason
+    blocked, reason, _ = index_lift_turn_blocks_side("NIFTY", Side.CALL, _snap())
+    assert blocked is False
+    assert reason == "ok"
 
 
 @patch("app.engines.index_lift_turn_guards.index_rally_metrics")
-def test_breakout_waives_near_hod_when_printing_new_high(mock_metrics):
-    mock_metrics.return_value = {
-        "rallyPoints": 400.0,
-        "slidePoints": 2.0,
-    }
-    ok, reason, _ = index_near_extreme_entry_waiver(
-        Side.CALL,
-        _snap(mom5=0.06),
-        meta=mock_metrics.return_value,
-        alert={},
-    )
-    assert ok is True
-    assert reason == "index_near_extreme_session_high_breakout"
-
-
-@patch("app.engines.index_lift_turn_guards.index_rally_metrics")
-def test_put_mirror_near_session_low(mock_metrics):
+def test_put_mirror_near_session_low_detected(mock_metrics):
     mock_metrics.return_value = {
         "rallyPoints": 15.0,
         "slidePoints": 380.0,
@@ -112,6 +67,3 @@ def test_put_mirror_near_session_low(mock_metrics):
     active, meta = index_near_extreme_chase_active("NIFTY", Side.PUT, _snap(spot=25360.0))
     assert active is True
     assert meta.get("mode") == "index_near_session_low_put_chase"
-    blocked, reason, _ = index_lift_turn_blocks_side("NIFTY", Side.PUT, _snap(spot=25360.0))
-    assert blocked is True
-    assert reason == "index_near_session_low_blocks_put"

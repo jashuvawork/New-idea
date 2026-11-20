@@ -236,76 +236,87 @@ def _near_extreme_max_slide(symbol: str, settings: Any) -> float:
     sym = symbol.upper()
     if sym == "NIFTY":
         return float(
-            getattr(settings, "index_near_extreme_call_max_slide_pts_nifty", 22.0) or 22.0
+            getattr(settings, "moment_capture_index_extreme_call_max_slide_pts_nifty", 22.0)
+            or 22.0
         )
     if sym == "BANKNIFTY":
         return float(
-            getattr(settings, "index_near_extreme_call_max_slide_pts_banknifty", 35.0) or 35.0
+            getattr(settings, "moment_capture_index_extreme_call_max_slide_pts_banknifty", 35.0)
+            or 35.0
         )
     if sym == "SENSEX":
         return float(
-            getattr(settings, "index_near_extreme_call_max_slide_pts_sensex", 45.0) or 45.0
+            getattr(settings, "moment_capture_index_extreme_call_max_slide_pts_sensex", 45.0)
+            or 45.0
         )
-    return float(getattr(settings, "index_near_extreme_call_max_slide_pts", 70.0) or 70.0)
+    return float(
+        getattr(settings, "moment_capture_index_extreme_call_max_slide_pts", 70.0) or 70.0
+    )
 
 
-def _near_extreme_min_rally_for_call_block(symbol: str, settings: Any) -> float:
+def _near_extreme_min_rally_for_call_detect(symbol: str, settings: Any) -> float:
     sym = symbol.upper()
     if sym == "NIFTY":
         return float(
-            getattr(settings, "index_near_extreme_call_min_rally_pts_nifty", 150.0) or 150.0
+            getattr(settings, "moment_capture_index_extreme_call_min_rally_pts_nifty", 150.0)
+            or 150.0
         )
     if sym == "BANKNIFTY":
         return float(
-            getattr(settings, "index_near_extreme_call_min_rally_pts_banknifty", 200.0) or 200.0
+            getattr(settings, "moment_capture_index_extreme_call_min_rally_pts_banknifty", 200.0)
+            or 200.0
         )
     if sym == "SENSEX":
         return float(
-            getattr(settings, "index_near_extreme_call_min_rally_pts_sensex", 250.0) or 250.0
+            getattr(settings, "moment_capture_index_extreme_call_min_rally_pts_sensex", 250.0)
+            or 250.0
         )
-    return float(getattr(settings, "index_near_extreme_call_min_rally_pts", 300.0) or 300.0)
+    return float(
+        getattr(settings, "moment_capture_index_extreme_call_min_rally_pts", 300.0) or 300.0
+    )
 
 
-def _near_extreme_max_rally_for_put_block(symbol: str, settings: Any) -> float:
+def _near_extreme_max_rally_for_put_detect(symbol: str, settings: Any) -> float:
     sym = symbol.upper()
     if sym == "NIFTY":
         return float(
-            getattr(settings, "index_near_extreme_put_max_rally_pts_nifty", 22.0) or 22.0
+            getattr(settings, "moment_capture_index_extreme_put_max_rally_pts_nifty", 22.0) or 22.0
         )
     if sym == "BANKNIFTY":
         return float(
-            getattr(settings, "index_near_extreme_put_max_rally_pts_banknifty", 35.0) or 35.0
+            getattr(settings, "moment_capture_index_extreme_put_max_rally_pts_banknifty", 35.0)
+            or 35.0
         )
     if sym == "SENSEX":
         return float(
-            getattr(settings, "index_near_extreme_put_max_rally_pts_sensex", 45.0) or 45.0
+            getattr(settings, "moment_capture_index_extreme_put_max_rally_pts_sensex", 45.0)
+            or 45.0
         )
-    return float(getattr(settings, "index_near_extreme_put_max_rally_pts", 70.0) or 70.0)
+    return float(
+        getattr(settings, "moment_capture_index_extreme_put_max_rally_pts", 70.0) or 70.0
+    )
 
 
-def _near_extreme_min_slide_for_put_block(symbol: str, settings: Any) -> float:
+def _near_extreme_min_slide_for_put_detect(symbol: str, settings: Any) -> float:
     sym = symbol.upper()
     if sym == "NIFTY":
         return float(
-            getattr(settings, "index_near_extreme_put_min_slide_pts_nifty", 150.0) or 150.0
+            getattr(settings, "moment_capture_index_extreme_put_min_slide_pts_nifty", 150.0)
+            or 150.0
         )
     if sym == "BANKNIFTY":
         return float(
-            getattr(settings, "index_near_extreme_put_min_slide_pts_banknifty", 200.0) or 200.0
+            getattr(settings, "moment_capture_index_extreme_put_min_slide_pts_banknifty", 200.0)
+            or 200.0
         )
     if sym == "SENSEX":
         return float(
-            getattr(settings, "index_near_extreme_put_min_slide_pts_sensex", 250.0) or 250.0
+            getattr(settings, "moment_capture_index_extreme_put_min_slide_pts_sensex", 250.0)
+            or 250.0
         )
-    return float(getattr(settings, "index_near_extreme_put_min_slide_pts", 300.0) or 300.0)
-
-
-_FIRST_LIFT_MOMENTS = frozenset({
-    "first_lift_local_base",
-    "armed_base_launch",
-    "v_rip_session_low",
-    "v_rip_session_high",
-})
+    return float(
+        getattr(settings, "moment_capture_index_extreme_put_min_slide_pts", 300.0) or 300.0
+    )
 
 
 def index_near_extreme_chase_active(
@@ -315,9 +326,11 @@ def index_near_extreme_chase_active(
     *,
     settings: Any = None,
 ) -> tuple[bool, dict[str, Any]]:
-    """CALL near session high or PUT near session low after a large same-day leg."""
+    """CALL near session high or PUT near session low — tags entry for scoped TP anchor."""
     settings = settings or get_settings()
-    if not bool(getattr(settings, "index_near_extreme_entry_block_enabled", True)):
+    if not bool(
+        getattr(settings, "moment_capture_tp_anchor_scope_near_index_extreme_enabled", True)
+    ):
         return False, {}
     sym = str(symbol or "").upper()
     allowed = {
@@ -337,7 +350,7 @@ def index_near_extreme_chase_active(
 
     if side_v == "CALL":
         max_slide = _near_extreme_max_slide(sym, settings)
-        min_rally = _near_extreme_min_rally_for_call_block(sym, settings)
+        min_rally = _near_extreme_min_rally_for_call_detect(sym, settings)
         if slide <= max_slide + 1e-6 and rally >= min_rally:
             return True, {
                 **metrics,
@@ -346,8 +359,8 @@ def index_near_extreme_chase_active(
                 "minRallyPts": min_rally,
             }
     elif side_v == "PUT":
-        max_rally = _near_extreme_max_rally_for_put_block(sym, settings)
-        min_slide = _near_extreme_min_slide_for_put_block(sym, settings)
+        max_rally = _near_extreme_max_rally_for_put_detect(sym, settings)
+        min_slide = _near_extreme_min_slide_for_put_detect(sym, settings)
         if rally <= max_rally + 1e-6 and slide >= min_slide:
             return True, {
                 **metrics,
@@ -356,46 +369,6 @@ def index_near_extreme_chase_active(
                 "minSlidePts": min_slide,
             }
     return False, metrics
-
-
-def index_near_extreme_entry_waiver(
-    side: Side | str,
-    snap: SymbolSnapshot,
-    *,
-    meta: dict[str, Any],
-    explosion_event: Any = None,
-    alert: Optional[Mapping[str, Any]] = None,
-    settings: Any = None,
-) -> tuple[bool, str, dict[str, Any]]:
-    """Waive near-extreme block on first lift / fresh session extreme break."""
-    settings = settings or get_settings()
-    alert_d = _coerce_mapping(alert)
-    if bool(getattr(settings, "index_near_extreme_first_lift_waiver_enabled", True)):
-        ev = alert_d.get("evidence") if isinstance(alert_d.get("evidence"), dict) else {}
-        if ev.get("firstLift") or alert_d.get("firstLift"):
-            return True, "index_near_extreme_first_lift", meta
-        moment = str(alert_d.get("momentType") or alert_d.get("pattern") or "").lower()
-        if moment in {m.lower() for m in _FIRST_LIFT_MOMENTS}:
-            return True, "index_near_extreme_first_lift_moment", meta
-
-    chart = snap.spotChart
-    max_break_slide = float(
-        getattr(settings, "index_near_extreme_breakout_max_slide_pts", 3.0) or 3.0
-    )
-    min_break_mom5 = float(
-        getattr(settings, "index_near_extreme_breakout_min_mom5_pct", 0.05) or 0.05
-    )
-    slide = float(meta.get("slidePoints") or 0)
-    mom5 = float(getattr(chart, "momentum5Pct", 0) or 0) if chart else 0.0
-    side_v = _side_val(side)
-    if side_v == "CALL" and slide <= max_break_slide and mom5 >= min_break_mom5:
-        return True, "index_near_extreme_session_high_breakout", {**meta, "mom5": mom5}
-    if side_v == "PUT":
-        rally = float(meta.get("rallyPoints") or 0)
-        if rally <= max_break_slide and mom5 <= -min_break_mom5:
-            return True, "index_near_extreme_session_low_breakout", {**meta, "mom5": mom5}
-
-    return False, "", meta
 
 
 def index_lift_turn_blocks_side(
@@ -410,24 +383,6 @@ def index_lift_turn_blocks_side(
     """Return (blocked, reason, meta) when side fights an active index V-turn."""
     settings = settings or get_settings()
     side_v = _side_val(side)
-
-    near_active, near_meta = index_near_extreme_chase_active(
-        symbol, side, snap, settings=settings
-    )
-    if near_active:
-        waived, waive_reason, waive_meta = index_near_extreme_entry_waiver(
-            side,
-            snap,
-            meta=near_meta,
-            explosion_event=explosion_event,
-            alert=alert,
-            settings=settings,
-        )
-        if not waived:
-            if side_v == "CALL":
-                return True, "index_near_session_high_blocks_call", near_meta
-            return True, "index_near_session_low_blocks_put", near_meta
-        near_meta = {**near_meta, "nearExtremeWaiver": waive_reason, **waive_meta}
 
     rip_ok, rip_reason, rip_meta = index_lift_turn_option_rip_waiver(
         side,
