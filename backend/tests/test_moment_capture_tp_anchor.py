@@ -109,3 +109,34 @@ def test_anchor_hold_defers_stage_hole(side):
         assert stage_runner_mega_pullback_exit_reason(
             trade, best=32.35, pnl_pts=6.8, hold_seconds=600, live_velocity_3s=-0.5,
         ) is None
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_scoped_anchor_allows_runner_guard_near_hod_before_rung_armed(side):
+    """Nov20 25700: +12pt best at HOD — runner guard not deferred until rung armed."""
+    s = Settings()
+    anchor = 141.25
+    trade = PaperTrade(
+        id=f"scoped-{side.value}",
+        symbol="NIFTY",
+        side=side,
+        strike=25700.0,
+        entryPremium=140.65,
+        currentPremium=140.65 + 3.7,
+        lots=3,
+        openedAt=datetime.now(IST) - timedelta(minutes=25),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=12.05,
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "momentCaptureTpAnchorPts": anchor,
+            "momentCaptureAnchorNearIndexExtreme": True,
+            "runnerGuardBelowSince": (
+                datetime.now(IST) - timedelta(seconds=s.runner_profit_guard_confirm_seconds + 5)
+            ).isoformat(),
+        },
+    )
+    assert moment_capture_anchor_hold_active(trade, 12.05, settings=s) is False
+    assert moment_capture_anchor_hold_active(trade, 27.9, settings=s) is False
+    assert moment_capture_anchor_hold_active(trade, 30.0, settings=s) is True

@@ -1883,6 +1883,27 @@ class Settings(BaseSettings):
     moment_capture_tp_anchor_projected_frac: float = 0.35
     moment_capture_tp_anchor_stage_frac: float = 0.5
     moment_capture_tp_anchor_max_projected_cap_frac: float = 0.85
+    # Narrow anchor marathon hold when entry hugged index session extreme (Nov20 25700 CE).
+    moment_capture_tp_anchor_scope_near_index_extreme_enabled: bool = True
+    moment_capture_tp_anchor_scope_min_best_pts: float = 28.0
+    moment_capture_tp_anchor_scope_min_progress_pct: float = 20.0
+    # Detect index hugging session high/low at entry (exit scoping only — no entry block).
+    moment_capture_index_extreme_call_max_slide_pts_nifty: float = 22.0
+    moment_capture_index_extreme_call_max_slide_pts_banknifty: float = 35.0
+    moment_capture_index_extreme_call_max_slide_pts_sensex: float = 45.0
+    moment_capture_index_extreme_call_max_slide_pts: float = 70.0
+    moment_capture_index_extreme_call_min_rally_pts_nifty: float = 150.0
+    moment_capture_index_extreme_call_min_rally_pts_banknifty: float = 200.0
+    moment_capture_index_extreme_call_min_rally_pts_sensex: float = 250.0
+    moment_capture_index_extreme_call_min_rally_pts: float = 300.0
+    moment_capture_index_extreme_put_max_rally_pts_nifty: float = 22.0
+    moment_capture_index_extreme_put_max_rally_pts_banknifty: float = 35.0
+    moment_capture_index_extreme_put_max_rally_pts_sensex: float = 45.0
+    moment_capture_index_extreme_put_max_rally_pts: float = 70.0
+    moment_capture_index_extreme_put_min_slide_pts_nifty: float = 150.0
+    moment_capture_index_extreme_put_min_slide_pts_banknifty: float = 200.0
+    moment_capture_index_extreme_put_min_slide_pts_sensex: float = 250.0
+    moment_capture_index_extreme_put_min_slide_pts: float = 300.0
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.

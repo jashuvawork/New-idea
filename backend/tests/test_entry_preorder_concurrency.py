@@ -220,6 +220,14 @@ def _process_patches(state, candidate, events, opener):
             return_value=False,
         )
     )
+    # conftest freezes wall clock at 16:30 IST; without this, afternoon stand-down
+    # blocks the entry path and concurrency replay never reaches preorder.
+    stack.enter_context(
+        patch(
+            "app.engines.chop_day_guards.plain_chop_afternoon_standdown_active",
+            return_value=(False, "ok", {}),
+        )
+    )
     return stack
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app.config import Settings, get_settings
-from app.models.schemas import PaperTrade
+from app.models.schemas import PaperTrade, Side, SymbolSnapshot
 
 
 def _cfg_float(settings: Any, name: str, default: float) -> float:
@@ -96,6 +96,37 @@ def stamp_moment_capture_tp_anchor_on_context(
     return anchor
 
 
+def stamp_moment_capture_index_scope_on_context(
+    ctx: dict[str, Any],
+    *,
+    symbol: str,
+    side: Side | str,
+    snap: Optional[SymbolSnapshot],
+    settings: Any = None,
+) -> bool:
+    """Stamp when entry hugged index session extreme — narrows marathon anchor hold."""
+    if snap is None:
+        return False
+    from app.engines.index_lift_turn_guards import index_near_extreme_chase_active
+
+    s = settings or get_settings()
+    active, meta = index_near_extreme_chase_active(symbol, side, snap, settings=s)
+    if not active:
+        return False
+    ctx["momentCaptureAnchorNearIndexExtreme"] = True
+    ctx["momentCaptureAnchorNearIndexExtremeMeta"] = meta
+    return True
+
+
+def _scoped_anchor_hold_threshold(anchor: float, settings: Any) -> float:
+    rung = _cfg_float(settings, "tp_rung_ladder_min_best_to_arm_exits", 28.0)
+    min_prog_frac = _cfg_float(
+        settings, "moment_capture_tp_anchor_scope_min_progress_pct", 20.0
+    ) / 100.0
+    min_best = _cfg_float(settings, "moment_capture_tp_anchor_scope_min_best_pts", 28.0)
+    return max(rung, min_best, anchor * min_prog_frac)
+
+
 def moment_capture_anchor_hold_active(
     trade: PaperTrade,
     best: float,
@@ -124,4 +155,12 @@ def moment_capture_anchor_hold_active(
     best_f = float(best or 0)
     ctx["momentCaptureTpAnchorProgressPct"] = round(min(100.0, (best_f / anchor) * 100.0), 1)
     trade.entryContext = ctx
-    return best_f + 1e-6 < float(anchor)
+    if best_f + 1e-6 >= float(anchor):
+        return False
+    if bool(
+        getattr(s, "moment_capture_tp_anchor_scope_near_index_extreme_enabled", True)
+    ) and ctx.get("momentCaptureAnchorNearIndexExtreme"):
+        threshold = _scoped_anchor_hold_threshold(anchor, s)
+        if best_f + 1e-6 < threshold:
+            return False
+    return True

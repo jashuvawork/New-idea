@@ -2946,6 +2946,15 @@ async def _open_from_candidate(
             plan = dict(ctx_extra.get("exitPlan") or {})
             plan.update(stage_plan)
             ctx_extra["exitPlan"] = plan
+        from app.engines.moment_capture_tp_anchor import stamp_moment_capture_index_scope_on_context
+
+        stamp_moment_capture_index_scope_on_context(
+            ctx_extra,
+            symbol=symbol,
+            side=candidate.side,
+            snap=snap,
+            settings=settings,
+        )
         from app.engines.peak_prediction import predict_peak, stamp_peak_prediction_on_context
 
         peak_pred = predict_peak(
