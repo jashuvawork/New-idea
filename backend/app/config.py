@@ -1868,13 +1868,14 @@ class Settings(BaseSettings):
     runner_profit_guard_defer_vbase_runner_enabled: bool = True
     runner_profit_guard_defer_vbase_max_gain_pct: float = 12.0
     runner_profit_guard_defer_vbase_max_progress_frac: float = 0.08
-    # Defer tier-2+ runner guard until TP rung arms (+28pt best) while the leg is still
-    # early on its stage path (Nov 20 NIFTY 25600 CE: +14% peak scratched at tier-2 keep).
-    # Tier-1-only fades (Oct 21 73300 PE +6.8%) still use the guard.
+    # Tier-2+ moment captures: runner guard stays OFF until TP rung arms (+28pt best).
+    # Tier-1-only fades (Oct 21 73300 PE +6.8%) still use the guard (Nov 20 25600 CE → 180+).
     runner_profit_guard_defer_pre_rung_enabled: bool = True
     runner_profit_guard_defer_pre_rung_min_tier_gain_pct: float = 12.0
-    runner_profit_guard_defer_pre_rung_max_gain_pct: float = 18.0
-    runner_profit_guard_defer_pre_rung_max_progress_frac: float = 0.12
+    # Hold green pre-stage pullbacks instead of stage_runner_hole_take (Nov 17 82600 CE).
+    stage_runner_mega_hole_defer_green_pullback_enabled: bool = True
+    stage_runner_mega_hole_defer_min_remain_frac_of_peak: float = 0.20
+    stage_runner_mega_hole_defer_max_giveback_frac: float = 0.792
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.

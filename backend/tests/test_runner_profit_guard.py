@@ -270,6 +270,52 @@ def test_nov20_nifty_25600_tier2_pullback_defers_guard_until_tp_rung(side):
 
 
 @pytest.mark.parametrize("side", SIDES)
+def test_nov20_25600_full_exit_stack_skips_runner_guard(side):
+    """Nov 20 NIFTY 25600 CE live path: tier-2 pullback must not runner-guard exit."""
+    from app.engines.explosion_profit import evaluate_explosion_exit
+
+    s = Settings()
+    entry, best = 88.9, 12.6
+    trade = PaperTrade(
+        id=f"nov20-full-{side.value}",
+        symbol="NIFTY",
+        side=side,
+        strike=25600.0,
+        entryPremium=entry,
+        currentPremium=entry + 3.7,
+        lots=5,
+        openedAt=datetime.now(IST) - timedelta(minutes=16),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=best,
+        maxLtp=entry + best,
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 359.0,
+            "stageSize": 75.0,
+            "exitPlan": {
+                "projectedMaxTp": 359.0,
+                "stageSize": 75.0,
+                "stopPoints": 16.0,
+                "adaptiveStop": True,
+            },
+            "runnerGuardBelowSince": (
+                datetime.now(IST) - timedelta(seconds=s.runner_profit_guard_confirm_seconds + 5)
+            ).isoformat(),
+        },
+    )
+    with patch("app.engines.explosion_profit.get_settings", return_value=s), patch(
+        "app.engines.moment_stage_trail.get_settings", return_value=s
+    ), patch("app.engines.tp_rung_ladder.get_settings", return_value=s), patch(
+        "app.engines.explosion_profit._hold_seconds", return_value=960
+    ):
+        reason, _ = evaluate_explosion_exit(
+            trade, trade.currentPremium, "ELITE", 65, live_velocity_3s=0.0,
+        )
+    assert reason is None or reason != "explosion_runner_profit_guard"
+
+
+@pytest.mark.parametrize("side", SIDES)
 def test_pre_rung_defer_stops_once_best_reaches_tp_rung_arm(side):
     s = Settings()
     entry, best = 88.9, 30.0

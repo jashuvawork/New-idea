@@ -305,3 +305,48 @@ def test_nov16_82200_pre_stage_pullback_defers_shallow_hole_take(_mp):
             live_velocity_3s=-0.5,
         )
     assert reason is None
+
+
+@patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
+def test_nov17_82600_shallow_hole_deferred_for_continuation(_mp):
+    """Nov 17 SENSEX 82600 CE: +32pt peak, +6.8pt pullback — hold for afternoon leg."""
+    from app.config import Settings
+    from app.engines.explosion_profit import stage_runner_mega_pullback_exit_reason
+    from app.models.schemas import PaperTrade, Side, StrategyType
+
+    s = Settings()
+    entry = 446.95
+    best = 32.35
+    pnl = 6.8
+    trade = PaperTrade(
+        id="nov17-82600",
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=82600.0,
+        entryPremium=entry,
+        currentPremium=entry + pnl,
+        lots=2,
+        openedAt=datetime.now(IST) - timedelta(seconds=600),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=best,
+        maxLtp=entry + best,
+        maxLtpAt=datetime.now(IST) - timedelta(seconds=120),
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+            "exitPlan": {"projectedMaxTp": 800.0, "stageSize": 75.0, "stopPoints": 40.0},
+        },
+    )
+    with patch("app.engines.explosion_profit.get_settings", return_value=s), patch(
+        "app.engines.moment_stage_trail.get_settings", return_value=s
+    ):
+        reason = stage_runner_mega_pullback_exit_reason(
+            trade,
+            best=best,
+            pnl_pts=pnl,
+            hold_seconds=600,
+            live_velocity_3s=-0.5,
+        )
+    assert reason is None
