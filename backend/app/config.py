@@ -1883,6 +1883,10 @@ class Settings(BaseSettings):
     moment_capture_tp_anchor_projected_frac: float = 0.35
     moment_capture_tp_anchor_stage_frac: float = 0.5
     moment_capture_tp_anchor_max_projected_cap_frac: float = 0.85
+    # Narrow anchor marathon hold when entry hugged index session extreme (Nov20 25700 CE).
+    moment_capture_tp_anchor_scope_near_index_extreme_enabled: bool = True
+    moment_capture_tp_anchor_scope_min_best_pts: float = 28.0
+    moment_capture_tp_anchor_scope_min_progress_pct: float = 20.0
     # Modest peak mode — chop-day ELITE/EXPLODING pops that are not mega FTV (Sep03 NIFTY).
     # Lowers %-keep arm threshold and caps stage projection so 75% peak-keep fires on +12–20pt
     # moves instead of holding for stage-1 (+45pt) mega-rip fantasy.
@@ -2329,6 +2333,27 @@ class Settings(BaseSettings):
     index_turn_exec_fade_waiver_enabled: bool = True
     index_turn_exec_fade_waiver_tiers_csv: str = "ELITE,EXPLODING"
     index_turn_exec_fade_waiver_shallow_mom3_pct: float = -0.35
+    # Block chasing CE when spot is still hugging session high (mirror: PUT hugging session low).
+    index_near_extreme_entry_block_enabled: bool = True
+    index_near_extreme_call_max_slide_pts_nifty: float = 22.0
+    index_near_extreme_call_max_slide_pts_banknifty: float = 35.0
+    index_near_extreme_call_max_slide_pts_sensex: float = 45.0
+    index_near_extreme_call_max_slide_pts: float = 70.0
+    index_near_extreme_call_min_rally_pts_nifty: float = 150.0
+    index_near_extreme_call_min_rally_pts_banknifty: float = 200.0
+    index_near_extreme_call_min_rally_pts_sensex: float = 250.0
+    index_near_extreme_call_min_rally_pts: float = 300.0
+    index_near_extreme_put_max_rally_pts_nifty: float = 22.0
+    index_near_extreme_put_max_rally_pts_banknifty: float = 35.0
+    index_near_extreme_put_max_rally_pts_sensex: float = 45.0
+    index_near_extreme_put_max_rally_pts: float = 70.0
+    index_near_extreme_put_min_slide_pts_nifty: float = 150.0
+    index_near_extreme_put_min_slide_pts_banknifty: float = 200.0
+    index_near_extreme_put_min_slide_pts_sensex: float = 250.0
+    index_near_extreme_put_min_slide_pts: float = 300.0
+    index_near_extreme_breakout_max_slide_pts: float = 3.0
+    index_near_extreme_breakout_min_mom5_pct: float = 0.05
+    index_near_extreme_first_lift_waiver_enabled: bool = True
 
     # Loss-triggered opposite flip — same-side losses + index rally/slide + RSI/MACD → elite opposite
     loss_triggered_side_flip_enabled: bool = True
