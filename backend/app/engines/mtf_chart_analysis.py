@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any, Optional
 
 from app.config import get_settings
@@ -382,6 +383,7 @@ def validate_mtf_scalp(
     nifty_expiry_1m_relief: bool = False,
     index_turn_fade_bypass: bool = False,
     scalp_mode: bool = False,
+    when: Optional[datetime] = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """
     Pre-trade MTF gate for scalping:
@@ -423,23 +425,37 @@ def validate_mtf_scalp(
             and not first_lift_bypass
             and not open_setup_fade_bypass
         ):
-            for req in ("1m", "5m"):
-                pt = premium_mtf.get(req)
+            def _fade_bad_bypass(req: str, pt: Optional[TimeframeChartRead]) -> tuple[bool, str]:
+                if not pt:
+                    return False, ""
                 thresh = _premium_mtf_fade_threshold(
                     settings,
                     timeframe=req,
                     nifty_expiry_1m_relief=nifty_expiry_1m_relief,
                 )
-                if pt and pt.direction == "BEARISH" and pt.momentumPct < thresh:
+                if pt.direction == "BEARISH" and pt.momentumPct < thresh:
                     if index_turn_fade_bypass and _index_turn_mtf_premium_shallow_ok(
                         pt,
                         settings,
                         premium_mtf=premium_mtf,
                         timeframe=req,
                     ):
-                        continue
-                    meta["passed"] = False
-                    return False, f"exec_mtf_premium_{req}_fading", meta
+                        return False, ""
+                    return True, f"exec_mtf_premium_{req}_fading"
+                return False, ""
+
+            from app.engines.morning_exec_fade import (
+                morning_fade_meta,
+                premium_mtf_fade_block_reason,
+            )
+
+            block, fade_reason = premium_mtf_fade_block_reason(
+                premium_mtf, fade_check=_fade_bad_bypass, when=when,
+            )
+            if block:
+                meta["passed"] = False
+                meta.update(morning_fade_meta(when))
+                return False, fade_reason, meta
         if premium_mtf and settings.execution_chart_premium_check_enabled and (
             pad_lane_bypass or first_lift_bypass or open_setup_fade_bypass
         ):
@@ -532,23 +548,34 @@ def validate_mtf_scalp(
         return False, "exec_mtf_higher_tf_conflict", meta
 
     if premium_mtf and settings.execution_chart_premium_check_enabled:
-        for req in ("1m", "5m"):
-            pt = premium_mtf.get(req)
+        def _fade_bad(req: str, pt: Optional[TimeframeChartRead]) -> tuple[bool, str]:
+            if not pt:
+                return False, ""
             thresh = _premium_mtf_fade_threshold(
                 settings,
                 timeframe=req,
                 nifty_expiry_1m_relief=nifty_expiry_1m_relief,
             )
-            if pt and pt.direction == "BEARISH" and pt.momentumPct < thresh:
+            if pt.direction == "BEARISH" and pt.momentumPct < thresh:
                 if index_turn_fade_bypass and _index_turn_mtf_premium_shallow_ok(
                     pt,
                     settings,
                     premium_mtf=premium_mtf,
                     timeframe=req,
                 ):
-                    continue
-                meta["passed"] = False
-                return False, f"exec_mtf_premium_{req}_fading", meta
+                    return False, ""
+                return True, f"exec_mtf_premium_{req}_fading"
+            return False, ""
+
+        from app.engines.morning_exec_fade import morning_fade_meta, premium_mtf_fade_block_reason
+
+        block, fade_reason = premium_mtf_fade_block_reason(
+            premium_mtf, fade_check=_fade_bad, when=when,
+        )
+        if block:
+            meta["passed"] = False
+            meta.update(morning_fade_meta(when))
+            return False, fade_reason, meta
     if nifty_expiry_1m_relief:
         meta["niftyExpiry1mFadeRelief"] = True
     htf_ok, htf_reason = _premium_htf_oppose_allows_entry(

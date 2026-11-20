@@ -150,7 +150,13 @@ def premium_fading_blocks_entry(
             return False, "index_turn_shallow_fade_ok"
 
     min_mom = settings.execution_chart_min_premium_momentum_pct
-    if premium_momentum_5s < min_mom and premium_momentum_3s < 0:
+    from app.engines.morning_exec_fade import premium_live_fade_blocks_now
+
+    if premium_live_fade_blocks_now(
+        premium_momentum_3s=premium_momentum_3s,
+        premium_momentum_5s=premium_momentum_5s,
+        min_mom=min_mom,
+    ):
         if open_caution_bypass and premium_momentum_3s >= -0.08 and premium_momentum_5s >= min_mom - 0.35:
             return False, "open_caution_flat_momentum_ok"
         return True, "premium_fading_at_execution"

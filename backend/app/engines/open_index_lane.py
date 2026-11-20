@@ -283,6 +283,12 @@ def open_index_lane_summary(settings: Any = None) -> dict[str, Any]:
         ),
         "requireFirstLift": bool(getattr(settings, "open_index_lane_require_first_lift", True)),
         "minEliteScore": float(getattr(settings, "open_index_lane_min_elite_score", 90.0) or 90.0),
+        "structuralEliteWaiver": bool(
+            getattr(settings, "open_index_lane_structural_elite_waiver_enabled", True)
+        ),
+        "waiverMinEliteScore": float(
+            getattr(settings, "open_index_lane_waiver_min_elite_score", 78.0) or 78.0
+        ),
         "maxLocalBasePct": float(
             getattr(settings, "open_index_lane_max_local_base_pct", 15.0) or 15.0
         ),
@@ -294,6 +300,87 @@ def open_index_lane_summary(settings: Any = None) -> dict[str, Any]:
 def _alert_dict(candidate: Any) -> dict[str, Any]:
     alert = getattr(candidate, "alert", None)
     return alert if isinstance(alert, dict) else {}
+
+
+def open_index_lane_structural_elite_waiver(
+    candidate: Any,
+    alert: dict[str, Any],
+    ranking: dict[str, Any],
+    score: float,
+    min_score: float,
+    *,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """
+    Waive open_index_lane_elite_below_* when ELITE rip has structure confirm but blended score lags.
+    CE/PE symmetric — does not relax local-base chase cap on the lane.
+    """
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "open_index_lane_structural_elite_waiver_enabled", True)):
+        meta["laneEliteWaiverReason"] = "disabled"
+        return False, meta
+    floor = float(getattr(settings, "open_index_lane_waiver_min_elite_score", 78.0) or 78.0)
+    if score < floor - 1e-6:
+        meta["laneEliteWaiverReason"] = "score_below_floor"
+        meta["laneEliteWaiverFloor"] = floor
+        return False, meta
+    tier = str(alert.get("tier") or getattr(candidate, "tier", "") or "").upper()
+    if tier not in ("ELITE", "EXPLODING"):
+        meta["laneEliteWaiverReason"] = "tier"
+        return False, meta
+    min_grade = str(
+        getattr(settings, "open_index_lane_waiver_min_grade", "A") or "A"
+    ).upper()
+    grade = str(
+        (ranking or {}).get("grade") or alert.get("causalGrade") or ""
+    ).upper()
+    allowed_grades = {"S", "A"} if min_grade == "A" else {min_grade, "S", "A"}
+    if grade and grade not in allowed_grades:
+        meta["laneEliteWaiverReason"] = "grade"
+        return False, meta
+    snap = getattr(candidate, "snap", None)
+    side = str(alert.get("side") or getattr(candidate, "side", "") or "")
+    symbol = str(alert.get("symbol") or getattr(candidate, "symbol", "") or "")
+    structure_ok = False
+    if alert.get("indexContinuationRallyNearMissWaive"):
+        structure_ok = True
+        meta["laneEliteWaiverVia"] = "index_continuation_stamp"
+    elif snap is not None:
+        from app.engines.advanced_indicators import index_vwap_confirms_side
+        from app.engines.chart_structure_entry import chart_pivot_confirms_side
+        from app.models.schemas import Side
+
+        try:
+            side_e = Side(side) if side in ("CALL", "PUT") else side
+        except Exception:
+            side_e = side
+        vwap_ok = index_vwap_confirms_side(side_e, snap)
+        pivot_ok, pivot_meta = chart_pivot_confirms_side(side, snap)
+        meta.update(pivot_meta)
+        structure_ok = vwap_ok or pivot_ok
+        if vwap_ok:
+            meta["laneEliteWaiverVia"] = "vwap_reclaim"
+        elif pivot_ok:
+            meta["laneEliteWaiverVia"] = "pivot_p"
+    if not structure_ok:
+        meta["laneEliteWaiverReason"] = "no_structure_confirm"
+        return False, meta
+    first_lift = bool(
+        alert.get("ictFirstLift") or alert.get("firstLift") or alert.get("firstLiftCapture")
+    )
+    moment = str(alert.get("momentType") or "").lower()
+    if not first_lift and moment not in (
+        "v_rip_session_low",
+        "v_rip_session_high",
+        "armed_base_launch",
+        "first_lift_local_base",
+    ):
+        meta["laneEliteWaiverReason"] = "no_lift_moment"
+        return False, meta
+    meta["laneEliteWaiverScore"] = round(score, 2)
+    meta["laneEliteWaiverMinScore"] = min_score
+    return True, meta
 
 
 def _lane_quality_ok(candidate: Any, settings: Any) -> tuple[bool, str, dict[str, Any]]:
@@ -357,7 +444,19 @@ def _lane_quality_ok(candidate: Any, settings: Any) -> tuple[bool, str, dict[str
     meta["stage"] = stage
     min_score = float(getattr(settings, "open_index_lane_min_elite_score", 90.0) or 90.0)
     if score < min_score:
-        return False, f"open_index_lane_elite_below_{min_score:g}", meta
+        waived, waive_meta = open_index_lane_structural_elite_waiver(
+            candidate,
+            alert,
+            ranking,
+            score,
+            min_score,
+            settings=settings,
+        )
+        meta.update(waive_meta)
+        if waived:
+            meta["openIndexLaneStructuralEliteWaiver"] = True
+        else:
+            return False, f"open_index_lane_elite_below_{min_score:g}", meta
 
     local = float(
         alert.get("ictBaseRelativeMovePct")
