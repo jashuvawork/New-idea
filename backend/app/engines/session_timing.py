@@ -206,3 +206,23 @@ def in_regular_explosion_session_window() -> bool:
 def entry_window_label() -> str:
     settings = get_settings()
     return f"{settings.entry_earliest_hour:02d}:{settings.entry_earliest_minute:02d} IST"
+
+
+def in_morning_exec_fade_strict_window(when: datetime | None = None) -> bool:
+    """09:45–10:30 IST — require premium fade on both 1m-scale and 5m before blocking (PDF)."""
+    settings = get_settings()
+    if not bool(getattr(settings, "morning_exec_fade_two_bar_enabled", True)):
+        return False
+    if commodity_paper_evening_active():
+        return False
+    if when is None:
+        if get_market_phase() != "LIVE_MARKET":
+            return False
+        current = _minutes_now()
+    else:
+        current = _minutes_at(when)
+    start = entry_earliest_minutes()
+    end_h = int(getattr(settings, "morning_exec_fade_strict_until_hour", 10) or 10)
+    end_m = int(getattr(settings, "morning_exec_fade_strict_until_minute", 30) or 30)
+    end = end_h * 60 + end_m
+    return start <= current < end

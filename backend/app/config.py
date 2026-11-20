@@ -3362,6 +3362,12 @@ class Settings(BaseSettings):
     open_caution_structural_waiver_rally_frac: float = 0.5
     open_caution_structural_waiver_min_range_position: float = 0.30
     open_caution_structural_waiver_near_extreme_pct: float = 0.15
+    morning_exec_fade_two_bar_enabled: bool = True
+    morning_exec_fade_strict_until_hour: int = 10
+    morning_exec_fade_strict_until_minute: int = 30
+    open_index_lane_structural_elite_waiver_enabled: bool = True
+    open_index_lane_waiver_min_elite_score: float = 78.0
+    open_index_lane_waiver_min_grade: str = "A"
     open_caution_chart_structure_reclaim_waiver_enabled: bool = True
     open_caution_chart_reclaim_earliest_hour: int = 9
     open_caution_chart_reclaim_earliest_minute: int = 25
