@@ -2531,6 +2531,57 @@ def _defer_runner_profit_guard_for_vbase_runner(
     return gain_pct + 1e-6 < max_gain
 
 
+def _defer_runner_profit_guard_pre_tp_rung(
+    trade: PaperTrade,
+    *,
+    best: float,
+    settings: Any,
+) -> bool:
+    """Hold maxProfitCapture stage runners through tier-2 pullbacks until TP rung owns exits.
+
+    Oct 21 73300 PE peaks at +6.8% (tier 1 only) — the guard must still book green before
+    the adaptive stop. Nov 20 NIFTY 25600 CE peaked at +14% (tier 2) with ~3.5% of
+    projectedMaxTp — selling at tier-2 35% keep exited at +3.7pt while premium later ~103.
+    """
+    if not bool(getattr(settings, "runner_profit_guard_defer_pre_rung_enabled", True)):
+        return False
+    ctx = trade.entryContext or {}
+    from app.engines.moment_stage_trail import trade_uses_moment_stage_ladder
+
+    if not trade_uses_moment_stage_ladder(trade) or not ctx.get("maxProfitCapture"):
+        return False
+    best_f = float(best or 0)
+    rung_arm = _cfg_float(settings, "tp_rung_ladder_min_best_to_arm_exits", 28.0)
+    if best_f + 1e-6 >= rung_arm:
+        return False
+    entry = float(trade.entryPremium or 0)
+    if entry <= 0 or best_f <= 0:
+        return False
+    gain_pct = best_f / entry * 100.0
+    min_tier = _cfg_float(
+        settings, "runner_profit_guard_defer_pre_rung_min_tier_gain_pct", 12.0
+    )
+    if gain_pct + 1e-6 < min_tier:
+        return False
+    max_gain = _cfg_float(
+        settings, "runner_profit_guard_defer_pre_rung_max_gain_pct", 18.0
+    )
+    if gain_pct > max_gain + 1e-6:
+        return False
+    projected = float(
+        ctx.get("projectedMaxTp")
+        or ((ctx.get("exitPlan") or {}).get("projectedMaxTp"))
+        or 0
+    )
+    if projected > 0:
+        max_prog = _cfg_float(
+            settings, "runner_profit_guard_defer_pre_rung_max_progress_frac", 0.12
+        )
+        if (best_f / projected) + 1e-6 < max_prog:
+            return True
+    return gain_pct + 1e-6 < max_gain
+
+
 def runner_profit_guard_exit_reason(
     trade: PaperTrade,
     *,
@@ -2552,7 +2603,9 @@ def runner_profit_guard_exit_reason(
     floor_pts = runner_profit_guard_floor(trade, settings=settings, pnl_pts=pnl_pts)
     ctx = trade.entryContext if trade.entryContext is not None else {}
     pnl = float(pnl_pts or 0)
-    if _defer_runner_profit_guard_for_vbase_runner(trade, best=best, settings=settings):
+    if _defer_runner_profit_guard_for_vbase_runner(
+        trade, best=best, settings=settings
+    ) or _defer_runner_profit_guard_pre_tp_rung(trade, best=best, settings=settings):
         ctx.pop("runnerGuardBelowSince", None)
         trade.entryContext = ctx
         return None
