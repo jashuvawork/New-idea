@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from fastapi import HTTPException
 
+from app.config import get_settings
 from app.engines.auto_trader import (
     entries_execution_active,
     get_performance_analysis,
@@ -12,6 +13,7 @@ from app.engines.auto_trader import (
     reset_session,
     set_capital,
 )
+from app.engines.capital_allocator import get_capital_snapshot, resolve_daily_loss_stop_inr
 from app.models.schemas import CapitalConfig
 from app.services import trade_store
 
@@ -105,10 +107,43 @@ async def purge_trade_logs():
     }
 
 
+@router.get("/capital")
+async def get_trading_capital():
+    """Runtime sizing book + env fallbacks (for daily capital checks)."""
+    settings = get_settings()
+    snap = get_capital_snapshot()
+    env_book = float(
+        settings.max_sizing_capital_inr or settings.fallback_capital_inr or 0
+    )
+    runtime_book = float(snap.availableMarginInr or snap.totalEquityInr or 0)
+    aligned = env_book <= 0 or abs(runtime_book - env_book) <= 1.0
+    return {
+        "status": "ok",
+        "runtime": snap.to_dict(),
+        "env": {
+            "fallbackCapitalInr": settings.fallback_capital_inr,
+            "maxSizingCapitalInr": settings.max_sizing_capital_inr,
+            "perTradeCapitalPct": settings.per_trade_capital_pct,
+            "dailyLossStopCapitalPct": settings.daily_loss_stop_capital_pct,
+            "dailyLossStopInr": resolve_daily_loss_stop_inr(env_book),
+        },
+        "aligned": aligned,
+    }
+
+
 @router.post("/capital")
 async def set_trading_capital(config: CapitalConfig):
-    set_capital(config.allocatedInr)
-    return {"status": "ok", "allocatedInr": config.allocatedInr}
+    requested = float(config.allocatedInr)
+    set_capital(requested)
+    snap = get_capital_snapshot()
+    effective = float(snap.availableMarginInr or snap.totalEquityInr or 0)
+    return {
+        "status": "ok",
+        "requestedInr": requested,
+        "allocatedInr": effective,
+        "cappedByEnvBook": effective + 0.5 < requested,
+        "runtime": snap.to_dict(),
+    }
 
 
 @router.get("/history")
