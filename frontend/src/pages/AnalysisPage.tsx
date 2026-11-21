@@ -160,9 +160,10 @@ function CapitalAlignmentCallout({
         {perTrade != null
           ? `. Per-trade sleeve is ₹${perTrade.toLocaleString('en-IN')} (${Math.round(perTradePct * 100)}% of book) — that is expected and not a mismatch.`
           : '.'}{' '}
-        Align with POST <span className="font-mono text-nexus-accent">/api/auto-trader/capital</span> or{' '}
-        <span className="font-mono text-nexus-accent">deploy/set-paper-capital.sh</span> on EC2 so env and runtime match
-        after restart.
+        Set today&apos;s book on EC2:{' '}
+        <span className="font-mono text-nexus-accent">deploy/set-daily-capital.sh</span> (see{' '}
+        <span className="font-mono text-nexus-accent">deploy/DAILY-CAPITAL.md</span>) or POST{' '}
+        <span className="font-mono text-nexus-accent">/api/auto-trader/capital</span>.
       </p>
     </div>
   );

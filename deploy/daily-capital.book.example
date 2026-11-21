@@ -1,0 +1,4 @@
+# Copy to EC2: /opt/nexusquant/daily-capital.book
+# One integer per line — the sizing book for today (INR).
+# Then: sudo bash deploy/set-daily-capital.sh
+45000

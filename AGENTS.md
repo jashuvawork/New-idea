@@ -93,6 +93,7 @@ When production changes function signatures or adds gate fields:
   ```
 - **Upstox:** token expires **03:30 IST** daily — re-login before open via `/api/upstox/login-url`.
 - **50-trade milestone:** `POST /api/auto-trader/milestone/reset` archives batch; does **not** delete trade logs.
+- **Daily sizing book:** Before the open, set today’s capital once — `echo <INR> | sudo tee /opt/nexusquant/daily-capital.book` then `sudo bash deploy/set-daily-capital.sh`. See `deploy/DAILY-CAPITAL.md`. Verify with `GET /api/auto-trader/capital` (runtime vs env `aligned`).
 
 ### PR / agent hygiene
 
