@@ -3,7 +3,7 @@
 #
 # Usage:
 #   sudo bash deploy/set-capital-book.sh
-#   CAPITAL_BOOK_INR=39000 sudo bash deploy/set-capital-book.sh
+#   CAPITAL_BOOK_INR=45000 sudo bash deploy/set-capital-book.sh
 #
 set -euo pipefail
 
@@ -27,7 +27,7 @@ _template_value() {
   printf '%s' "${line#*=}"
 }
 
-CAPITAL_BOOK_INR="${CAPITAL_BOOK_INR:-$(_template_value FALLBACK_CAPITAL_INR || echo 39000)}"
+CAPITAL_BOOK_INR="${CAPITAL_BOOK_INR:-$(_template_value FALLBACK_CAPITAL_INR || echo 45000)}"
 
 _set_env_key() {
   local key="$1"
