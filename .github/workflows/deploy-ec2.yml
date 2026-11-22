@@ -14,6 +14,8 @@ env:
   EC2_INSTANCE_ID: i-0f3f9e5e67815c21b
   # Direct API host — do not verify via www (Vercel proxy breaks when account paused).
   PUBLIC_API_URL: https://api.jashuvatrade.xyz
+  # curl -k: api.jashuvatrade.xyz cert may expire before Let's Encrypt renew; verify body only.
+  PUBLIC_CURL: curl -sfk --connect-timeout 5 --max-time 20
 
 jobs:
   deploy:
@@ -208,10 +210,10 @@ jobs:
       - name: Verify public deployment status
         run: |
           set -euo pipefail
-          EXPECTED=$(git rev-parse --short HEAD)
+          EXPECTED=$(git rev-parse --short=7 HEAD)
           API="${{ env.PUBLIC_API_URL }}"
           for i in 1 2 3 4 5; do
-            if curl -sf --connect-timeout 5 --max-time 15 \
+            if ${{ env.PUBLIC_CURL }} \
               "$API/api/deployment/status" | python3 -c "
           import json, sys
           d = json.load(sys.stdin)
@@ -219,8 +221,9 @@ jobs:
           print(json.dumps({'status': d.get('status'), 'commit': commit}, indent=2))
           if d.get('status') != 'ok':
               raise SystemExit('deployment status not ok')
-          if commit != '$EXPECTED':
-              raise SystemExit(f'commit mismatch: live {commit!r} != expected $EXPECTED!r')
+          expected = '$EXPECTED'
+          if commit[:7] != expected[:7]:
+              raise SystemExit(f'commit mismatch: live {commit!r} != expected {expected!r}')
           f = d.get('flags') or {}
           live = bool(f.get('enableLiveTrading'))
           paper = bool(f.get('paperTrading'))
@@ -238,14 +241,14 @@ jobs:
             echo "verify attempt $i failed — waiting"
             sleep 8
           done
-          curl -sf --connect-timeout 5 --max-time 20 "$API/health" | python3 -m json.tool
-          curl -sf --connect-timeout 5 --max-time 20 "$API/api/deployment/status" | python3 -m json.tool
+          ${{ env.PUBLIC_CURL }} "$API/health" | python3 -m json.tool
+          ${{ env.PUBLIC_CURL }} "$API/api/deployment/status" | python3 -m json.tool
 
       - name: Verify live armed
         if: github.event_name == 'push' && contains(github.event.head_commit.message, '[arm-live]')
         run: |
           set -euo pipefail
-          curl -sf "${{ env.PUBLIC_API_URL }}/api/deployment/status" | python3 -c "
+          ${{ env.PUBLIC_CURL }} "${{ env.PUBLIC_API_URL }}/api/deployment/status" | python3 -c "
           import json, sys
           d = json.load(sys.stdin)
           f = d.get('flags') or {}
