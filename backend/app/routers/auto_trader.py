@@ -90,6 +90,27 @@ async def reset_paper_session():
     }
 
 
+@router.post("/flatten-strategy")
+async def flatten_strategy_opens(reason: str = "broker_reconcile_flat"):
+    """
+  Mark all OPEN strategy legs closed without sending broker exit orders.
+  Use when Upstox is already flat but the bot still tracks reconciliation orphans.
+  Does not delete trade archives (unlike purge-logs).
+    """
+    from app.services import trade_store
+
+    closed_ids = trade_store.close_open_trades_on_reset(reason=reason)
+    reset_session(preserve_open_trades=False)
+    state = get_state()
+    return {
+        "status": "ok",
+        "message": "Strategy opens flattened — broker orders not sent",
+        "exitReason": reason,
+        "closedIds": closed_ids,
+        "openTradesRemaining": len(state.openPaperTrades),
+    }
+
+
 @router.post("/purge-logs")
 async def purge_trade_logs():
     """Wipe all trade archives + log, reset session and milestone — unblocks stale gates."""
