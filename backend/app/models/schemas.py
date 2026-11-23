@@ -368,6 +368,7 @@ class AutoTraderState(BaseModel):
     dailyStrategy: dict[str, Any] = {}
     lastEntry: Optional[dict[str, Any]] = None
     lastExit: Optional[dict[str, Any]] = None
+    postExitMonitors: dict[str, Any] = {}
     liveOrdersPlaced: int = 0
     # BUILDING LTP monitor scoreboard — every watched name scored; best ready wins.
     buildingLtpMonitor: dict[str, Any] = {}

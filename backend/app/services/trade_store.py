@@ -427,6 +427,44 @@ def record_trade_report(report: dict[str, Any]) -> None:
     _append_log("TRADE_REPORT", {"report": report})
 
 
+def merge_closed_trade_post_exit_monitor(
+    trade_id: str,
+    session_date: str,
+    monitor: dict[str, Any],
+) -> None:
+    """Attach finalized post-exit LTP audit to the closed trade day file."""
+    if not trade_id or not session_date:
+        return
+    data = _load_day(session_date)
+    trades = data.get("trades") or []
+    for row in trades:
+        if str(row.get("id")) != str(trade_id):
+            continue
+        ctx = row.get("entryContext")
+        if not isinstance(ctx, dict):
+            ctx = {}
+        ctx = dict(ctx)
+        ctx["postExitLtpMonitor"] = monitor
+        row["entryContext"] = ctx
+        row["postExitLtpMonitor"] = monitor
+        _save_day(session_date, data)
+        return
+
+
+def record_post_exit_monitor_report(monitor: dict[str, Any]) -> None:
+    """Append post-exit peak summary (one line per finalized watch)."""
+    trade_id = str(monitor.get("tradeId") or "")
+    closed = str(monitor.get("closedAt") or "")[:10]
+    date = closed if len(closed) == 10 else _today()
+    entry = {"ts": _now().isoformat(), "type": "post_exit_ltp_monitor", **monitor}
+    line = json.dumps(entry, default=str, separators=(",", ":"))
+    try:
+        with open(_reports_file(date), "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except Exception as e:
+        logger.error("Failed to write post-exit monitor report: %s", e)
+
+
 def get_trade_reports(
     *,
     date: Optional[str] = None,
