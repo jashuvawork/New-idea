@@ -58,7 +58,7 @@ def test_production_template_uses_bounded_loss_policy():
     assert env["EXPLOSION_EXCEPTIONAL_PER_TRADE_MAX_LOSS_INR"] == "4000"
     assert env["ENTRY_TIMING_STRUCTURED_COLD_MIN_VELOCITY_3S"] == "0.5"
     assert env["ENTRY_TIMING_STRUCTURED_COLD_MAX_LOTS"] == "false"
-    assert env["EXPLOSION_FAILED_LAUNCH_EXIT_ENABLED"] == "true"
+    assert env["EXPLOSION_FAILED_LAUNCH_EXIT_ENABLED"] == "false"
     assert env["EXPLOSION_FAILED_LAUNCH_MIN_HOLD_SECONDS"] == "60"
     assert env["EXPLOSION_FAILED_LAUNCH_ALLOW_WITH_SL_ONLY"] == "true"
     assert env["CAPITAL_TIER_ENTRY_SYMBOLS_ENABLED"] == "false"
