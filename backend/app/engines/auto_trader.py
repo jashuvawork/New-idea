@@ -4037,6 +4037,9 @@ async def _process_open_trades(
         report["sessionDate"] = trade.sessionDate or datetime.now(IST).strftime("%Y-%m-%d")
         await asyncio.to_thread(trade_store.record_trade_closed, trade, ctx)
         await asyncio.to_thread(ts.record_trade_report, report)
+        from app.engines.post_exit_ltp_monitor import register_post_exit_watch
+
+        register_post_exit_watch(trade, exit_premium=eval_premium)
         get_ai_learning().record_trade_close(trade)
         state.lastExit = {
             "tradeId": trade.id,
@@ -4079,6 +4082,10 @@ async def process_exits_only(
     state.skipped = exit_skipped
     state.dailyReport = _calibration.build_report(state.closedPaperTrades)
     _risk_engine.update_daily_pnl(compute_session_pnl(state))
+    from app.engines.post_exit_ltp_monitor import post_exit_monitor_hud, tick_post_exit_monitors
+
+    tick_post_exit_monitors(snapshots)
+    state.postExitMonitors = post_exit_monitor_hud()
     return state
 
 
@@ -5367,6 +5374,10 @@ async def _process_locked(
         except Exception:
             pass
 
+    from app.engines.post_exit_ltp_monitor import post_exit_monitor_hud, tick_post_exit_monitors
+
+    tick_post_exit_monitors(snapshots)
+    state.postExitMonitors = post_exit_monitor_hud()
     return state
 
 

@@ -187,6 +187,11 @@ class Settings(BaseSettings):
     # Stored on the trade as entryContext.entryLtpMultipleCaptures for closed-trade / HUD review.
     trade_entry_multiple_capture_enabled: bool = True
     trade_entry_multiple_capture_max_n: int = 20
+    # After each close, track contract LTP for N seconds and flag early exits vs peak.
+    post_exit_ltp_monitor_enabled: bool = True
+    post_exit_ltp_monitor_seconds: int = 5400
+    post_exit_ltp_monitor_early_min_points: float = 5.0
+    post_exit_ltp_monitor_early_min_missed_n: int = 1
     entry_scan_interval_ms: int = 1000
     expiry_entry_scan_interval_ms: int = 500
     # Runner velocity compares consecutive snapshots only while the feed is fresh.
