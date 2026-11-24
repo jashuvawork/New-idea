@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from threading import Lock
 from typing import Any, Optional
@@ -37,9 +38,13 @@ class PostExitWatch:
     monitor_until: datetime
     session_date: str
     while_open_max_ltp: float
+    instrument_key: Optional[str] = None
     post_exit_peak_ltp: float = 0.0
     post_exit_peak_at: Optional[datetime] = None
     ticks: int = 0
+    tape_scans: int = 0
+    last_tape_scan_mono: float = 0.0
+    peak_from_tape: bool = False
     finalized: bool = False
 
     def monitor_payload(self, *, settings: Settings) -> dict[str, Any]:
@@ -81,8 +86,65 @@ class PostExitWatch:
             "closedAt": self.closed_at.isoformat(),
             "peakAt": self.post_exit_peak_at.isoformat() if self.post_exit_peak_at else None,
             "monitorTicks": self.ticks,
+            "tapeScans": self.tape_scans,
+            "peakFromTape": self.peak_from_tape,
             "finalizedAt": datetime.now(IST).isoformat(),
         }
+
+
+def _trade_like(watch: PostExitWatch) -> dict[str, Any]:
+    return {
+        "symbol": watch.symbol,
+        "side": watch.side,
+        "strike": watch.strike,
+        "entryPremium": watch.entry_premium,
+    }
+
+
+def _note_peak(watch: PostExitWatch, ltp: float, when: datetime, *, from_tape: bool = False) -> None:
+    if ltp > watch.post_exit_peak_ltp + 1e-6:
+        watch.post_exit_peak_ltp = ltp
+        watch.post_exit_peak_at = when
+        if from_tape:
+            watch.peak_from_tape = True
+
+
+def _resolve_live_ltp(
+    watch: PostExitWatch,
+    snap: Optional[SymbolSnapshot],
+    *,
+    settings: Settings,
+) -> Optional[float]:
+    if not snap:
+        return None
+    side = Side.PUT if watch.side == "PUT" else Side.CALL
+    ws_age = float(
+        getattr(settings, "post_exit_ltp_ws_max_age_seconds", 45.0) or 45.0
+    )
+    return resolve_trade_premium(
+        snap,
+        watch.strike,
+        side,
+        watch.instrument_key,
+        max_age_seconds=ws_age,
+    )
+
+
+def _scan_tape_peak_locked(watch: PostExitWatch, *, settings: Settings, until: datetime) -> None:
+    from app.engines.nx_exit_audit import tape_contract_peak_after_close
+
+    tail = int(getattr(settings, "post_exit_ltp_tape_tail_bytes", 8_388_608) or 0)
+    peak = tape_contract_peak_after_close(
+        watch.session_date,
+        _trade_like(watch),
+        watch.closed_at,
+        until=min(until, watch.monitor_until),
+        max_bytes=tail if tail > 0 else 0,
+    )
+    watch.tape_scans += 1
+    watch.last_tape_scan_mono = time.monotonic()
+    if peak > 0:
+        _note_peak(watch, peak, until, from_tape=True)
 
 
 def register_post_exit_watch(trade: PaperTrade, *, exit_premium: Optional[float] = None) -> None:
@@ -106,6 +168,7 @@ def register_post_exit_watch(trade: PaperTrade, *, exit_premium: Optional[float]
     )
     side = trade.side.value if hasattr(trade.side, "value") else str(trade.side)
     exit_p = float(exit_premium if exit_premium is not None else trade.currentPremium or 0)
+    instrument_key = str(ctx.get("instrumentKey") or "") or None
     watch = PostExitWatch(
         trade_id=str(trade.id),
         symbol=str(trade.symbol).upper(),
@@ -119,6 +182,7 @@ def register_post_exit_watch(trade: PaperTrade, *, exit_premium: Optional[float]
         monitor_until=closed + timedelta(seconds=dur),
         session_date=trade.sessionDate or closed.strftime("%Y-%m-%d"),
         while_open_max_ltp=while_peak,
+        instrument_key=instrument_key,
         post_exit_peak_ltp=exit_p,
         post_exit_peak_at=closed,
     )
@@ -141,24 +205,58 @@ def tick_post_exit_monitors(snapshots: dict[str, SymbolSnapshot]) -> list[dict[s
         return []
     now = datetime.now(IST)
     finalized: list[dict[str, Any]] = []
+    scan_iv = float(
+        getattr(settings, "post_exit_ltp_tape_scan_seconds", 30.0) or 30.0
+    )
+    scan_iv = max(5.0, min(scan_iv, 300.0))
+    mono = time.monotonic()
     with _lock:
         for trade_id, watch in list(_active.items()):
             if watch.finalized:
                 continue
             snap = snapshots.get(watch.symbol)
-            ltp: Optional[float] = None
-            if snap:
-                side = Side.PUT if watch.side == "PUT" else Side.CALL
-                ltp = resolve_trade_premium(
-                    snap, watch.strike, side, max_age_seconds=5.0
-                )
-            if ltp is not None and ltp > watch.post_exit_peak_ltp + 1e-6:
-                watch.post_exit_peak_ltp = ltp
-                watch.post_exit_peak_at = now
+            ltp = _resolve_live_ltp(watch, snap, settings=settings)
             if ltp is not None:
+                _note_peak(watch, ltp, now)
                 watch.ticks += 1
+            elif (
+                mono - watch.last_tape_scan_mono >= scan_iv
+                or watch.last_tape_scan_mono <= 0
+            ):
+                try:
+                    _scan_tape_peak_locked(watch, settings=settings, until=now)
+                except Exception as exc:
+                    logger.debug("Post-exit tape scan failed trade=%s: %s", trade_id, exc)
             if now >= watch.monitor_until:
+                _scan_tape_peak_locked(watch, settings=settings, until=now)
                 finalized.append(_finalize_watch_locked(watch, settings=settings))
+    return finalized
+
+
+def flush_post_exit_monitors_if_session_closed() -> list[dict[str, Any]]:
+    """Finalize active watches when the cash session is over (no more tick-fast path)."""
+    from app.services.upstox import get_market_phase
+
+    phase = get_market_phase()
+    if phase in ("LIVE_MARKET", "POST_MARKET"):
+        return []
+    return finalize_all_post_exit_monitors()
+
+
+def finalize_all_post_exit_monitors() -> list[dict[str, Any]]:
+    """Force-finalize every active watch (restart / session-end safety)."""
+    settings = get_settings()
+    now = datetime.now(IST)
+    finalized: list[dict[str, Any]] = []
+    with _lock:
+        for watch in list(_active.values()):
+            if watch.finalized:
+                continue
+            try:
+                _scan_tape_peak_locked(watch, settings=settings, until=now)
+            except Exception as exc:
+                logger.debug("Post-exit tape finalize scan failed trade=%s: %s", watch.trade_id, exc)
+            finalized.append(_finalize_watch_locked(watch, settings=settings))
     return finalized
 
 

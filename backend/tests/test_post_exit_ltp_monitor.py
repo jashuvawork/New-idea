@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.engines.post_exit_ltp_monitor import (
+    finalize_all_post_exit_monitors,
     post_exit_monitor_hud,
     register_post_exit_watch,
     tick_post_exit_monitors,
@@ -130,4 +131,68 @@ def test_finalize_flags_early_exit(mock_settings):
     assert finalized
     assert finalized[0]["earlyExitLikely"] is True
     assert finalized[0]["missedPointsAfterExit"] >= 50
+    merge.assert_called_once()
+
+
+@patch("app.engines.post_exit_ltp_monitor.get_settings")
+def test_tape_fallback_when_live_ltp_missing(mock_settings):
+    s = MagicMock()
+    s.post_exit_ltp_monitor_enabled = True
+    s.post_exit_ltp_monitor_seconds = 120
+    s.trade_entry_multiple_capture_max_n = 20
+    s.post_exit_ltp_monitor_early_min_points = 5.0
+    s.post_exit_ltp_monitor_early_min_missed_n = 1
+    s.post_exit_ltp_tape_tail_bytes = 1_048_576
+    s.post_exit_ltp_tape_scan_seconds = 0.0
+    s.post_exit_ltp_ws_max_age_seconds = 45.0
+    mock_settings.return_value = s
+
+    import app.engines.post_exit_ltp_monitor as mod
+
+    trade = _trade(exit_prem=69.85)
+    trade.closedAt = datetime.now(IST)
+    trade.entryContext = {"instrumentKey": "NSE_FO|12345"}
+    register_post_exit_watch(trade, exit_premium=69.85)
+    with (
+        patch(
+            "app.engines.post_exit_ltp_monitor.resolve_trade_premium",
+            return_value=None,
+        ),
+        patch(
+            "app.engines.nx_exit_audit.tape_contract_peak_after_close",
+            return_value=180.0,
+        ),
+    ):
+        tick_post_exit_monitors({"NIFTY": _snap()})
+    hud = post_exit_monitor_hud()
+    assert hud["active"][0]["postExitPeakLtp"] == 180.0
+
+
+@patch("app.engines.post_exit_ltp_monitor.get_settings")
+def test_finalize_all_persists_tape_peak(mock_settings):
+    s = MagicMock()
+    s.post_exit_ltp_monitor_enabled = True
+    s.post_exit_ltp_monitor_seconds = 3600
+    s.trade_entry_multiple_capture_max_n = 20
+    s.post_exit_ltp_monitor_early_min_points = 5.0
+    s.post_exit_ltp_monitor_early_min_missed_n = 1
+    s.post_exit_ltp_tape_tail_bytes = 1_048_576
+    mock_settings.return_value = s
+
+    trade = _trade(exit_prem=69.85)
+    trade.closedAt = datetime.now(IST) - timedelta(minutes=5)
+    register_post_exit_watch(trade, exit_premium=69.85)
+    with (
+        patch(
+            "app.engines.nx_exit_audit.tape_contract_peak_after_close",
+            return_value=125.0,
+        ),
+        patch("app.services.trade_store.merge_closed_trade_post_exit_monitor") as merge,
+        patch("app.services.trade_store.record_post_exit_monitor_report"),
+        patch("app.services.radar_learning.record_funnel_event"),
+    ):
+        finalized = finalize_all_post_exit_monitors()
+    assert len(finalized) == 1
+    assert finalized[0]["postExitPeakLtp"] == 125.0
+    assert finalized[0]["peakFromTape"] is True
     merge.assert_called_once()

@@ -4082,9 +4082,14 @@ async def process_exits_only(
     state.skipped = exit_skipped
     state.dailyReport = _calibration.build_report(state.closedPaperTrades)
     _risk_engine.update_daily_pnl(compute_session_pnl(state))
-    from app.engines.post_exit_ltp_monitor import post_exit_monitor_hud, tick_post_exit_monitors
+    from app.engines.post_exit_ltp_monitor import (
+        flush_post_exit_monitors_if_session_closed,
+        post_exit_monitor_hud,
+        tick_post_exit_monitors,
+    )
 
     tick_post_exit_monitors(snapshots)
+    flush_post_exit_monitors_if_session_closed()
     state.postExitMonitors = post_exit_monitor_hud()
     return state
 
@@ -5374,9 +5379,14 @@ async def _process_locked(
         except Exception:
             pass
 
-    from app.engines.post_exit_ltp_monitor import post_exit_monitor_hud, tick_post_exit_monitors
+    from app.engines.post_exit_ltp_monitor import (
+        flush_post_exit_monitors_if_session_closed,
+        post_exit_monitor_hud,
+        tick_post_exit_monitors,
+    )
 
     tick_post_exit_monitors(snapshots)
+    flush_post_exit_monitors_if_session_closed()
     state.postExitMonitors = post_exit_monitor_hud()
     return state
 

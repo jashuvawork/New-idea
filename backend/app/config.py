@@ -192,6 +192,10 @@ class Settings(BaseSettings):
     post_exit_ltp_monitor_seconds: int = 5400
     post_exit_ltp_monitor_early_min_points: float = 5.0
     post_exit_ltp_monitor_early_min_missed_n: int = 1
+    # Tail-read premium tape when WS/snapshot LTP is missing after exit.
+    post_exit_ltp_tape_tail_bytes: int = 8_388_608
+    post_exit_ltp_tape_scan_seconds: float = 30.0
+    post_exit_ltp_ws_max_age_seconds: float = 45.0
     entry_scan_interval_ms: int = 1000
     expiry_entry_scan_interval_ms: int = 500
     # Runner velocity compares consecutive snapshots only while the feed is fresh.
