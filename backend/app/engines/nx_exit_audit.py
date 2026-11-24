@@ -77,18 +77,26 @@ def _match_contract(contract: dict[str, Any], trade: dict[str, Any]) -> bool:
     return abs(_number(contract.get("strike")) - strike) <= 0.5
 
 
-def _post_exit_tape_peak(
+def tape_contract_peak_after_close(
     date: str,
     trade: dict[str, Any],
     closed_at: datetime,
     *,
-    max_n: int,
-) -> tuple[float, int]:
+    until: datetime | None = None,
+    max_bytes: int = 0,
+) -> float:
     """Max sanitized LTP on premium tape strictly after ``closed_at`` for this contract."""
     peak = 0.0
-    for batch in read_premium_tape(date):
+    batches = (
+        read_premium_tape(date, max_bytes=max_bytes)
+        if max_bytes and max_bytes > 0
+        else read_premium_tape(date)
+    )
+    for batch in batches:
         ts = _parse_ts(batch.get("ts"))
         if ts is None or ts <= closed_at:
+            continue
+        if until is not None and ts > until:
             continue
         for contract in batch.get("contracts") or []:
             if not isinstance(contract, dict):
@@ -98,6 +106,17 @@ def _post_exit_tape_peak(
             prem = _number(contract.get("premium"))
             if prem > peak:
                 peak = prem
+    return peak
+
+
+def _post_exit_tape_peak(
+    date: str,
+    trade: dict[str, Any],
+    closed_at: datetime,
+    *,
+    max_n: int,
+) -> tuple[float, int]:
+    peak = tape_contract_peak_after_close(date, trade, closed_at)
     entry = _number(trade.get("entryPremium"))
     post_n = _highest_n_multiple(entry, peak, max_n=max_n) if peak > 0 else 0
     return peak, post_n
