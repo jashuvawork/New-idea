@@ -4793,18 +4793,29 @@ async def _process_locked(
     # Try new entries — best setup only, max lots on 85% sizing capital
     entries_ok, entry_window_reason = entries_allowed_now()
     explosion_early_ok, _ = explosion_entries_allowed_now()
-    if market_live and not entries_ok and not explosion_early_ok:
+    from app.engines.open_setup_shadow import open_setup_shadow_select_active
+
+    open_shadow_active, open_shadow_reason = open_setup_shadow_select_active()
+    force_open_setup_shadow = open_shadow_active and not entries_ok and not explosion_early_ok
+    if market_live and not entries_ok and not explosion_early_ok and not open_shadow_active:
         skipped.append({
             "symbol": "SESSION",
             "reason": entry_window_reason,
             "message": f"Entries from {entry_window_label()} — skipping open auction minute",
+        })
+    elif force_open_setup_shadow:
+        skipped.append({
+            "symbol": "SESSION",
+            "reason": open_shadow_reason,
+            "message": "Open book 09:15–09:45 — shadow SELECT + funnel (no orders until entry earliest)",
+            "openSetupShadow": True,
         })
 
     if (
         settings.auto_trading_enabled
         and market_live
         and profit_gate.newEntriesAllowed
-        and (entries_ok or explosion_early_ok)
+        and (entries_ok or explosion_early_ok or open_shadow_active)
     ):
         standdown = False
         paused, pause_reason, pause_meta = resolve_session_entry_pause(snapshots)
@@ -4945,7 +4956,8 @@ async def _process_locked(
             and (power_ok or session_lift)
             and (policy != "PAUSED" or session_lift)
         )
-        if session_entries_ok:
+        run_candidate_loop = session_entries_ok or force_open_setup_shadow
+        if run_candidate_loop:
             allocation_enabled = bool(
                 getattr(settings, "ftv_ranked_allocation_enabled", True)
             )
@@ -5043,6 +5055,24 @@ async def _process_locked(
                     snapshots=snapshots,
                 )
                 if not setup_ok:
+                    if force_open_setup_shadow:
+                        await _record_funnel_event_safe(
+                            {
+                                "event": "GATED",
+                                "key": radar_key,
+                                "symbol": best.symbol.upper(),
+                                "side": best.side.value,
+                                "strike": best.strike,
+                                "stage": "open_setup_shadow",
+                                "cycleId": cycle_id,
+                                "reason": setup_reason,
+                                "selectionMode": best.mode,
+                                "selectionScore": best.score,
+                                "tier": getattr(best, "tier", None),
+                                "openSetupShadow": True,
+                                "openSetupGuard": setup_meta,
+                            }
+                        )
                     skipped.append(
                         {
                             "symbol": best.symbol,
@@ -5062,6 +5092,24 @@ async def _process_locked(
                     best.symbol, best.side, snapshots.get(best.symbol), settings=settings,
                 )
                 if open_blocked:
+                    if force_open_setup_shadow:
+                        await _record_funnel_event_safe(
+                            {
+                                "event": "GATED",
+                                "key": radar_key,
+                                "symbol": best.symbol.upper(),
+                                "side": best.side.value,
+                                "strike": best.strike,
+                                "stage": "open_setup_shadow",
+                                "cycleId": cycle_id,
+                                "reason": open_reason,
+                                "selectionMode": best.mode,
+                                "selectionScore": best.score,
+                                "tier": getattr(best, "tier", None),
+                                "openSetupShadow": True,
+                                "openSideConfirmation": open_meta,
+                            }
+                        )
                     skipped.append(
                         {
                             "symbol": best.symbol,
@@ -5173,6 +5221,48 @@ async def _process_locked(
                 selected_ranking = (
                     (best.pretrade_meta or {}).get("causalRanking") or {}
                 )
+                if force_open_setup_shadow:
+                    from app.engines.open_setup_shadow import (
+                        assess_open_setup_shadow_preorder,
+                        build_open_setup_shadow_events,
+                    )
+                    from app.engines.session_mode_feedback import fresh_base_funnel_fields
+
+                    fresh_fb = fresh_base_funnel_fields(
+                        pretrade_meta=(best.pretrade_meta or {}),
+                        elite_assessment=(
+                            ((best.pretrade_meta or {}).get("topMomentGate") or {}).get(
+                                "eliteAssessment"
+                            )
+                            or {}
+                        ),
+                    )
+                    would_ok, would_reason, shadow_meta = assess_open_setup_shadow_preorder(
+                        best, state, snapshots=snapshots,
+                    )
+                    for evt in build_open_setup_shadow_events(
+                        best,
+                        cycle_id=cycle_id,
+                        radar_key=radar_key,
+                        would_ok=would_ok,
+                        would_reason=would_reason,
+                        shadow_meta=shadow_meta,
+                        selected_ranking=selected_ranking,
+                    ):
+                        evt.update(fresh_fb)
+                        await _record_funnel_event_safe(evt)
+                    if not would_ok:
+                        skipped.append({
+                            "symbol": best.symbol,
+                            "side": best.side.value,
+                            "strike": best.strike,
+                            "reason": would_reason,
+                            "mode": best.mode,
+                            "score": best.score,
+                            "tier": getattr(best, "tier", None),
+                            "openSetupShadow": True,
+                        })
+                    continue
                 entry_claim = _try_claim_entry(radar_key)
                 if entry_claim is None:
                     reason = "entry_preorder_claim_conflict"

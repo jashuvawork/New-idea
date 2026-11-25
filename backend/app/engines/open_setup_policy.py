@@ -179,11 +179,14 @@ def open_setup_policy_status(settings: Any = None) -> dict[str, Any]:
     ok, drift = verify_open_setup_policy(settings)
     confirmed = str(getattr(settings, "open_setup_policy_confirmed_session", "") or "").strip()
     paper_parity = bool(getattr(settings, "paper_live_parity_enabled", True))
+    from app.engines.open_setup_shadow import open_setup_shadow_summary
+
     return {
         "policyId": OPEN_SETUP_POLICY_ID,
         "aligned": ok,
         "drift": drift,
         "confirmedSession": confirmed or None,
+        "openSetupShadow": open_setup_shadow_summary(settings),
         "readyForLiveOpenBook": ok and bool(confirmed),
         "readyForLiveSessionBooks": ok and bool(confirmed),
         "execution": {
