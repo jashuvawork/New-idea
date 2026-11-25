@@ -2329,6 +2329,19 @@ def peak_velocity_reversal_keep_reason(
     return None
 
 
+def _never_green_min_hold_seconds(trade: PaperTrade, settings: Any) -> float:
+    """Minimum hold before never-green hard stop — longer on ELITE/EXPLODING."""
+    base = _cfg_float(settings, "never_green_hard_stop_min_hold_seconds", 300.0)
+    ctx = getattr(trade, "entryContext", None) or {}
+    tier = str(ctx.get("explosionTier") or "").upper()
+    if tier in ("ELITE", "EXPLODING"):
+        elite = _cfg_float(
+            settings, "never_green_hard_stop_elite_min_hold_seconds", 600.0
+        )
+        return max(base, elite)
+    return base
+
+
 def never_green_hard_stop_reason(
     trade: PaperTrade,
     *,
@@ -2342,8 +2355,8 @@ def never_green_hard_stop_reason(
 
     The elite min-hold (600s) defers ``adaptive_stop_loss``. This stop is not
     deferred and is the same for CALL and PUT. It waits
-    ``never_green_hard_stop_min_hold_seconds`` (300) so a dip that then goes
-    green is left alone.
+    ``never_green_hard_stop_min_hold_seconds`` (300; ELITE up to 900) so a dip
+    that then goes green is left alone.
     """
     settings = settings or get_settings()
     if getattr(settings, "never_green_hard_stop_enabled", False) is not True:
@@ -2357,7 +2370,8 @@ def never_green_hard_stop_reason(
     stop_points = float(stop_points or 0)
     if stop_points <= 0:
         return None
-    if hold_seconds < _cfg_float(settings, "never_green_hard_stop_min_hold_seconds", 300.0):
+    min_hold = _never_green_min_hold_seconds(trade, settings)
+    if hold_seconds < min_hold:
         return None
     green_max = max(
         0.5,
