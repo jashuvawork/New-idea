@@ -150,13 +150,12 @@ def premium_fading_blocks_entry(
             return False, "index_turn_shallow_fade_ok"
         # Nov25 SENSEX 84000 @ 10:19: index session rally turn armed but 1m premium
         # mom3 printed ~-39% (tick/series skew) while the 5m leg was launching.
+        # Day mode MOMENTUM RALLY only — not in_momentum_rally_window() (that OR let
+        # afternoon chop bypass all fade floors). Require 5m not collapsing + mom3 floor.
         if bool(
             getattr(settings, "momentum_rally_index_turn_trust_premium_fade", True)
         ):
-            from app.engines.chop_day_guards import (
-                in_momentum_rally_window,
-                resolve_chop_day_mode_from_state,
-            )
+            from app.engines.chop_day_guards import resolve_chop_day_mode_from_state
 
             dm = ""
             try:
@@ -165,8 +164,28 @@ def premium_fading_blocks_entry(
                 dm = resolve_chop_day_mode_from_state(get_state()).strip().upper()
             except Exception:
                 dm = ""
-            if dm == "MOMENTUM RALLY" or in_momentum_rally_window():
-                return False, "momentum_rally_index_turn_fade_ok"
+            if dm == "MOMENTUM RALLY":
+                mom5_floor = float(
+                    getattr(
+                        settings,
+                        "momentum_rally_index_turn_trust_min_mom5_pct",
+                        -0.35,
+                    )
+                    or -0.35
+                )
+                mom3_floor = float(
+                    getattr(
+                        settings,
+                        "momentum_rally_index_turn_trust_min_mom3_pct",
+                        -0.55,
+                    )
+                    or -0.55
+                )
+                if (
+                    premium_momentum_5s >= mom5_floor - 1e-9
+                    and premium_momentum_3s >= mom3_floor - 1e-9
+                ):
+                    return False, "momentum_rally_index_turn_fade_ok"
 
     min_mom = settings.execution_chart_min_premium_momentum_pct
     from app.engines.morning_exec_fade import premium_live_fade_blocks_now

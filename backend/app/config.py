@@ -3108,6 +3108,9 @@ class Settings(BaseSettings):
     # SENSEX ATM coils trade far above the NIFTY ₹18–45 band (Nov25 84400 CE base ~₹85).
     momentum_rally_armed_coil_max_premium_sensex: float = 120.0
     momentum_rally_index_turn_trust_premium_fade: bool = True
+    # Deep mom3 skew waiver only on MOMENTUM RALLY day mode (not rally clock window alone).
+    momentum_rally_index_turn_trust_min_mom5_pct: float = -0.35
+    momentum_rally_index_turn_trust_min_mom3_pct: float = -0.55
     momentum_rally_waive_v_rip_shallow_enabled: bool = True
     momentum_rally_v_rip_shallow_min_explosion_score: float = 70.0
     momentum_rally_armed_coil_min_samples: int = 4

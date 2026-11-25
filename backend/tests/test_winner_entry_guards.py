@@ -246,6 +246,62 @@ def test_chop_weak_explosion_blocked(mock_settings):
     assert "chop_immature" in reason or reason == "chop_weak_explosion"
 
 
+@patch("app.engines.chop_day_guards.in_momentum_rally_window", return_value=True)
+@patch("app.engines.chop_day_guards.resolve_chop_day_mode_from_state", return_value="CHOP DAY")
+@patch("app.engines.auto_trader.get_state")
+@patch("app.engines.winner_entry_guards.get_settings")
+def test_momentum_rally_fade_waiver_requires_day_mode_not_clock_window(
+    mock_settings, _mock_get_state, _mock_day_mode, _mock_window
+):
+    s = MagicMock()
+    s.execution_chart_premium_check_enabled = True
+    s.all_day_explosion_extreme_move_min_pct = 80.0
+    s.execution_chart_min_premium_momentum_pct = -0.15
+    s.index_turn_exec_fade_waiver_shallow_mom3_pct = -0.35
+    s.momentum_rally_index_turn_trust_premium_fade = True
+    s.momentum_rally_index_turn_trust_min_mom5_pct = -0.35
+    s.momentum_rally_index_turn_trust_min_mom3_pct = -0.55
+    mock_settings.return_value = s
+
+    blocked, _ = premium_fading_blocks_entry(
+        trade_score=90.0,
+        premium_momentum_3s=-0.39,
+        premium_momentum_5s=-0.20,
+        premium_direction="BEARISH",
+        explosion_event=_event(daily_move=12.0, tier="ELITE"),
+        index_turn_fade_bypass=True,
+    )
+    assert blocked
+
+
+@patch("app.engines.chop_day_guards.resolve_chop_day_mode_from_state", return_value="MOMENTUM RALLY")
+@patch("app.engines.auto_trader.get_state")
+@patch("app.engines.winner_entry_guards.get_settings")
+def test_momentum_rally_fade_waiver_blocks_collapsing_5m_on_rally_day(
+    mock_settings, _mock_get_state, _mock_day_mode
+):
+    s = MagicMock()
+    s.execution_chart_premium_check_enabled = True
+    s.all_day_explosion_extreme_move_min_pct = 80.0
+    s.execution_chart_min_premium_momentum_pct = -0.15
+    s.index_turn_exec_fade_waiver_shallow_mom3_pct = -0.35
+    s.momentum_rally_index_turn_trust_premium_fade = True
+    s.momentum_rally_index_turn_trust_min_mom5_pct = -0.35
+    s.momentum_rally_index_turn_trust_min_mom3_pct = -0.55
+    mock_settings.return_value = s
+
+    blocked, reason = premium_fading_blocks_entry(
+        trade_score=90.0,
+        premium_momentum_3s=-0.39,
+        premium_momentum_5s=-0.55,
+        premium_direction="BEARISH",
+        explosion_event=_event(daily_move=12.0, tier="ELITE"),
+        index_turn_fade_bypass=True,
+    )
+    assert blocked
+    assert reason == "premium_fading_at_execution"
+
+
 @patch("app.engines.chop_day_guards.resolve_chop_day_mode_from_state", return_value="MOMENTUM RALLY")
 @patch("app.engines.auto_trader.get_state")
 @patch("app.engines.winner_entry_guards.get_settings")
@@ -259,6 +315,8 @@ def test_momentum_rally_index_turn_waives_deep_exec_fade(
     s.execution_chart_min_premium_momentum_pct = -0.15
     s.index_turn_exec_fade_waiver_shallow_mom3_pct = -0.35
     s.momentum_rally_index_turn_trust_premium_fade = True
+    s.momentum_rally_index_turn_trust_min_mom5_pct = -0.35
+    s.momentum_rally_index_turn_trust_min_mom3_pct = -0.55
     mock_settings.return_value = s
 
     blocked, reason = premium_fading_blocks_entry(
