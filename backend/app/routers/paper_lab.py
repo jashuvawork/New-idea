@@ -1,7 +1,8 @@
 """Local paper lab — status and manual prod-sync (experiments vs EC2 live)."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, HTTPException
 
+from app.config import get_settings
 from app.engines.paper_lab_base_rip import build_index_base_rip_monitor
 from app.engines.paper_lab_prod_feed import (
     fetch_prod_multi_snapshot,
@@ -37,3 +38,36 @@ async def sync_prod_once():
     ran = await maybe_run_prod_snapshot_cycle()
     st = await paper_lab_status()
     return {"ran": ran, **st}
+
+
+@router.get("/vm-upstox-session")
+async def export_vm_upstox_session(
+    x_paper_lab_vm_sync_key: str = Header(default="", alias="X-Paper-Lab-VM-Sync-Key"),
+):
+    """
+    EC2-only: copy today's Upstox access token to a trusted Cloud VM (shared sync key).
+    Disabled unless PAPER_LAB_VM_TOKEN_SYNC_EXPORT_ENABLED=true on the host.
+    """
+    from app.services.redis_store import get_upstox_token
+    from app.services.token_manager import get_daily_token_status, is_token_valid_today
+
+    settings = get_settings()
+    if not bool(getattr(settings, "paper_lab_vm_token_sync_export_enabled", False)):
+        raise HTTPException(status_code=404, detail="vm_upstox_export_disabled")
+    expected = str(getattr(settings, "paper_lab_vm_token_sync_key", "") or "").strip()
+    provided = str(x_paper_lab_vm_sync_key or "").strip()
+    if not expected or provided != expected:
+        raise HTTPException(status_code=401, detail="sync_key_invalid")
+    if not await is_token_valid_today():
+        raise HTTPException(
+            status_code=503,
+            detail={"reason": "prod_token_unavailable", "tokenStatus": await get_daily_token_status()},
+        )
+    token = await get_upstox_token()
+    if not token:
+        raise HTTPException(status_code=503, detail={"reason": "no_access_token"})
+    return {
+        "accessToken": token,
+        "refreshToken": "",
+        "tokenStatus": await get_daily_token_status(),
+    }

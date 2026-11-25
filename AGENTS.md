@@ -138,6 +138,13 @@ Scheduled market monitors live in `.cursor/automations/` — enable those only v
 ### Expected "no data" state without credentials
 - `.env` is gitignored and not required to boot. With no `UPSTOX_API_KEY`/`UPSTOX_API_SECRET`, the app runs correctly but the UI stays in a "Waiting for live market data — Upstox not authenticated" state by design (the product never shows fake prices). Backend health (`/health`) and most control APIs (`/api/deployment/status`, `/api/capital`, `/api/execution/{stop,resume}`, `/api/auto-trader/status`) work without credentials. To exercise live market data, set Upstox keys in `.env` and complete OAuth at `/api/upstox/login-url`.
 
+### Cloud VM local Upstox (tick-faithful paper)
+
+1. **Secrets** (Cursor → Cloud Agents → Secrets, **Runtime Secret**): `UPSTOX_API_KEY`, `UPSTOX_API_SECRET`, `UPSTOX_REDIRECT_URI`, and shared `PAPER_LAB_VM_TOKEN_SYNC_KEY`. Secrets inject only when a **new agent** starts.
+2. **EC2** (one-time after merge): set `PAPER_LAB_VM_TOKEN_SYNC_EXPORT_ENABLED=true` and the same `PAPER_LAB_VM_TOKEN_SYNC_KEY` in production env (never commit the key).
+3. **VM start**: `backend/scripts/start_vm_local_stack.sh` (port **8001**). On boot, `VM_UPSTOX_LOCAL_ENABLED=true` pulls today's token from `GET /api/paper-lab/vm-upstox-session` on prod — no second OAuth on the VM.
+4. Until export is on EC2, VM still runs **prod snapshot paper** via `PAPER_LAB_USE_PROD_SNAPSHOTS=true`.
+
 ### Gotcha: trade-store path
 - `.env.example` ships the production path `TRADE_STORE_DIR=/opt/nexusquant/data/trades`, which is NOT writable in this VM and makes `/api/deployment/status` 500. If you create a `.env` from the example, override it to a writable path (the code default is fine): `TRADE_STORE_DIR=/tmp/nexusquant/trades`. Running with no `.env` at all also works because that default is already dev-safe.
 - Redis is optional: `redis_store.py` falls back to in-memory storage when Redis is unavailable, so no Redis server is needed for local dev. PostgreSQL is declared in deps but unused.
