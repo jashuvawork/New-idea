@@ -82,6 +82,43 @@ def _summarize_alerts(snapshots: dict[str, Any], *, max_rows: int = 12) -> list[
     return rows[:max_rows]
 
 
+def _at_base_heuristic(ec: dict[str, Any] | None, entry_premium: float | None) -> dict[str, Any]:
+    """Classify whether a live fill looks like pad/base vs elevated chase (read-only)."""
+    ec = ec if isinstance(ec, dict) else {}
+    local = float(
+        ec.get("localBaseMovePct")
+        or ec.get("offLowMovePct")
+        or ec.get("offBasePct")
+        or 0
+    )
+    if local <= 0 and isinstance(ec.get("pretrade_meta"), dict):
+        pm = ec["pretrade_meta"]
+        local = float(
+            pm.get("localBaseMovePct") or pm.get("offLowMovePct") or pm.get("offBasePct") or 0
+        )
+    new_base = ec.get("newBaseKind") or (ec.get("sessionBase") or {}).get("newBaseKind")
+    rip_block = "explosion_session_rip_fall" in str(ec.get("lastBlockReason") or "")
+    band = "near_trough"
+    if local <= 18:
+        band = "near_trough"
+    elif local <= 28:
+        band = "pad"
+    else:
+        band = "chase_elevated"
+    return {
+        "localBaseMovePct": round(local, 2) if local else None,
+        "newBaseKind": new_base,
+        "baseBand": band,
+        "likelyAtBase": band in ("near_trough", "pad") or bool(new_base),
+        "ripFallWouldCare": rip_block,
+        "entryPremium": entry_premium,
+    }
+
+
+def _today_ist() -> str:
+    return datetime.now(IST).strftime("%Y-%m-%d")
+
+
 async def build_report(*, prod_base: str, run_local_cycle: bool) -> dict[str, Any]:
     report: dict[str, Any] = {
         "tsIst": _now_ist(),
@@ -95,6 +132,10 @@ async def build_report(*, prod_base: str, run_local_cycle: bool) -> dict[str, An
         _, deploy = await _fetch_json(client, "/api/deployment/status")
         _, snaps = await _fetch_json(client, "/api/market/snapshots")
         _, milestone = await _fetch_json(client, "/api/auto-trader/milestone")
+        _, status = await _fetch_json(client, "/api/auto-trader/status")
+        _, closed = await _fetch_json(client, "/api/auto-trader/history/trades/closed?limit=30")
+        today = _today_ist()
+        _, funnel = await _fetch_json(client, f"/api/ai/radar-funnel/{today}")
 
         report["prodHealth"] = {
             "status": health.get("status") if isinstance(health, dict) else None,
@@ -107,8 +148,65 @@ async def build_report(*, prod_base: str, run_local_cycle: bool) -> dict[str, An
             report["prodDeploy"] = {
                 "commit": deploy.get("commit"),
                 "executionMode": deploy.get("executionMode") or flags.get("executionMode"),
+                "enableLiveTrading": flags.get("enableLiveTrading"),
+                "autoTradingEnabled": flags.get("autoTradingEnabled"),
                 "sessionBaseGuards": flags.get("sessionBaseGuards"),
                 "openSetupShadow": (flags.get("openSetupPolicy") or {}).get("openSetupShadow"),
+            }
+        report.setdefault("ec2Live", {})
+        if isinstance(status, dict):
+            open_trades = status.get("openPaperTrades") or status.get("openTrades") or []
+            report["ec2Live"].update({
+                "running": status.get("running"),
+                "openCount": len(open_trades) if isinstance(open_trades, list) else 0,
+                "openLegs": [
+                    {
+                        "symbol": t.get("symbol"),
+                        "side": t.get("side"),
+                        "strike": t.get("strike"),
+                        "entryPremium": t.get("entryPremium"),
+                        "strategyType": t.get("strategyType"),
+                    }
+                    for t in (open_trades if isinstance(open_trades, list) else [])[:5]
+                ],
+            })
+        if isinstance(closed, dict):
+            trades = closed.get("trades") or []
+            session_trades: list[dict[str, Any]] = []
+            for t in trades:
+                if not isinstance(t, dict):
+                    continue
+                et = str(t.get("entryTime") or t.get("openedAt") or "")
+                if today not in et:
+                    continue
+                ec = t.get("entryContext") if isinstance(t.get("entryContext"), dict) else {}
+                ep = t.get("entryPremium")
+                try:
+                    ep_f = float(ep) if ep is not None else None
+                except (TypeError, ValueError):
+                    ep_f = None
+                session_trades.append(
+                    {
+                        "symbol": t.get("symbol"),
+                        "side": t.get("side"),
+                        "strike": t.get("strike"),
+                        "entryPremium": ep_f,
+                        "pnlInr": t.get("realizedPnlInr") or t.get("pnlInr"),
+                        "exitReason": t.get("exitReason"),
+                        "base": _at_base_heuristic(ec, ep_f),
+                    }
+                )
+            report["ec2Live"]["closedToday"] = session_trades[:10]
+            losses = [x for x in session_trades if float(x.get("pnlInr") or 0) < -500]
+            report["ec2Live"]["lossAlerts"] = [
+                {**x, "note": "elevated_chase" if x.get("base", {}).get("baseBand") == "chase_elevated" else "review"}
+                for x in losses
+            ]
+        if isinstance(funnel, dict) and not funnel.get("error"):
+            blockers = funnel.get("topBlockers") or funnel.get("blockerCounts") or []
+            report["funnelToday"] = {
+                "keys": list(funnel.keys())[:12],
+                "topBlockers": blockers[:8] if isinstance(blockers, list) else blockers,
             }
         if isinstance(snaps, dict):
             raw = snaps.get("snapshots") or {}
