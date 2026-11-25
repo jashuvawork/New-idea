@@ -1341,6 +1341,7 @@ def record_funnel_gate_block(
     stage: str = "SELECTOR_GATE",
     cycle_id: str | None = None,
     now: datetime | None = None,
+    extra: Mapping[str, Any] | None = None,
 ) -> bool:
     """Persist one contract-level gate block for funnel RCA (selector/pretrade rejects)."""
     settings = get_settings()
@@ -1373,6 +1374,10 @@ def record_funnel_gate_block(
         "cycleId": cycle_id,
         "reason": reason_s,
     }
+    if extra:
+        for k, v in dict(extra).items():
+            if k not in row and v is not None:
+                row[k] = v
     # The selector runs on the event loop; file I/O there is what froze it.
     if _on_event_loop_thread():
         _defer_funnel_row(date, row)

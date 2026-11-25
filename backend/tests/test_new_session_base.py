@@ -9,6 +9,8 @@ from app.engines.explosion_detector import _open_key
 from app.engines.new_session_base import (
     new_session_base_identify,
     resolve_effective_base_premium_inr,
+    session_base_guard_summary,
+    session_base_observability_bundle,
     stamp_new_session_base_fields,
 )
 from app.models.schemas import Side
@@ -107,3 +109,25 @@ def test_resolve_prefers_effective_over_stale_ict():
     )
     assert prem == 175.0
     assert meta.get("fromAlert") is True
+
+
+def test_session_base_guard_summary_keys():
+    s = session_base_guard_summary(_settings())
+    assert s["newSessionBaseIdentifyEnabled"] is True
+    assert s["explosionSessionRipFallBlockEnabled"] is True
+    assert s["fakeExplosionTrapPostWinArmedBaseBypassEnabled"] is False
+
+
+def test_observability_bundle_merges_rip_fall_and_alert():
+    bundle = session_base_observability_bundle(
+        alert={"newSessionBase": True, "newBaseKind": "session_trough", "effectiveBasePremium": 21.0},
+        pretrade_meta={
+            "sessionRipFall": {
+                "sessionRipFallExempt": "near_session_trough",
+                "liftFromTroughPct": 8.0,
+            }
+        },
+    )
+    assert bundle["newSessionBase"] is True
+    assert bundle["sessionRipFallExempt"] == "near_session_trough"
+    assert bundle["effectiveBasePremium"] == 21.0

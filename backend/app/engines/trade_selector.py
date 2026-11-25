@@ -1128,8 +1128,31 @@ def _explosion_candidates(
             continue
         from app.engines.explosion_entry_guards import explosion_session_rip_fall_entry_blocked
 
-        rip_fall, _rf_reason, _ = explosion_session_rip_fall_entry_blocked(event)
+        mom5 = None
+        if isinstance(alert, dict):
+            try:
+                mom5 = float(
+                    alert.get("premiumMomentum5Pct")
+                    or alert.get("momentum5Pct")
+                    or 0
+                )
+            except (TypeError, ValueError):
+                mom5 = None
+        rip_fall, rf_reason, _ = explosion_session_rip_fall_entry_blocked(
+            event,
+            snap=snap,
+            momentum5_pct=mom5,
+        )
         if rip_fall:
+            from app.services.radar_learning import record_funnel_gate_block
+
+            record_funnel_gate_block(
+                str(symbol or "").upper(),
+                side_v,
+                float(strike or 0),
+                rf_reason,
+                stage="SELECTOR_GATE",
+            )
             continue
         from app.engines.rally_capture import infer_alert_causal_grade
 
