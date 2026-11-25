@@ -65,6 +65,37 @@ def _ict_base_armed(candidate: Any, snap: Optional[SymbolSnapshot]) -> bool:
 
 def _base_premium_inr(candidate: Any, snap: Optional[SymbolSnapshot]) -> float:
     alert = _alert_dict(candidate)
+    event = getattr(candidate, "explosion_event", None)
+    settings = get_settings()
+    if bool(getattr(settings, "new_session_base_identify_enabled", True)):
+        from app.engines.new_session_base import resolve_effective_base_premium_inr
+
+        sym = str(getattr(candidate, "symbol", "") or alert.get("symbol") or "")
+        strike = float(getattr(candidate, "strike", 0) or alert.get("strike") or 0)
+        side = getattr(candidate, "side", None) or alert.get("side")
+        prem = float(getattr(candidate, "premium", 0) or alert.get("premium") or 0)
+        v3 = float(getattr(event, "velocity_3s", 0) or alert.get("velocity3s") or 0)
+        fallback = 0.0
+        for key in ("ictBasePremium", "localBaseBasePremium", "basePremium"):
+            try:
+                v = float(alert.get(key) or 0)
+                if v > 0:
+                    fallback = v
+                    break
+            except (TypeError, ValueError):
+                pass
+        eff, _ = resolve_effective_base_premium_inr(
+            alert,
+            symbol=sym,
+            strike=strike,
+            side=side,
+            premium=prem,
+            velocity_3s=v3,
+            fallback=fallback,
+            settings=settings,
+        )
+        if eff > 0:
+            return eff
     for key in ("ictBasePremium", "localBaseBasePremium", "basePremium"):
         try:
             v = float(alert.get(key) or 0)

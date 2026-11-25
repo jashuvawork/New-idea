@@ -1096,6 +1096,13 @@ class Settings(BaseSettings):
     local_base_pullback_armed_launch_stale_trough_blocks_waiver: bool = True
     index_lift_turn_option_rip_respect_session_fall: bool = True
     index_lift_turn_put_rip_requires_slide_or_not_bullish_breadth: bool = True
+    new_session_base_identify_enabled: bool = True
+    new_session_base_trough_max_off_low_pct: float = 14.0
+    new_session_base_post_rip_min_session_run_pct: float = 0.30
+    new_session_base_post_rip_min_peak_pullback_pct: float = 0.12
+    new_session_base_post_rip_max_pad_pct: float = 18.0
+    new_session_base_post_rip_min_velocity_3s: float = 0.8
+    new_session_base_stale_ict_gap_pct: float = 12.0
     # Sep07 23900 PE: block deep ITM fallback when near-strike OTM armed on same side.
     explosion_deep_itm_substitute_block_enabled: bool = True
     explosion_deep_itm_substitute_min_itm_steps: int = 1

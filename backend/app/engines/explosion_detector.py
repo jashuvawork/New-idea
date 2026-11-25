@@ -1333,6 +1333,33 @@ def armed_base_anchor(
         current = None
         mid_rip_rejected = True
 
+    if current is None and candidate is None and live > 0:
+        from app.engines.new_session_base import new_session_base_identify
+
+        stale_ref = float(current.premium if current else 0)
+        ok, kind, nb_meta = new_session_base_identify(
+            symbol,
+            float(strike),
+            side_v,
+            live,
+            velocity_3s=0.0,
+            stale_ict_base=stale_ref,
+            settings=settings,
+        )
+        if ok and kind == "post_rip_pullback":
+            eff = float(nb_meta.get("effectiveBasePremium") or 0)
+            if eff > 0:
+                candidate = ArmedBaseAnchor(
+                    premium=eff,
+                    armed_at=now,
+                    expires_at=now + timedelta(seconds=horizon),
+                    first_sample_at=now - timedelta(seconds=max(min_span, 30.0)),
+                    last_support_at=now - timedelta(seconds=exclude + 1.0),
+                    sample_count=max(min_samples, 6),
+                    span_seconds=max(min_span, 30.0),
+                    range_pct=0.0,
+                )
+
     # V-bottom session/day trough: arm while still near the low so elite/armed
     # launch can fire off ~125 instead of waiting for a tight poll coil (or a
     # later mid-rip pause).
@@ -3480,4 +3507,26 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     from app.engines.live_entry_score import stamp_alert_live_entry_scores
 
     alert_out = stamp_alert_live_entry_scores(alert_out)
+    from app.engines.new_session_base import stamp_new_session_base_fields
+
+    alert_out = stamp_new_session_base_fields(
+        alert_out,
+        symbol=e.symbol,
+        strike=float(e.strike),
+        side=e.side,
+        premium=float(e.premium),
+        velocity_3s=float(e.velocity_3s or 0),
+        settings=_settings,
+    )
+    if alert_out.get("newSessionBase") and float(
+        alert_out.get("effectiveBasePremium") or 0
+    ) > 0:
+        # Chase gates use localBaseBasePremium / ictBaseRelativeMovePct off the true pad.
+        eff = float(alert_out["effectiveBasePremium"])
+        if eff > 0 and float(e.premium or 0) > eff:
+            alert_out["localBaseMovePct"] = round(
+                (float(e.premium) - eff) / eff * 100.0,
+                1,
+            )
+            alert_out["ictBaseRelativeMovePct"] = alert_out["localBaseMovePct"]
     return alert_out
