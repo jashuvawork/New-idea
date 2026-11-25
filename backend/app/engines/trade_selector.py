@@ -1157,6 +1157,10 @@ def _explosion_candidates(
         trap_block, _trap_reason, trap_meta = detect_fake_explosion_trap(
             cand_probe, snap, state=state, ict=ict,
         )
+        from app.engines.explosion_entry_guards import fake_trap_bypass_disallowed
+
+        if fake_trap_bypass_disallowed(trap_meta, settings=settings):
+            continue
         if (
             (trap_block or trap_meta.get("action") == "block")
             and not first_lift_ready

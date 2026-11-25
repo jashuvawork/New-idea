@@ -1777,9 +1777,12 @@ def _post_session_win(state: Any) -> tuple[bool, dict[str, Any]]:
 
     last = recent[-1]
     pnl = float(getattr(last, "pnl_inr", 0) or 0)
+    last_side = getattr(last, "side", None)
+    last_side_val = str(getattr(last_side, "value", last_side) or "").upper()
     meta = {
         "lastPnlInr": round(pnl, 2),
         "lastExitReason": str(getattr(last, "exit_reason", "") or "").lower(),
+        "lastWinSide": last_side_val,
         "postSessionWin": True,
         "recentWinCount": len(wins),
     }
@@ -2508,6 +2511,44 @@ def detect_fake_explosion_trap(
             })
             return True, "fake_explosion_trap_post_win_cold_velocity", meta
 
+    if post_session_win and bool(
+        getattr(settings, "fake_trap_post_win_opposite_breadth_block_enabled", True)
+    ):
+        last_win_side = str(meta.get("lastWinSide") or "").upper()
+        side_raw = getattr(candidate, "side", None)
+        side_val = str(getattr(side_raw, "value", side_raw) or "").upper()
+        opposite_leg = bool(
+            last_win_side
+            and side_val
+            and last_win_side in ("CALL", "PUT")
+            and side_val in ("CALL", "PUT")
+            and last_win_side != side_val
+        )
+        bias = ""
+        breadth_aligned = False
+        if snap is not None:
+            br = getattr(snap, "breadth", None)
+            if isinstance(br, dict):
+                bias = str(br.get("bias") or "").upper()
+                breadth_aligned = bool(br.get("aligned"))
+            elif br is not None:
+                bias = str(getattr(br, "bias", "") or "").upper()
+                breadth_aligned = bool(getattr(br, "aligned", False))
+        misaligned = (side_val == "CALL" and bias == "BEARISH") or (
+            side_val == "PUT" and bias == "BULLISH"
+        )
+        if opposite_leg and misaligned and breadth_aligned and bias in ("BULLISH", "BEARISH"):
+            meta.update({
+                "fakeExplosionTrap": True,
+                "action": "block",
+                "psychologyEscalate": "FOMO",
+                "postWinOppositeBreadthBlock": True,
+                "breadthBias": bias,
+                "conflictFlags": flags + ["post_session_win", "opposite_breadth"],
+                "conflictCount": len(flags) + 2,
+            })
+            return True, "fake_explosion_trap_post_win_opposite_breadth", meta
+
     if post_win and not _post_win_top_confidence_allows(candidate, v3=v3, snap=snap):
         meta.update({
             "fakeExplosionTrap": True,
@@ -2838,6 +2879,31 @@ def _trap_soft_cap_must_honor(trap_meta: dict[str, Any]) -> bool:
     return chopish and (elite_hot or int(trap_meta.get("conflictCount") or 0) >= 3)
 
 
+_HARD_TRAP_BLOCK_FLAGS = (
+    "postWinTopConfidenceBlock",
+    "postWinOppositeBreadthBlock",
+    "postWinChopAfternoon",
+    "postWinAfternoonLatchBlock",
+    "postWinAfternoonBlock",
+    "postWinVelocityBlock",
+)
+
+
+def fake_trap_bypass_disallowed(
+    trap_meta: Optional[dict[str, Any]],
+    *,
+    settings: Any = None,
+) -> bool:
+    """When True, building-rip / top-must-take must not clear action=block traps."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "fake_trap_honor_hard_action_block", True)):
+        return False
+    meta = trap_meta or {}
+    if str(meta.get("action") or "") != "block":
+        return False
+    return any(meta.get(flag) for flag in _HARD_TRAP_BLOCK_FLAGS)
+
+
 def fake_explosion_trap_reject_reason(
     trap_meta: Optional[dict[str, Any]],
     *,
@@ -2857,6 +2923,7 @@ def fake_explosion_trap_reject_reason(
         ("postWinAfternoonBlock", "fake_explosion_trap_post_win_afternoon"),
         ("postWinVelocityBlock", "fake_explosion_trap_post_win_cold_velocity"),
         ("postWinTopConfidenceBlock", "fake_explosion_trap_post_win_not_top_confidence"),
+        ("postWinOppositeBreadthBlock", "fake_explosion_trap_post_win_opposite_breadth"),
     ):
         if meta.get(flag):
             return code

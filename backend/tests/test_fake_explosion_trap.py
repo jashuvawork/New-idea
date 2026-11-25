@@ -7,14 +7,18 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.engines.explosion_detector import ExplosionEvent
+from app.config import Settings
 from app.engines.explosion_entry_guards import (
     cap_fake_explosion_trap_lots,
     detect_fake_explosion_trap,
     fake_explosion_trap_reject_reason,
+    fake_trap_bypass_disallowed,
     post_win_afternoon_explosion_latched,
     record_post_win_afternoon_trap_reject,
     reset_post_win_afternoon_trap_latch,
 )
+from app.engines.building_ftv_gates import top_must_take_bypasses_fake_trap
+from app.models.schemas import Breadth
 from app.engines.ict_breakout_monitor import ICTBreakoutSignal
 from app.engines.pretrade_validator import TradeRecord
 from app.models.schemas import MarketPhase, Regime, Side, SpotChart, SymbolSnapshot
@@ -959,3 +963,58 @@ def test_fake_trap_reject_reason_never_bare_block():
     assert fake_explosion_trap_reject_reason(
         {"action": "block", "postWinVelocityBlock": True, "fakeExplosionTrap": True},
     ) == "fake_explosion_trap_post_win_cold_velocity"
+
+
+def test_fake_trap_bypass_disallowed_on_post_win_hard_block():
+    meta = {
+        "action": "block",
+        "fakeExplosionTrap": True,
+        "postWinTopConfidenceBlock": True,
+    }
+    assert fake_trap_bypass_disallowed(meta, settings=Settings())
+    assert top_must_take_bypasses_fake_trap(must_take=True, alert={"tier": "ELITE"})
+    assert fake_explosion_trap_reject_reason(meta) == (
+        "fake_explosion_trap_post_win_not_top_confidence"
+    )
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+@patch("app.engines.explosion_entry_guards.collect_session_trades", create=True)
+def test_post_win_opposite_breadth_blocks_put_when_bullish(
+    mock_collect, mock_money_settings, mock_settings,
+):
+    """Nov25 SENSEX PE after CE win with BULLISH breadth — no live fill."""
+    cfg = _settings(
+        fake_trap_post_win_opposite_breadth_block_enabled=True,
+    )
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="ABOVE")
+    snap.symbol = "SENSEX"
+    snap.breadth = Breadth(score=75.0, bias="BULLISH", aligned=True, source="blended")
+    put_event = _event(daily=35.0, v3=2.5, tier="ELITE", strike=83600.0)
+    put_event.side = Side.PUT
+    put_event.symbol = "SENSEX"
+    cand = _candidate(put_event, snap, score=367.0)
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="SENSEX",
+                side="CALL",
+                pnl_inr=2712.0,
+                exit_reason="explosion_tp_rung_floor",
+                strike=84400.0,
+            )
+        ],
+    ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(), ict=_confirmed_ict(35.0),
+        )
+
+    assert blocked is True
+    assert reason == "fake_explosion_trap_post_win_opposite_breadth"
+    assert meta.get("postWinOppositeBreadthBlock") is True
