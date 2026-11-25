@@ -2840,6 +2840,20 @@ def scan_chain_explosions(
                                 getattr(settings, "momentum_rally_armed_coil_max_premium", 45.0)
                                 or 45.0
                             )
+                            if str(symbol or "").upper() == "SENSEX":
+                                prem_hi = float(
+                                    getattr(
+                                        settings,
+                                        "momentum_rally_armed_coil_max_premium_sensex",
+                                        0.0,
+                                    )
+                                    or 0.0
+                                )
+                                if prem_hi <= 0:
+                                    prem_hi = float(
+                                        getattr(settings, "sensex_max_option_premium_inr", 650.0)
+                                        or prem_hi
+                                    )
                             min_samples = int(
                                 getattr(settings, "momentum_rally_armed_coil_min_samples", 4)
                                 or 4

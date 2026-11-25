@@ -244,3 +244,30 @@ def test_chop_weak_explosion_blocked(mock_settings):
     blocked, reason = chop_weak_explosion_blocks_entry(candidate, snap)
     assert blocked
     assert "chop_immature" in reason or reason == "chop_weak_explosion"
+
+
+@patch("app.engines.chop_day_guards.resolve_chop_day_mode_from_state", return_value="MOMENTUM RALLY")
+@patch("app.engines.auto_trader.get_state")
+@patch("app.engines.winner_entry_guards.get_settings")
+def test_momentum_rally_index_turn_waives_deep_exec_fade(
+    mock_settings, _mock_get_state, _mock_day_mode
+):
+    """Nov25 84000 CE: index turn armed; noisy mom3 must not reject on MOMENTUM RALLY day."""
+    s = MagicMock()
+    s.execution_chart_premium_check_enabled = True
+    s.all_day_explosion_extreme_move_min_pct = 80.0
+    s.execution_chart_min_premium_momentum_pct = -0.15
+    s.index_turn_exec_fade_waiver_shallow_mom3_pct = -0.35
+    s.momentum_rally_index_turn_trust_premium_fade = True
+    mock_settings.return_value = s
+
+    blocked, reason = premium_fading_blocks_entry(
+        trade_score=90.0,
+        premium_momentum_3s=-0.39,
+        premium_momentum_5s=-0.20,
+        premium_direction="BEARISH",
+        explosion_event=_event(daily_move=12.0, tier="ELITE"),
+        index_turn_fade_bypass=True,
+    )
+    assert not blocked
+    assert reason == "momentum_rally_index_turn_fade_ok"
