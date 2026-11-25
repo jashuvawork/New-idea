@@ -714,6 +714,28 @@ def _gate_checks(
                 "passed": True,
                 "detail": "not chasing a completed run's top",
             })
+        from app.engines.explosion_entry_guards import explosion_session_rip_fall_entry_blocked
+
+        rf_blocked, rf_reason, rf_meta = explosion_session_rip_fall_entry_blocked(
+            candidate.explosion_event,
+            snap=snap,
+        )
+        if rf_blocked:
+            blockers.append(rf_reason)
+            gates.append({
+                "gate": "explosion_session_rip_fall",
+                "passed": False,
+                "detail": rf_reason,
+                "fix": "Enter at session trough or fresh post-rip coil — not cold fall-leg after a big rip",
+                "meta": rf_meta,
+            })
+        else:
+            gates.append({
+                "gate": "explosion_session_rip_fall",
+                "passed": True,
+                "detail": rf_meta.get("sessionRipFallExempt") or "not_a_session_rip_fall_leg",
+                "meta": rf_meta,
+            })
         ext_blocked, ext_reason = extended_session_chase_blocked(
             candidate.explosion_event, ict=ict,
         )

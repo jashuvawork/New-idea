@@ -1027,9 +1027,14 @@ async def _open_from_candidate(
     if snapshots and settings.controlled_trading_enabled:
         from app.engines.pretrade_validator import validate_candidate
 
-        vt_ok, vt_reason, _ = validate_candidate(candidate, state, snapshots=snapshots)
+        vt_ok, vt_reason, vt_meta = validate_candidate(
+            candidate, state, snapshots=snapshots,
+        )
         if not vt_ok:
             return False, vt_reason
+        if isinstance(vt_meta, dict) and vt_meta:
+            pre = getattr(candidate, "pretrade_meta", None) or {}
+            candidate.pretrade_meta = {**pre, **vt_meta}
 
     profile = snap.optimizedProfile or get_session_targets()
     if candidate.mode == "worst_day_itm_fade":
@@ -2788,6 +2793,14 @@ async def _open_from_candidate(
             "localBaseBaseRelPct": round(base_rel, 1),
             "localBaseBasePremium": round(base_premium, 2),
         })
+        from app.engines.new_session_base import session_base_observability_bundle
+
+        ctx_extra.update(
+            session_base_observability_bundle(
+                alert=alert if isinstance(alert, dict) else {},
+                pretrade_meta=getattr(candidate, "pretrade_meta", None),
+            )
+        )
         ctx_extra["vixRegime"] = vix_ctx
         from app.engines.advanced_indicators import build_entry_confluence
 
@@ -5292,6 +5305,21 @@ async def _process_locked(
                             "selectionMode": best.mode,
                             "selectionScore": best.score,
                         }
+                        from app.engines.new_session_base import (
+                            session_base_observability_bundle,
+                        )
+
+                        _alert = (
+                            best.alert
+                            if isinstance(getattr(best, "alert", None), dict)
+                            else {}
+                        )
+                        reject_evt.update(
+                            session_base_observability_bundle(
+                                alert=_alert,
+                                pretrade_meta=best.pretrade_meta or {},
+                            )
+                        )
                         _pre = getattr(best, "pretrade_meta", None) or {}
                         _exec_reject = _pre.get("execChartReject") or {}
                         if _exec_reject and (

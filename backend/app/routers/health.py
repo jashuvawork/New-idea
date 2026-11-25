@@ -16,6 +16,7 @@ from app.engines.open_index_lane import open_index_lane_summary
 from app.engines.open_setup_guards import open_setup_guard_summary
 from app.engines.live_paper_parity import live_paper_parity_status
 from app.engines.open_setup_policy import open_setup_policy_status
+from app.engines.new_session_base import session_base_guard_summary
 from app.engines.structural_guard_settings import structural_guard_summary
 from app.services import trade_store
 from app.services.redis_store import has_upstox_token
@@ -161,6 +162,7 @@ async def deployment_status():
             "paperSlippageEnabled": settings.paper_slippage_enabled,
             "paperLiveParityEnabled": settings.paper_live_parity_enabled,
             "sep917LegacyProfile": _sep917_legacy_profile_summary(settings),
+            "sessionBaseGuards": session_base_guard_summary(settings),
         },
         "paperSlippage": slippage_config_summary(),
         "cadence": {

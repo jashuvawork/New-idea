@@ -245,3 +245,85 @@ def resolve_effective_base_premium_inr(
         except (TypeError, ValueError):
             pass
     return float(fallback or 0), meta
+
+
+def session_base_guard_summary(settings: Any = None) -> dict[str, Any]:
+    """Deployment HUD — session trough / rip-fall / stale-armed knobs (09:45+ book)."""
+    settings = settings or get_settings()
+    return {
+        "newSessionBaseIdentifyEnabled": bool(
+            getattr(settings, "new_session_base_identify_enabled", True)
+        ),
+        "explosionSessionRipFallBlockEnabled": bool(
+            getattr(settings, "explosion_session_rip_fall_entry_block_enabled", True)
+        ),
+        "localBasePullbackArmedRespectRipFall": bool(
+            getattr(settings, "local_base_pullback_armed_launch_respect_rip_fall", True)
+        ),
+        "localBasePullbackStaleTroughBlocksWaiver": bool(
+            getattr(settings, "local_base_pullback_armed_launch_stale_trough_blocks_waiver", True)
+        ),
+        "localBasePullbackStaleTroughGapPct": float(
+            getattr(settings, "local_base_pullback_stale_trough_gap_pct", 15.0) or 15.0
+        ),
+        "indexLiftTurnPutRipRequiresSlideOrNotBullishBreadth": bool(
+            getattr(
+                settings,
+                "index_lift_turn_put_rip_requires_slide_or_not_bullish_breadth",
+                True,
+            )
+        ),
+        "fakeExplosionTrapPostWinArmedBaseBypassEnabled": bool(
+            getattr(settings, "fake_explosion_trap_post_win_armed_base_bypass_enabled", False)
+        ),
+        "ripFallNearTroughMaxLiftPct": float(
+            getattr(settings, "explosion_session_rip_fall_near_trough_max_lift_pct", 0.18)
+            or 0.18
+        )
+        * 100.0,
+    }
+
+
+_RIP_FALL_OBS_KEYS = (
+    "sessionRipFallBlock",
+    "sessionRipFallExempt",
+    "sessionRunPct",
+    "fallFromPeakPct",
+    "liftFromTroughPct",
+    "sessionPeakPremium",
+    "sessionLowPremium",
+    "velocity3s",
+    "premiumMomentum5Pct",
+    "armedBaseStaleVsSessionTrough",
+)
+
+
+def session_base_observability_bundle(
+    alert: Mapping[str, Any] | None = None,
+    pretrade_meta: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Funnel + entryContext stamps for post-session RCA (base vs fall-leg)."""
+    out: dict[str, Any] = {}
+    row = dict(alert) if isinstance(alert, Mapping) else {}
+    pre = dict(pretrade_meta) if isinstance(pretrade_meta, Mapping) else {}
+    rip = pre.get("sessionRipFall")
+    if isinstance(rip, dict):
+        for key in _RIP_FALL_OBS_KEYS:
+            if rip.get(key) is not None:
+                out[key] = rip[key]
+    for key in (
+        "newSessionBase",
+        "newBaseKind",
+        "effectiveBasePremium",
+        "sessionTroughBase",
+        "postRipPullbackBase",
+        "localBasePullbackFill",
+    ):
+        if row.get(key) is not None:
+            out[key] = row[key]
+        elif pre.get(key) is not None:
+            out[key] = pre[key]
+    for key in _RIP_FALL_OBS_KEYS:
+        if pre.get(key) is not None and key not in out:
+            out[key] = pre[key]
+    return out
