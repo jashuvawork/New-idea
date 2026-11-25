@@ -98,7 +98,6 @@ def _at_base_heuristic(ec: dict[str, Any] | None, entry_premium: float | None) -
         )
     new_base = ec.get("newBaseKind") or (ec.get("sessionBase") or {}).get("newBaseKind")
     rip_block = "explosion_session_rip_fall" in str(ec.get("lastBlockReason") or "")
-    band = "near_trough"
     if local <= 18:
         band = "near_trough"
     elif local <= 28:
