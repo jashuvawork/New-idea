@@ -992,6 +992,7 @@ class Settings(BaseSettings):
     local_base_pullback_max_chase_pct: float = 7.0
     local_base_pullback_min_drawdown_from_high_pct: float = 3.0
     local_base_pullback_tiers_csv: str = "ELITE,EXPLODING"
+    local_base_pullback_stale_trough_gap_pct: float = 15.0
     # Nov 3 23550 CE — near_base_v bypass at ₹180/session-top after open rip.
     premium_extended_session_chase_block_enabled: bool = True
     premium_extended_session_afternoon_only: bool = True
@@ -1083,6 +1084,18 @@ class Settings(BaseSettings):
     explosion_session_trough_late_chase_grade_s_max_steps: int = 2
     # first_lift stamp only waives trough chase when still near the session low.
     explosion_session_trough_first_lift_max_waive_lift_pct: float = 0.40
+    # Nov 25 SENSEX 83600 PE: enter on rollover after session rip, not at trough/base.
+    explosion_session_rip_fall_entry_block_enabled: bool = True
+    explosion_session_rip_fall_min_session_run_pct: float = 0.35
+    explosion_session_rip_fall_min_fall_from_peak_pct: float = 0.08
+    explosion_session_rip_fall_min_lift_from_trough_pct: float = 0.28
+    explosion_session_rip_fall_max_velocity_3s: float = 1.25
+    explosion_session_rip_fall_max_momentum5_pct: float = 8.0
+    explosion_session_rip_fall_near_trough_max_lift_pct: float = 0.18
+    local_base_pullback_armed_launch_respect_rip_fall: bool = True
+    local_base_pullback_armed_launch_stale_trough_blocks_waiver: bool = True
+    index_lift_turn_option_rip_respect_session_fall: bool = True
+    index_lift_turn_put_rip_requires_slide_or_not_bullish_breadth: bool = True
     # Sep07 23900 PE: block deep ITM fallback when near-strike OTM armed on same side.
     explosion_deep_itm_substitute_block_enabled: bool = True
     explosion_deep_itm_substitute_min_itm_steps: int = 1

@@ -1239,6 +1239,15 @@ async def _open_from_candidate(
         if peak_chase:
             return False, peak_reason
 
+        from app.engines.explosion_entry_guards import explosion_session_rip_fall_entry_blocked
+
+        rip_fall, rip_fall_reason, _rip_fall_meta = explosion_session_rip_fall_entry_blocked(
+            candidate.explosion_event,
+            snap=snap,
+        )
+        if rip_fall:
+            return False, rip_fall_reason
+
         from app.engines.explosion_entry_guards import (
             deep_itm_near_strike_substitute_blocked,
             far_otm_near_base_substitute_blocked,

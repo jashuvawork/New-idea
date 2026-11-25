@@ -1246,6 +1246,16 @@ def validate_candidate(
         if peak_chase:
             return False, peak_reason, meta
 
+        from app.engines.explosion_entry_guards import explosion_session_rip_fall_entry_blocked
+
+        rip_fall, rip_fall_reason, rip_fall_meta = explosion_session_rip_fall_entry_blocked(
+            explosion_event,
+            snap=snap,
+        )
+        meta["sessionRipFall"] = rip_fall_meta
+        if rip_fall:
+            return False, rip_fall_reason, meta
+
         from app.engines.premium_spike_dump_guard import post_spike_premium_dump_blocked
 
         dump_blocked, dump_reason, dump_meta = post_spike_premium_dump_blocked(

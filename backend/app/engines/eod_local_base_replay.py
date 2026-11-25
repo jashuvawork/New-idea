@@ -626,6 +626,12 @@ def evaluate_replay_structural_gates(
     if pp_blocked:
         return False, pp_reason
 
+    from app.engines.explosion_entry_guards import explosion_session_rip_fall_entry_blocked
+
+    rip_fall, rip_reason, _ = explosion_session_rip_fall_entry_blocked(event, snap=snap)
+    if rip_fall:
+        return False, rip_reason
+
     coil_blocked, coil_reason = coil_top_entry_blocked(
         event,
         tier=str(getattr(candidate, "tier", "") or alert.get("tier") or ""),

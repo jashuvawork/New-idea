@@ -156,8 +156,75 @@ def local_base_pullback_blocks_entry(
         return False, "ok", meta
 
     if _armed_base_launch_confirmed(candidate, snap):
-        meta["localBasePullbackFill"] = "armed_base_launch_waiver"
-        return False, "ok", meta
+        alert = _alert_dict(candidate)
+        stale_gap = float(
+            getattr(settings, "local_base_pullback_stale_trough_gap_pct", 15.0) or 15.0
+        )
+        stale = False
+        sess_low = 0.0
+        armed_base = _base_premium_inr(candidate, snap)
+        for key in ("sessionLowPremium", "sessionTroughPremium"):
+            try:
+                sess_low = float(alert.get(key) or 0)
+                if sess_low > 0:
+                    break
+            except (TypeError, ValueError):
+                pass
+        if sess_low <= 0 and snap is not None:
+            event = getattr(candidate, "explosion_event", None)
+            if event is not None:
+                try:
+                    from app.engines.explosion_detector import get_session_low_premium
+
+                    sess_low = float(
+                        get_session_low_premium(
+                            str(getattr(event, "symbol", "") or ""),
+                            float(getattr(event, "strike", 0) or 0),
+                            getattr(event, "side", None),
+                        )
+                        or 0
+                    )
+                except Exception:
+                    sess_low = 0.0
+        if (
+            bool(
+                getattr(
+                    settings,
+                    "local_base_pullback_armed_launch_stale_trough_blocks_waiver",
+                    True,
+                )
+            )
+            and sess_low > 0
+            and armed_base > 0
+        ):
+            gap_pct = (armed_base - sess_low) / sess_low * 100.0
+            stale = gap_pct >= stale_gap - 1e-6
+            if stale:
+                meta["armedBaseStaleVsSessionTrough"] = round(gap_pct, 1)
+
+        if not stale and bool(
+            getattr(settings, "local_base_pullback_armed_launch_respect_rip_fall", True)
+        ):
+            event = getattr(candidate, "explosion_event", None)
+            if event is not None:
+                from app.engines.explosion_entry_guards import (
+                    explosion_session_rip_fall_entry_blocked,
+                )
+
+                metrics = _chase_metrics(candidate, premium_chart=premium_chart)
+                rip_block, rip_reason, rip_meta = explosion_session_rip_fall_entry_blocked(
+                    event,
+                    settings=settings,
+                    momentum5_pct=float(metrics.get("premiumMomentum5Pct") or 0),
+                    snap=snap,
+                )
+                if rip_block:
+                    meta.update(rip_meta)
+                    return True, rip_reason, meta
+
+        if not stale:
+            meta["localBasePullbackFill"] = "armed_base_launch_waiver"
+            return False, "ok", meta
 
     try:
         signal = float(getattr(candidate, "premium", 0) or 0)

@@ -3,9 +3,26 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import app.engines.explosion_detector as ed
+from app.engines.explosion_detector import _open_key
 from app.engines.local_base_pullback_entry import local_base_pullback_blocks_entry
 from app.models.schemas import PremiumChart, Side
 from tests.mock_defaults import settings_mock
+
+
+def _seed_session(symbol, strike, side, low, peak):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    key = _open_key(symbol, strike, side)
+    ed._session_low[key] = float(low)
+    ed._session_peak[key] = float(peak)
+    ed._session_date = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
+
+
+def teardown_function(_):
+    ed._session_low.clear()
+    ed._session_peak.clear()
 
 
 def _settings():
@@ -55,6 +72,61 @@ def test_allows_when_within_chase_cap_put():
     assert blocked is False
     assert reason == "ok"
     assert meta.get("localBasePullbackFill") == "within_chase_cap"
+
+
+def test_blocks_armed_launch_on_session_rip_fall_leg():
+    settings = _settings()
+    settings.local_base_pullback_armed_launch_respect_rip_fall = True
+    cand = _candidate(
+        side=Side.PUT,
+        premium=429.0,
+        alert={
+            "ictBaseArmed": True,
+            "ictArmedBaseLaunch": True,
+            "ictBasePremium": 418.0,
+        },
+        explosion_event=SimpleNamespace(
+            tier="ELITE",
+            symbol="SENSEX",
+            side=Side.PUT,
+            strike=83600.0,
+            premium=429.0,
+            velocity_3s=0.4,
+        ),
+        liveEntryScoreMeta={"drawdownFromHighPct": -2.0, "premiumMomentum5Pct": 2.0},
+    )
+    _seed_session("SENSEX", 83600.0, Side.PUT, 175.0, 550.0)
+    with patch(
+        "app.engines.local_base_pullback_entry.get_settings", return_value=settings,
+    ):
+        blocked, reason, meta = local_base_pullback_blocks_entry(
+            cand, None, settings=settings,
+        )
+    assert blocked is True
+    assert reason == "explosion_session_rip_fall_entry"
+    assert "armed_base_launch_waiver" not in (meta.get("localBasePullbackFill") or "")
+
+
+def test_stale_armed_base_no_launch_waiver_far_above_trough():
+    settings = _settings()
+    settings.local_base_pullback_armed_launch_stale_trough_blocks_waiver = True
+    cand = _candidate(
+        side=Side.PUT,
+        premium=450.0,
+        alert={
+            "ictBaseArmed": True,
+            "ictArmedBaseLaunch": True,
+            "ictBasePremium": 418.0,
+            "sessionLowPremium": 175.0,
+        },
+        liveEntryScoreMeta={"drawdownFromHighPct": 0.0, "premiumMomentum5Pct": 11.5},
+    )
+    with patch(
+        "app.engines.local_base_pullback_entry.get_settings", return_value=settings,
+    ):
+        blocked, reason, _ = local_base_pullback_blocks_entry(cand, None, settings=settings)
+    assert blocked is True
+    assert reason == "local_base_pullback_wait"
 
 
 def test_allows_armed_base_launch_above_chase_cap_ce_pe():
