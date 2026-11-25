@@ -13,9 +13,11 @@ from app.engines.elite_score_engine import (
     elite_entry_allowed,
     elite_mega_vertical_bypass,
     elite_must_take,
+    elite_v_rip_shallow_lift_blocked,
     infer_setup_type,
     infer_stage,
 )
+from app.config import Settings
 from app.engines.elite_trade_budget import (
     elite_budget_blocks_entry,
     elite_trade_budget_allows,
@@ -264,6 +266,27 @@ def test_elite_entry_blocks_shallow_elite_tier_without_lift():
         "elite_shallow_first_lift_blocked",
         "elite_v_rip_shallow_first_lift_blocked",
     }
+
+
+def test_momentum_rally_waives_v_rip_shallow_on_armed_base_launch():
+    blocked, reason = elite_v_rip_shallow_lift_blocked(
+        {
+            "momentType": "armed_base_launch",
+            "explosionScore": 99.0,
+            "dayMode": "MOMENTUM RALLY",
+        },
+        {
+            "setup": "V",
+            "dayMode": "MOMENTUM RALLY",
+            "localBaseMovePct": 6.5,
+            "firstLift": False,
+            "activeBreakout": True,
+            "flatVerticalQuality": 79.0,
+        },
+        settings=Settings(),
+    )
+    assert not blocked
+    assert reason == ""
 
 
 def test_elite_entry_blocks_v_rip_without_first_lift_even_with_breakout():

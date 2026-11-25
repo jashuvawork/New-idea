@@ -1146,6 +1146,25 @@ def elite_v_rip_shallow_lift_blocked(
     settings = settings or get_settings()
     if not bool(getattr(settings, "elite_v_rip_shallow_require_first_lift_enabled", True)):
         return False, ""
+    dm = str(assessment.get("dayMode") or evidence.get("dayMode") or "").strip().upper()
+    moment = str(evidence.get("momentType") or "").lower()
+    min_score = float(
+        getattr(settings, "momentum_rally_v_rip_shallow_min_explosion_score", 70.0)
+        or 70.0
+    )
+    exp_score = float(
+        evidence.get("explosionScore")
+        or evidence.get("score")
+        or assessment.get("explosionScore")
+        or 0
+    )
+    if (
+        dm == _MOMENTUM_RALLY_DAY_MODE
+        and bool(getattr(settings, "momentum_rally_waive_v_rip_shallow_enabled", True))
+        and moment in ("v_rip_session_low", "armed_base_launch", "first_lift_local_base")
+        and exp_score >= min_score - 1e-6
+    ):
+        return False, ""
     if str(assessment.get("setup") or "") != "V":
         return False, ""
     if bool(evidence.get("armedBaseLaunch")):

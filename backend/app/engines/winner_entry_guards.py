@@ -148,6 +148,25 @@ def premium_fading_blocks_entry(
             return False, "index_turn_premium_rip_ok"
         if premium_momentum_3s >= shallow_mom3:
             return False, "index_turn_shallow_fade_ok"
+        # Nov25 SENSEX 84000 @ 10:19: index session rally turn armed but 1m premium
+        # mom3 printed ~-39% (tick/series skew) while the 5m leg was launching.
+        if bool(
+            getattr(settings, "momentum_rally_index_turn_trust_premium_fade", True)
+        ):
+            from app.engines.chop_day_guards import (
+                in_momentum_rally_window,
+                resolve_chop_day_mode_from_state,
+            )
+
+            dm = ""
+            try:
+                from app.engines.auto_trader import get_state
+
+                dm = resolve_chop_day_mode_from_state(get_state()).strip().upper()
+            except Exception:
+                dm = ""
+            if dm == "MOMENTUM RALLY" or in_momentum_rally_window():
+                return False, "momentum_rally_index_turn_fade_ok"
 
     min_mom = settings.execution_chart_min_premium_momentum_pct
     from app.engines.morning_exec_fade import premium_live_fade_blocks_now

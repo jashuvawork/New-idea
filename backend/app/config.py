@@ -3082,6 +3082,11 @@ class Settings(BaseSettings):
     momentum_rally_armed_coil_radar_enabled: bool = True
     momentum_rally_armed_coil_min_premium: float = 18.0
     momentum_rally_armed_coil_max_premium: float = 45.0
+    # SENSEX ATM coils trade far above the NIFTY ₹18–45 band (Nov25 84400 CE base ~₹85).
+    momentum_rally_armed_coil_max_premium_sensex: float = 120.0
+    momentum_rally_index_turn_trust_premium_fade: bool = True
+    momentum_rally_waive_v_rip_shallow_enabled: bool = True
+    momentum_rally_v_rip_shallow_min_explosion_score: float = 70.0
     momentum_rally_armed_coil_min_samples: int = 4
     momentum_rally_armed_coil_min_score: float = 18.0
     # Mid-session flat armed coil on radar (SENSEX/NIFTY bands) after peak pullback — not
