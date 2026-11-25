@@ -955,6 +955,7 @@ def check_explosion_entry(
         event, ict=ict_live, top_must_take=must_take,
         squeeze_early_base=squeeze_early_base_active(event, snap),
         bullish_local_base=bool(bullish_base.get("active")),
+        alert=alert if isinstance(alert, dict) else None,
     )
     if window_blocked and not first_lift_ready and not early_pad:
         return False, window_reason

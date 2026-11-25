@@ -353,6 +353,15 @@ def _explosion_candidates(
             pad_lane_waive = symmetric_structural_near_miss_waive(
                 alert if isinstance(alert, dict) else None,
             )
+        if not pad_lane_waive:
+            from app.engines.new_session_base import new_session_base_near_miss_waive
+
+            pad_lane_waive = new_session_base_near_miss_waive(
+                alert if isinstance(alert, dict) else None,
+                settings=settings,
+            )
+            if pad_lane_waive and isinstance(alert, dict):
+                alert["newSessionBaseNearMissWaive"] = True
         side_u = str(alert.get("side") or "").upper()
         if not pad_lane_waive and side_u == "CALL":
             from app.engines.pe_win_ce_mirror import pe_win_ce_mirror_near_miss_waive
@@ -1060,6 +1069,7 @@ def _explosion_candidates(
             event, ict=ict, top_must_take=must_take,
             squeeze_early_base=squeeze_early_base_active(event, snap),
             bullish_local_base=bool(bullish_base.get("active")),
+            alert=alert if isinstance(alert, dict) else None,
         )
         if window_blocked and not first_lift_ready:
             continue
@@ -2831,6 +2841,10 @@ def diagnose_missed_entries(
                     readiness_reason=readiness_reason,
                 )
             if not pad_lane_waive:
+                from app.engines.new_session_base import new_session_base_near_miss_waive
+
+                pad_lane_waive = new_session_base_near_miss_waive(alert, settings=settings)
+            if not pad_lane_waive:
                 from app.engines.nifty_expiry_flip_capture import nifty_expiry_flip_near_miss_waive
 
                 pad_lane_waive = nifty_expiry_flip_near_miss_waive(
@@ -3044,6 +3058,8 @@ def diagnose_missed_entries(
             if snap.tradeQualityScore < 25 and score < settings.aggressive_min_explosion_score + 10:
                 blockers.append("symbol_tqs_low")
             if blockers:
+                from app.engines.new_session_base import session_base_observability_bundle
+
                 side_raw = str(alert.get("side") or "").upper()
                 strike_v = float(alert.get("strike") or 0)
                 notes.append({
@@ -3056,6 +3072,8 @@ def diagnose_missed_entries(
                     "premium": prem,
                     "score": score,
                     "tier": alert.get("tier"),
+                    "firstLiftReadinessReason": readiness_reason,
+                    "sessionBase": session_base_observability_bundle(alert=alert),
                 })
 
         for suggestion in snap.suggestedTrades or []:
