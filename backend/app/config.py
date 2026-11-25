@@ -3428,6 +3428,10 @@ class Settings(BaseSettings):
     ce_cold_timing_max_local_base_pct: float = 10.0
     # Combined open setup (selector + pretrade + selective fade bypass).
     open_setup_guards_enabled: bool = True
+    # 09:15–09:45: run selector + funnel SELECT + pretrade shadow; never place orders until
+    # entry_earliest (default 09:45). Builds proof for a future live open book at 09:15.
+    open_setup_shadow_record_enabled: bool = True
+    open_setup_shadow_pretrade_enabled: bool = True
     # When True, block PUT on bullish open / CALL on bearish open (not all PUTs).
     open_caution_side_align_index_enabled: bool = True
     # Open dump + V off session extreme: stamped pad lift may trade before cash open reclaims.
