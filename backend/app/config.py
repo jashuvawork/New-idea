@@ -3910,6 +3910,9 @@ class Settings(BaseSettings):
     never_green_hard_stop_enabled: bool = True
     never_green_hard_stop_max_best_pct: float = 2.0
     never_green_hard_stop_min_hold_seconds: float = 300.0
+    # ELITE/EXPLODING: longer before failed-launch cut (Nov25 SENSEX PE dipped then
+    # re-rated above entry after the 300s never-green exit).
+    never_green_hard_stop_elite_min_hold_seconds: float = 900.0
     # Scratch a launch that immediately loses both price and velocity confirmation.
     # Wait ≥1m before scratch; premium fading + no bullish tape (long CE/PE).
     explosion_failed_launch_exit_enabled: bool = False

@@ -1,11 +1,15 @@
-"""#676 live guards: never-green hard stop at 300s, reentry velocity after a win."""
+"""#676 live guards: never-green hard stop (elite 900s), reentry velocity after a win."""
 
 from datetime import datetime, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from app.config import Settings
-from app.engines.explosion_profit import ExplosionExitParams, evaluate_explosion_exit
+from app.engines.explosion_profit import (
+    ExplosionExitParams,
+    _never_green_min_hold_seconds,
+    evaluate_explosion_exit,
+)
 from app.engines.session_mode_feedback import win_reentry_velocity_blocked
 from app.models.schemas import AutoTraderState, PaperTrade, Side, StrategyType
 
@@ -37,6 +41,7 @@ def _settings() -> Settings:
     return Settings(
         never_green_hard_stop_enabled=True,
         never_green_hard_stop_min_hold_seconds=300.0,
+        never_green_hard_stop_elite_min_hold_seconds=900.0,
         never_green_hard_stop_max_best_pct=2.0,
         executed_entry_sl_only_loss_exits=True,
         win_reentry_requires_velocity_enabled=True,
@@ -65,16 +70,23 @@ def _exit(side: Side, *, hold: float, best: float, premium: float):
             )
 
 
-def test_never_green_hard_stop_fires_at_300s_for_put_and_call():
+def test_never_green_hard_stop_fires_at_900s_for_elite_put_and_call():
     for side in (Side.PUT, Side.CALL):
-        reason, pnl = _exit(side, hold=300, best=0.0, premium=70.0)
+        reason, pnl = _exit(side, hold=900, best=0.0, premium=70.0)
         assert reason == "explosion_never_green_hard_stop"
         assert pnl < 0
 
 
-def test_never_green_hard_stop_waits_out_299s():
-    reason, _pnl = _exit(Side.PUT, hold=299, best=0.0, premium=70.0)
+def test_never_green_hard_stop_waits_out_899s_on_elite():
+    reason, _pnl = _exit(Side.PUT, hold=899, best=0.0, premium=70.0)
     assert reason != "explosion_never_green_hard_stop"
+
+
+def test_never_green_min_hold_building_stays_300():
+    trade = _never_green_trade(Side.CALL, best=0.0)
+    trade.entryContext = {**(trade.entryContext or {}), "explosionTier": "BUILDING"}
+    s = _settings()
+    assert _never_green_min_hold_seconds(trade, s) == 300.0
 
 
 def test_never_green_hard_stop_leaves_a_green_trade():
