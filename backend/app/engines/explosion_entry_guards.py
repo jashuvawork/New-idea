@@ -1969,6 +1969,12 @@ def fresh_near_local_base(
         meta["freshNearBaseReason"] = "early_radar_pad_ready"
         return True, meta
 
+    if resolved.get("newSessionBase"):
+        kind = str(resolved.get("newBaseKind") or "identified")
+        meta["freshNearBaseReason"] = f"new_session_base_{kind}"
+        meta["effectiveBasePremium"] = resolved.get("effectiveBasePremium")
+        return True, meta
+
     if local_pad <= fresh_max + 1e-6:
         meta["freshNearBaseReason"] = "near_base_pad"
         return True, meta
