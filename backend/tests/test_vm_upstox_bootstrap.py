@@ -52,3 +52,18 @@ def test_bootstrap_skips_when_disabled(monkeypatch):
     out = asyncio.run(upstox_vm_bootstrap.maybe_bootstrap_vm_upstox())
     assert out["bootstrapped"] is False
     assert out["reason"] == "vm_upstox_local_disabled"
+
+
+def test_direct_bootstrap_missing_code(monkeypatch):
+    s = settings_mock()
+    s.vm_upstox_direct_oauth_enabled = True
+    s.upstox_oauth_code = ""
+    s.upstox_bootstrap_access_token = ""
+    monkeypatch.setattr(upstox_vm_bootstrap, "get_settings", lambda: s)
+    async def _no_token():
+        return False
+
+    monkeypatch.setattr(upstox_vm_bootstrap, "has_upstox_token", _no_token)
+    out = asyncio.run(upstox_vm_bootstrap.maybe_bootstrap_direct_upstox())
+    assert out["bootstrapped"] is False
+    assert out["reason"] == "missing_oauth_code_or_bootstrap_token"

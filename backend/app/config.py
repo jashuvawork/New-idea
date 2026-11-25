@@ -897,6 +897,10 @@ class Settings(BaseSettings):
     paper_lab_base_rip_hot_defer_velocity_3s: float = 1.6
     # Cloud VM: local Upstox ticks (sync token from prod — no second OAuth redirect on VM).
     vm_upstox_local_enabled: bool = False
+    # Cloud VM: exchange UPSTOX_OAUTH_CODE or seed UPSTOX_BOOTSTRAP_ACCESS_TOKEN locally (no prod sync).
+    vm_upstox_direct_oauth_enabled: bool = False
+    upstox_oauth_code: str = ""
+    upstox_bootstrap_access_token: str = ""
     paper_lab_vm_token_sync_key: str = ""
     # EC2 only: allow GET /api/paper-lab/vm-upstox-session when key matches.
     paper_lab_vm_token_sync_export_enabled: bool = False

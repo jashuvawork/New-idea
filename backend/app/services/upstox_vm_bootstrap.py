@@ -10,10 +10,50 @@ import httpx
 from app.config import get_settings
 from app.services.redis_store import has_upstox_token, store_upstox_token
 from app.services.token_manager import get_daily_token_status, record_token_generated
+from app.services.upstox import UpstoxClient
 
 logger = logging.getLogger(__name__)
 
 _SYNC_HEADER = "X-Paper-Lab-VM-Sync-Key"
+
+
+async def maybe_bootstrap_direct_upstox() -> dict[str, Any]:
+    """When VM_UPSTOX_DIRECT_OAUTH_ENABLED, seed token from env code or bootstrap access token."""
+    settings = get_settings()
+    if not bool(getattr(settings, "vm_upstox_direct_oauth_enabled", False)):
+        return {"bootstrapped": False, "reason": "vm_upstox_direct_oauth_disabled"}
+    if await has_upstox_token():
+        status = await get_daily_token_status()
+        return {
+            "bootstrapped": False,
+            "reason": "local_token_present",
+            "tokenStatus": status,
+        }
+    bootstrap = str(getattr(settings, "upstox_bootstrap_access_token", "") or "").strip()
+    if bootstrap:
+        await store_upstox_token(bootstrap, "")
+        await record_token_generated(bootstrap, "")
+        status = await get_daily_token_status()
+        logger.info("VM Upstox bootstrapped from UPSTOX_BOOTSTRAP_ACCESS_TOKEN")
+        return {"bootstrapped": True, "source": "bootstrap_access_token", "tokenStatus": status}
+    code = str(getattr(settings, "upstox_oauth_code", "") or "").strip()
+    if not code:
+        return {"bootstrapped": False, "reason": "missing_oauth_code_or_bootstrap_token"}
+    client = UpstoxClient()
+    try:
+        tokens = await client.exchange_code(code)
+    except Exception as exc:
+        logger.warning("VM direct OAuth exchange failed: %s", exc)
+        return {"bootstrapped": False, "reason": "oauth_exchange_failed", "detail": str(exc)}
+    access = str(tokens.get("access_token") or "").strip()
+    refresh = str(tokens.get("refresh_token") or "").strip()
+    if not access:
+        return {"bootstrapped": False, "reason": "empty_access_token"}
+    await store_upstox_token(access, refresh)
+    await record_token_generated(access, refresh)
+    status = await get_daily_token_status()
+    logger.info("VM Upstox bootstrapped from UPSTOX_OAUTH_CODE (validToday=%s)", status.get("validToday"))
+    return {"bootstrapped": True, "source": "oauth_code", "tokenStatus": status}
 
 
 async def maybe_bootstrap_vm_upstox() -> dict[str, Any]:

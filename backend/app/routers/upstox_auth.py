@@ -18,10 +18,12 @@ router = APIRouter(prefix="/api/upstox", tags=["upstox"])
 
 @router.get("/login-url")
 async def login_url():
+    settings = get_settings()
     status = await get_daily_token_status()
     client = UpstoxClient()
     return {
         "loginUrl": client.get_login_url(),
+        "redirectUri": settings.upstox_redirect_uri,
         "tokenStatus": status,
         "canLogin": status["canLogin"],
     }

@@ -334,7 +334,15 @@ async def lifespan(app: FastAPI):
             )
     except Exception as exc:
         logger.warning("Capital sizing initialization error: %s", exc)
-    if bool(getattr(settings, "vm_upstox_local_enabled", False)):
+    if bool(getattr(settings, "vm_upstox_direct_oauth_enabled", False)):
+        try:
+            from app.services.upstox_vm_bootstrap import maybe_bootstrap_direct_upstox
+
+            boot = await maybe_bootstrap_direct_upstox()
+            logger.info("VM Upstox direct OAuth bootstrap: %s", boot)
+        except Exception as exc:
+            logger.warning("VM Upstox direct OAuth bootstrap error: %s", exc)
+    elif bool(getattr(settings, "vm_upstox_local_enabled", False)):
         try:
             from app.services.upstox_vm_bootstrap import maybe_bootstrap_vm_upstox
 
