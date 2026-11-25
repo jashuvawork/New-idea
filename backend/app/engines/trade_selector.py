@@ -1126,6 +1126,11 @@ def _explosion_candidates(
         pp_blocked, _pp_reason = post_peak_chase_blocked(event)
         if pp_blocked:
             continue
+        from app.engines.explosion_entry_guards import explosion_session_rip_fall_entry_blocked
+
+        rip_fall, _rf_reason, _ = explosion_session_rip_fall_entry_blocked(event)
+        if rip_fall:
+            continue
         from app.engines.rally_capture import infer_alert_causal_grade
 
         _alert_dict = alert if isinstance(alert, dict) else None

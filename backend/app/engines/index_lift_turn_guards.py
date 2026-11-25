@@ -187,6 +187,8 @@ def index_lift_turn_option_rip_waiver(
     explosion_event: Any = None,
     alert: Optional[Mapping[str, Any]] = None,
     settings: Any = None,
+    snap: Optional[SymbolSnapshot] = None,
+    symbol: str | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Allow PE/CALL when the option book is ripping even if index turn guard is on."""
     settings = settings or get_settings()
@@ -216,6 +218,49 @@ def index_lift_turn_option_rip_waiver(
     min_v3 = float(getattr(settings, "index_lift_turn_option_rip_min_velocity_3s", 1.2) or 1.2)
     if v3 < min_v3:
         return False, "", {}
+
+    sym = str(
+        symbol
+        or getattr(explosion_event, "symbol", "")
+        or alert_d.get("symbol")
+        or ""
+    ).upper()
+    if bool(getattr(settings, "index_lift_turn_option_rip_respect_session_fall", True)):
+        from app.engines.explosion_entry_guards import explosion_session_rip_fall_entry_blocked
+
+        fall_block, _, fall_meta = explosion_session_rip_fall_entry_blocked(
+            explosion_event,
+            settings=settings,
+            velocity_3s=v3,
+            snap=snap,
+        )
+        if fall_block:
+            return False, "", {"sessionRipFallDeniedWaiver": fall_meta}
+
+    if (
+        side_v == "PUT"
+        and snap is not None
+        and sym
+        and bool(
+            getattr(settings, "index_lift_turn_put_rip_requires_slide_or_not_bullish_breadth", True)
+        )
+    ):
+        slide_active, slide_meta = index_session_slide_turn_active(sym, snap, settings=settings)
+        br = getattr(snap, "breadth", None)
+        bias = ""
+        aligned = False
+        if isinstance(br, dict):
+            bias = str(br.get("bias") or "").upper()
+            aligned = bool(br.get("aligned"))
+        elif br is not None:
+            bias = str(getattr(br, "bias", "") or "").upper()
+            aligned = bool(getattr(br, "aligned", False))
+        bullish_breadth = bias == "BULLISH" and aligned
+        if bullish_breadth and not slide_active:
+            return False, "", {
+                "putRipWaiverDenied": "bullish_breadth_without_index_slide",
+                **slide_meta,
+            }
 
     moment = str(alert_d.get("momentType") or alert_d.get("pattern") or "").lower()
     if moment and moment not in {m.lower() for m in _PUT_OPTION_RIP_MOMENTS}:
@@ -389,6 +434,8 @@ def index_lift_turn_blocks_side(
         explosion_event=explosion_event,
         alert=alert,
         settings=settings,
+        snap=snap,
+        symbol=symbol,
     )
     if rip_ok:
         return False, "ok", {"indexLiftTurnWaiver": rip_meta, "waiverReason": rip_reason}

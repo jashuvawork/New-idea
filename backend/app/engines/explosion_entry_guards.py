@@ -1069,6 +1069,112 @@ def post_peak_chase_blocked(
     return False, ""
 
 
+def explosion_session_rip_fall_entry_blocked(
+    explosion_event: Any,
+    *,
+    settings: Any = None,
+    velocity_3s: float | None = None,
+    momentum5_pct: float | None = None,
+    snap: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Block entries on the fall leg after a large session rip — not at base/trough.
+
+    Nov 25 live: SENSEX 83600 PE ripped to ~₹550 then filled ~₹429 on rollover while
+    session trough sat ~₹170–200. Genuine base entries sit near the session low; this
+    only blocks elevated fall-leg fills when momentum is cooling.
+  Symmetric CE/PE."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "explosion_session_rip_fall_entry_block_enabled", True)):
+        return False, "", meta
+    if explosion_event is None:
+        return False, "", meta
+    sym = str(getattr(explosion_event, "symbol", "") or "")
+    side = getattr(explosion_event, "side", None)
+    strike = float(getattr(explosion_event, "strike", 0) or 0)
+    current = float(getattr(explosion_event, "premium", 0) or 0)
+    if not sym or side is None or strike <= 0 or current <= 0:
+        return False, "", meta
+
+    v3 = velocity_3s
+    if v3 is None:
+        v3 = float(getattr(explosion_event, "velocity_3s", 0) or 0)
+    mom5 = momentum5_pct
+    if mom5 is None:
+        pc = getattr(explosion_event, "premium_chart", None)
+        if pc is not None:
+            mom5 = float(getattr(pc, "momentum5Pct", 0) or 0)
+
+    try:
+        from app.engines.explosion_detector import (
+            get_session_low_premium,
+            get_session_peak_premium,
+        )
+
+        session_low = float(get_session_low_premium(sym, strike, side) or 0)
+        session_peak = float(get_session_peak_premium(sym, strike, side) or 0)
+    except Exception:
+        return False, "", meta
+    if session_low <= 0 or session_peak <= 0:
+        return False, "", meta
+
+    session_run = (session_peak - session_low) / session_low
+    min_run = float(
+        getattr(settings, "explosion_session_rip_fall_min_session_run_pct", 0.35) or 0.35
+    )
+    if session_run < min_run - 1e-6:
+        return False, "", meta
+
+    lift_from_trough = (current - session_low) / session_low
+    near_trough_cap = float(
+        getattr(settings, "explosion_session_rip_fall_near_trough_max_lift_pct", 0.18)
+        or 0.18
+    )
+    if lift_from_trough <= near_trough_cap + 1e-6:
+        meta["sessionRipFallExempt"] = "near_session_trough"
+        return False, "", meta
+
+    fall_from_peak = (session_peak - current) / session_peak
+    min_fall = float(
+        getattr(settings, "explosion_session_rip_fall_min_fall_from_peak_pct", 0.08) or 0.08
+    )
+    if fall_from_peak < min_fall - 1e-6:
+        return False, "", meta
+
+    min_lift = float(
+        getattr(settings, "explosion_session_rip_fall_min_lift_from_trough_pct", 0.28) or 0.28
+    )
+    if lift_from_trough < min_lift - 1e-6:
+        return False, "", meta
+
+    max_v3 = float(
+        getattr(settings, "explosion_session_rip_fall_max_velocity_3s", 1.25) or 1.25
+    )
+    max_mom5 = float(
+        getattr(settings, "explosion_session_rip_fall_max_momentum5_pct", 8.0) or 8.0
+    )
+    hot_rip = v3 >= max_v3
+    if mom5 is not None and mom5 >= max_mom5:
+        hot_rip = True
+    if hot_rip:
+        return False, "", meta
+
+    meta.update(
+        {
+            "sessionRipFallBlock": True,
+            "sessionRunPct": round(session_run * 100, 1),
+            "fallFromPeakPct": round(fall_from_peak * 100, 1),
+            "liftFromTroughPct": round(lift_from_trough * 100, 1),
+            "sessionPeakPremium": round(session_peak, 2),
+            "sessionLowPremium": round(session_low, 2),
+            "velocity3s": round(v3, 2),
+        }
+    )
+    if mom5 is not None:
+        meta["premiumMomentum5Pct"] = round(mom5, 2)
+    return True, "explosion_session_rip_fall_entry", meta
+
+
 def _session_trough_lift_confirmed(
     ict: Any,
     alert: Optional[dict[str, Any]],
