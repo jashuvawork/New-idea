@@ -895,6 +895,11 @@ class Settings(BaseSettings):
     paper_lab_base_rip_rank_bonus: float = 22.0
     paper_lab_base_rip_ladder_keep_ratio: float = 0.85
     paper_lab_base_rip_hot_defer_velocity_3s: float = 1.6
+    # Cloud VM: local Upstox ticks (sync token from prod — no second OAuth redirect on VM).
+    vm_upstox_local_enabled: bool = False
+    paper_lab_vm_token_sync_key: str = ""
+    # EC2 only: allow GET /api/paper-lab/vm-upstox-session when key matches.
+    paper_lab_vm_token_sync_export_enabled: bool = False
 
     # Paper slippage — realistic fills for milestone / PnL (ignored on live broker fills)
     paper_slippage_enabled: bool = True
