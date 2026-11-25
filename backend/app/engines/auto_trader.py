@@ -1061,10 +1061,16 @@ async def _open_from_candidate(
 
         if trap_block or trap_meta.get("action") == "block":
             from app.engines.building_ftv_gates import building_rip_bypasses_fake_trap
+            from app.engines.explosion_entry_guards import (
+                fake_explosion_trap_reject_reason,
+                fake_trap_bypass_disallowed,
+            )
 
+            if fake_trap_bypass_disallowed(trap_meta, settings=settings):
+                return False, fake_explosion_trap_reject_reason(
+                    trap_meta, trap_reason=trap_reason,
+                )
             if not building_rip_bypasses_fake_trap(candidate=candidate):
-                from app.engines.explosion_entry_guards import fake_explosion_trap_reject_reason
-
                 return False, fake_explosion_trap_reject_reason(
                     trap_meta, trap_reason=trap_reason,
                 )
@@ -2133,11 +2139,22 @@ async def _open_from_candidate(
                 if live_trap.get("fakeExplosionTrap"):
                     trap_meta = {**trap_meta, **live_trap}
                 if trap_block or live_trap.get("action") == "block":
+                    from app.engines.explosion_entry_guards import (
+                        fake_explosion_trap_reject_reason,
+                        fake_trap_bypass_disallowed,
+                    )
                     from app.engines.building_ftv_gates import (
                         building_rip_bypasses_fake_trap,
                         top_must_take_bypasses_fake_trap,
                     )
                     from app.engines.elite_never_block import elite_must_take_bypass_allowed
+
+                    merged_trap = {**trap_meta, **live_trap}
+                    if fake_trap_bypass_disallowed(merged_trap, settings=settings):
+                        hard_reason = fake_explosion_trap_reject_reason(
+                            merged_trap, trap_reason=trap_reason,
+                        )
+                        return False, hard_reason
 
                     must_take = elite_must_take_bypass_allowed(
                         event=candidate.explosion_event,

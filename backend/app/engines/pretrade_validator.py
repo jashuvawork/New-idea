@@ -1273,11 +1273,21 @@ def validate_candidate(
         )
         meta.update(trap_meta)
         if trap_block or trap_meta.get("action") == "block":
+            from app.engines.explosion_entry_guards import (
+                fake_explosion_trap_reject_reason,
+                fake_trap_bypass_disallowed,
+            )
             from app.engines.building_ftv_gates import (
                 building_rip_bypasses_fake_trap,
                 top_must_take_bypasses_fake_trap,
             )
             from app.engines.elite_never_block import elite_must_take_bypass_allowed
+
+            if fake_trap_bypass_disallowed(trap_meta, settings=settings):
+                hard_reason = fake_explosion_trap_reject_reason(
+                    trap_meta, trap_reason=trap_reason,
+                )
+                return False, hard_reason, meta
 
             must_take = elite_must_take_bypass_allowed(
                 event=explosion_event,

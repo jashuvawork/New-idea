@@ -2038,6 +2038,9 @@ class Settings(BaseSettings):
     fake_explosion_trap_chop_post_win_afternoon_enabled: bool = True
     # Post-win re-entry only when top-rank / full-sleeve OR hot re-acceleration — no 8-lot FOMO probes.
     fake_explosion_trap_post_win_require_top_confidence: bool = True
+    # Nov25 live −₹18k: trap stamped action=block but top_must_take bypass still filled.
+    fake_trap_honor_hard_action_block: bool = True
+    fake_trap_post_win_opposite_breadth_block_enabled: bool = True
     fake_explosion_trap_post_win_hc_min_velocity_3s: float = 2.0
     # Sep17 SENSEX 74600 PE: after +₹11.6k trail win, re-entered at 13.7% pad / 25% session
     # rip with v3=2.37 → −₹19.8k adaptive SL. Large trail wins skipped post_small_win, so
