@@ -1215,6 +1215,11 @@ def validate_candidate(
             explosion_event, ict=trap_ict, top_must_take=must_take,
             squeeze_early_base=squeeze_early_base_active(explosion_event, snap),
             bullish_local_base=bool(bullish_base.get("active")),
+            alert=(
+                getattr(candidate, "alert", None)
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else None
+            ),
         )
         if window_blocked and not strict_base_ready:
             return False, window_reason, meta

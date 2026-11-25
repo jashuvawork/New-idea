@@ -247,6 +247,80 @@ def resolve_effective_base_premium_inr(
     return float(fallback or 0), meta
 
 
+def alert_pad_move_pct(alert: Mapping[str, Any] | None) -> float:
+    """Trusted % off effective session base when newSessionBase is stamped."""
+    if not isinstance(alert, Mapping):
+        return -1.0
+    if not alert.get("newSessionBase"):
+        return -1.0
+    for key in ("localBaseMovePct", "offBasePct", "ictBaseRelativeMovePct"):
+        try:
+            v = float(alert.get(key) or -1)
+            if v >= 0:
+                return v
+        except (TypeError, ValueError):
+            pass
+    eff = float(alert.get("effectiveBasePremium") or 0)
+    prem = float(alert.get("premium") or alert.get("lastPremium") or 0)
+    if eff > 0 and prem > eff:
+        return (prem - eff) / eff * 100.0
+    return -1.0
+
+
+def new_session_base_near_miss_waive(
+    alert: Mapping[str, Any] | None,
+    *,
+    settings: Any = None,
+) -> bool:
+    """BUILDING/ELITE at a freshly identified trough/pullback base — reduce tier lag."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "new_session_base_near_miss_waive_enabled", True)):
+        return False
+    if not isinstance(alert, Mapping) or not alert.get("newSessionBase"):
+        return False
+    pad = alert_pad_move_pct(alert)
+    pad_max = float(
+        getattr(settings, "new_session_base_entry_max_move_pct", 22.0) or 22.0
+    )
+    pad_min = float(getattr(settings, "new_session_base_entry_min_move_pct", 2.0) or 2.0)
+    if pad < 0 or pad < pad_min - 1e-6 or pad > pad_max + 1e-6:
+        return False
+    try:
+        score = float(alert.get("explosionScore") or alert.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    min_score = float(
+        getattr(settings, "new_session_base_near_miss_min_explosion_score", 18.0) or 18.0
+    )
+    if score < min_score - 1e-6:
+        return False
+    try:
+        v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
+    except (TypeError, ValueError):
+        v3 = 0.0
+    min_v3 = float(
+        getattr(settings, "new_session_base_near_miss_min_velocity_3s", 0.35) or 0.35
+    )
+    if v3 < min_v3 - 1e-6:
+        return False
+    tier = str(alert.get("tier") or "").upper()
+    if tier not in ("BUILDING", "ELITE", "EXPLODING", "HOT"):
+        return False
+    return True
+
+
+def new_session_base_entry_floors(settings: Any = None) -> dict[str, float]:
+    settings = settings or get_settings()
+    return {
+        "minMovePct": float(
+            getattr(settings, "new_session_base_entry_min_move_pct", 2.0) or 2.0
+        ),
+        "maxMovePct": float(
+            getattr(settings, "new_session_base_entry_max_move_pct", 22.0) or 22.0
+        ),
+    }
+
+
 def session_base_guard_summary(settings: Any = None) -> dict[str, Any]:
     """Deployment HUD — session trough / rip-fall / stale-armed knobs (09:45+ book)."""
     settings = settings or get_settings()
@@ -281,6 +355,10 @@ def session_base_guard_summary(settings: Any = None) -> dict[str, Any]:
             or 0.18
         )
         * 100.0,
+        "newSessionBaseEntryFloors": new_session_base_entry_floors(settings),
+        "newSessionBaseNearMissWaiveEnabled": bool(
+            getattr(settings, "new_session_base_near_miss_waive_enabled", True)
+        ),
     }
 
 

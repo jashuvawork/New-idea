@@ -1108,6 +1108,12 @@ class Settings(BaseSettings):
     new_session_base_post_rip_max_pad_pct: float = 18.0
     new_session_base_post_rip_min_velocity_3s: float = 0.8
     new_session_base_stale_ict_gap_pct: float = 12.0
+    # When newSessionBase is stamped, selectors use true pad floors (2–22%) not stale ICT 15%.
+    new_session_base_entry_min_move_pct: float = 2.0
+    new_session_base_entry_max_move_pct: float = 22.0
+    new_session_base_near_miss_waive_enabled: bool = True
+    new_session_base_near_miss_min_velocity_3s: float = 0.35
+    new_session_base_near_miss_min_explosion_score: float = 18.0
     # Sep07 23900 PE: block deep ITM fallback when near-strike OTM armed on same side.
     explosion_deep_itm_substitute_block_enabled: bool = True
     explosion_deep_itm_substitute_min_itm_steps: int = 1

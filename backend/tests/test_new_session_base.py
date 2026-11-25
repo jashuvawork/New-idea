@@ -4,9 +4,13 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
 import app.engines.explosion_detector as ed
 from app.engines.explosion_detector import _open_key
 from app.engines.new_session_base import (
+    alert_pad_move_pct,
+    new_session_base_near_miss_waive,
     new_session_base_identify,
     resolve_effective_base_premium_inr,
     session_base_guard_summary,
@@ -116,6 +120,40 @@ def test_session_base_guard_summary_keys():
     assert s["newSessionBaseIdentifyEnabled"] is True
     assert s["explosionSessionRipFallBlockEnabled"] is True
     assert s["fakeExplosionTrapPostWinArmedBaseBypassEnabled"] is False
+
+
+def test_alert_pad_move_pct_from_effective_base():
+    pad = alert_pad_move_pct(
+        {
+            "newSessionBase": True,
+            "effectiveBasePremium": 100.0,
+            "premium": 108.0,
+        }
+    )
+    assert pad == pytest.approx(8.0, abs=0.1)
+
+
+def test_near_miss_waive_at_trough_building():
+    alert = {
+        "newSessionBase": True,
+        "newBaseKind": "session_trough",
+        "localBaseMovePct": 8.0,
+        "tier": "BUILDING",
+        "explosionScore": 24,
+        "velocity3s": 1.2,
+    }
+    assert new_session_base_near_miss_waive(alert, settings=_settings()) is True
+
+
+def test_near_miss_waive_rejects_chase_pad():
+    alert = {
+        "newSessionBase": True,
+        "localBaseMovePct": 35.0,
+        "tier": "ELITE",
+        "explosionScore": 40,
+        "velocity3s": 2.0,
+    }
+    assert new_session_base_near_miss_waive(alert, settings=_settings()) is False
 
 
 def test_observability_bundle_merges_rip_fall_and_alert():

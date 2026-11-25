@@ -419,6 +419,7 @@ def explosion_entry_window_blocked(
     top_must_take: bool = False,
     squeeze_early_base: bool = False,
     bullish_local_base: bool = False,
+    alert: Optional[dict[str, Any]] = None,
 ) -> tuple[bool, str]:
     """Hard-block EXPLOSIVE entries outside the active early window.
 
@@ -500,6 +501,15 @@ def explosion_entry_window_blocked(
         )
         if bullish_floor > 0:
             lo = min(lo, bullish_floor)
+    if isinstance(alert, dict) and alert.get("newSessionBase"):
+        from app.engines.new_session_base import (
+            alert_pad_move_pct,
+            new_session_base_entry_floors,
+        )
+
+        floors = new_session_base_entry_floors(settings)
+        lo = min(lo, floors["minMovePct"])
+        hi = min(hi, floors["maxMovePct"])
     try:
         max_credible = float(
             getattr(settings, "session_move_max_credible_pct", 500.0)
@@ -515,6 +525,12 @@ def explosion_entry_window_blocked(
 
     # Primary: local pad / off-low — never day% when a pad exists.
     pad = effective_local_base_move_pct(explosion_event, ict)
+    if isinstance(alert, dict) and alert.get("newSessionBase"):
+        from app.engines.new_session_base import alert_pad_move_pct
+
+        ap = alert_pad_move_pct(alert)
+        if ap >= 0:
+            pad = ap
     if pad > 0:
         if pad < lo:
             return True, f"entry_window_local_low_{pad:.0f}%"
@@ -586,6 +602,15 @@ def immature_explosion_blocked(
         if getattr(settings, "explosion_chase_use_local_base", True)
         else 0.0
     )
+    if isinstance(alert, dict) and alert.get("newSessionBase"):
+        from app.engines.new_session_base import (
+            alert_pad_move_pct,
+            new_session_base_entry_floors,
+        )
+
+        ap = alert_pad_move_pct(alert)
+        if ap >= 0:
+            base_move = ap
     structured_pad = bool(ict is not None) and (
         bool(getattr(ict, "local_swing_base", False))
         or bool(getattr(ict, "flat_then_vertical", False))
@@ -680,6 +705,13 @@ def immature_explosion_blocked(
         if bullish_day_context_active(day_mode=_bd_day_mode, confidence_tier=_bd_conf_tier):
             bd = bullish_day_first_lift_floors(settings)
             local_floor = min(local_floor, bd["immatureLocalBaseMinMove"])
+        if isinstance(alert, dict) and alert.get("newSessionBase"):
+            from app.engines.new_session_base import new_session_base_entry_floors
+
+            local_floor = min(
+                local_floor,
+                new_session_base_entry_floors(settings)["minMovePct"],
+            )
         if base_move >= local_floor:
             return False, ""
         return True, f"immature_local_base_{base_move:.1f}%"

@@ -2068,11 +2068,20 @@ def first_lift_entry_readiness(
         if not structure_bypass:
             return False, "first_lift_structure_not_confirmed"
 
-    base_move = float(
-        getattr(ict, "base_relative_move_pct", 0)
-        or row.get("ictBaseRelativeMovePct")
-        or 0
-    )
+    from app.engines.new_session_base import alert_pad_move_pct, new_session_base_entry_floors
+
+    if isinstance(row, dict) and row.get("newSessionBase"):
+        ap = alert_pad_move_pct(row)
+        base_move = ap if ap >= 0 else float(
+            row.get("localBaseMovePct") or row.get("ictBaseRelativeMovePct") or 0
+        )
+    else:
+        base_move = float(
+            getattr(ict, "base_relative_move_pct", 0)
+            or row.get("ictBaseRelativeMovePct")
+            or row.get("localBaseMovePct")
+            or 0
+        )
     if not day_mode and state is None:
         try:
             from app.engines.daily_18pct_strategy import get_session_limits
@@ -2195,6 +2204,10 @@ def first_lift_entry_readiness(
         max_move = float(
             getattr(settings, "ict_elite_base_ready_max_move_pct", 5.0) or 5.0
         )
+    elif isinstance(row, dict) and row.get("newSessionBase"):
+        floors = new_session_base_entry_floors(settings)
+        min_move = floors["minMovePct"]
+        max_move = floors["maxMovePct"]
     elif armed_launch:
         min_move = float(
             getattr(settings, "ict_armed_base_launch_min_move_pct", 5.0) or 5.0
