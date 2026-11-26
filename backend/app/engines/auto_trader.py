@@ -2066,6 +2066,8 @@ async def _open_from_candidate(
 
     live_score_meta = refresh_candidate_live_entry_score(candidate, snap)
     trade_score = candidate_trade_score(candidate)
+    prem_chart_obj = None
+    chart_meta: dict[str, Any] = {"enabled": False}
 
     if not settings.execution_chart_gate_enabled or not client:
         from app.engines.live_entry_score import live_entry_score_blocks_entry
@@ -3357,6 +3359,56 @@ async def _open_from_candidate(
         if chop_live_guard_day_active(state, snap, snapshots):
             ctx_extra["chopLiveGuard"] = True
             ctx_extra.update({k: v for k, v in chop_meta.items() if k != "chopLiveGuard"})
+
+    if (
+        bool(getattr(settings, "execution_order_preflight_refetch_chart", True))
+        and client
+        and settings.execution_chart_gate_enabled
+    ):
+        from app.engines.entry_context import alert_for_execution_chart
+        from app.engines.execution_chart_monitor import monitor_trade_chart_before_execution
+
+        chart_ok, chart_reason, chart_meta = await monitor_trade_chart_before_execution(
+            client,
+            symbol,
+            candidate.side,
+            candidate.strike,
+            snap,
+            trade_score=trade_score,
+            instrument_key=instrument_key,
+            mode=candidate.mode or "",
+            explosion_event=candidate.explosion_event,
+            alert=alert_for_execution_chart(candidate),
+            state=state,
+        )
+        if not chart_ok:
+            _stash_exec_chart_reject_telemetry(candidate, chart_meta, chart_reason)
+            _record_deferred_candidate_fallback(candidate, chart_reason)
+            return False, chart_reason
+        prem_chart_obj = None
+        if (chart_meta or {}).get("premiumChart"):
+            try:
+                from app.models.schemas import PremiumChart
+
+                prem_chart_obj = PremiumChart(**(chart_meta.get("premiumChart") or {}))
+            except Exception:
+                prem_chart_obj = None
+
+    from app.engines.execution_order_preflight import execution_order_preflight_blocked
+
+    pre_blocked, pre_reason, pre_meta = execution_order_preflight_blocked(
+        candidate,
+        snap,
+        premium_chart=prem_chart_obj,
+        premium_candles_1m=(chart_meta or {}).get("_premiumCandles1m"),
+        chart_meta=chart_meta if chart_meta else None,
+        settings=settings,
+    )
+    ctx_extra["executionOrderPreflight"] = pre_meta
+    if pre_blocked:
+        _stash_exec_chart_reject_telemetry(candidate, chart_meta, pre_reason)
+        _record_deferred_candidate_fallback(candidate, pre_reason)
+        return False, pre_reason
 
     if is_live or use_parity:
         if not client:

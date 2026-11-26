@@ -2901,6 +2901,14 @@ class Settings(BaseSettings):
     put_slide_opposite_call_min_velocity3s: float = 0.25
     put_slide_opposite_call_max_put_mom3_pct: float = 2.5
     pe_win_mirror_fade_waiver_requires_nonneg_mom3: bool = True
+    # Final boundary before broker/paper entry — re-sync alert + live premium tape (no stale SELECT).
+    execution_order_preflight_enabled: bool = True
+    execution_order_preflight_refetch_chart: bool = True
+    execution_order_preflight_block_post_spike_chart: bool = True
+    execution_order_preflight_block_bearish_premium: bool = True
+    execution_order_preflight_min_drawdown_pct: float = 8.0
+    execution_order_preflight_min_live_score_recheck: bool = True
+    execution_order_preflight_force_post_spike_dump: bool = True
     # Slow-grind coil in the pad band — catch the flat base before volume/velocity spike.
     # Aug24 24200 PE: 18–23 LTP for ~45min, then sudden lift at 11:15.
     slow_grind_sudden_lift_enabled: bool = True
