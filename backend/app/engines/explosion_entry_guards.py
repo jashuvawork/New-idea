@@ -3060,6 +3060,82 @@ def fake_trap_bypass_disallowed(
     return any(meta.get(flag) for flag in _HARD_TRAP_BLOCK_FLAGS)
 
 
+def fake_trap_entry_rejected(
+    trap_meta: Optional[dict[str, Any]],
+    *,
+    settings: Any = None,
+    must_take: bool = False,
+    candidate: Any = None,
+    snap: Any = None,
+    trap_reason: str = "",
+    building_rip_ready: bool = False,
+) -> tuple[bool, str]:
+    """Return (reject, funnel_reason). Honors action=block without building-rip bypass."""
+    settings = settings or get_settings()
+    meta = trap_meta or {}
+    if fake_trap_bypass_disallowed(meta, settings=settings):
+        return True, fake_explosion_trap_reject_reason(
+            meta, trap_reason=trap_reason,
+        )
+
+    from app.engines.building_ftv_gates import (
+        building_rip_bypasses_fake_trap,
+        top_must_take_bypasses_fake_trap,
+    )
+
+    alert = getattr(candidate, "alert", None) if candidate is not None else None
+    if top_must_take_bypasses_fake_trap(
+        must_take=must_take,
+        alert=alert if isinstance(alert, dict) else None,
+        candidate=candidate,
+        snap=snap,
+    ):
+        return False, ""
+
+    action = str(meta.get("action") or "")
+    if (
+        action == "block"
+        and bool(getattr(settings, "fake_trap_block_denies_building_rip_bypass", True))
+    ):
+        if building_rip_ready:
+            return False, ""
+        from app.engines.building_ftv_gates import ARMED_BASE_GRADE_A_READY_REASONS
+
+        rr = ""
+        al = getattr(candidate, "alert", None) if candidate is not None else None
+        if candidate is not None:
+            pre = getattr(candidate, "pretrade_meta", None) or {}
+            if isinstance(pre, dict):
+                rr = str(
+                    pre.get("ictBaseReadinessReason")
+                    or pre.get("firstLiftReadinessReason")
+                    or ""
+                )
+        if isinstance(al, dict):
+            rr = rr or str(
+                al.get("ictBaseReadinessReason")
+                or al.get("firstLiftReadinessReason")
+                or ""
+            )
+        if rr in ARMED_BASE_GRADE_A_READY_REASONS:
+            return False, ""
+        if isinstance(al, dict) and bool(al.get("indexHelpersConfirm")):
+            if building_rip_bypasses_fake_trap(candidate=candidate):
+                return False, ""
+        return True, fake_explosion_trap_reject_reason(
+            meta, trap_reason=trap_reason,
+        )
+
+    if building_rip_ready or building_rip_bypasses_fake_trap(candidate=candidate):
+        return False, ""
+
+    if action == "block" or meta.get("fakeExplosionTrap"):
+        return True, fake_explosion_trap_reject_reason(
+            meta, trap_reason=trap_reason,
+        )
+    return False, ""
+
+
 def fake_explosion_trap_reject_reason(
     trap_meta: Optional[dict[str, Any]],
     *,
