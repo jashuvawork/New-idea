@@ -52,19 +52,6 @@ def is_live_execution(settings: Any = None) -> bool:
     return armed is True
 
 
-def armed_trading_book_applies_entry_gates(settings: Any = None) -> bool:
-    """Paper book and live execution share the same entry gates when armed."""
-    settings = settings or get_settings()
-    armed = getattr(settings, "auto_trading_enabled", True)
-    if armed is False:
-        return False
-    if armed is not True:
-        return False
-    if is_live_execution(settings):
-        return True
-    return bool(getattr(settings, "paper_trading", True)) is True
-
-
 def uses_paper_live_broker_sim(settings: Any = None) -> bool:
     settings = settings or get_settings()
     return (

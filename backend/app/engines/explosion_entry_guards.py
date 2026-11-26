@@ -2050,11 +2050,9 @@ def armed_base_late_entry_blocked(
 
 
 def _live_post_win_hard_block_active(settings: Any) -> bool:
-    """Mega-session block on paper book + live; optional live-only via config."""
-    if not bool(getattr(settings, "fake_trap_post_win_mega_session_block_live_only", False)):
-        from app.engines.live_paper_parity import armed_trading_book_applies_entry_gates
-
-        return armed_trading_book_applies_entry_gates(settings)
+    """When mega-session / extended blocks apply to armed live only (paper replay unchanged)."""
+    if not bool(getattr(settings, "fake_trap_post_win_mega_session_block_live_only", True)):
+        return True
     from app.engines.live_paper_parity import is_live_execution
 
     return is_live_execution(settings)

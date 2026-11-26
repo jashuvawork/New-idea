@@ -641,10 +641,10 @@ async def monitor_trade_chart_before_execution(
         if nifty_expiry_flip_bypass:
             premium_fade_pad_lane = True
 
-    from app.engines.live_paper_parity import armed_trading_book_applies_entry_gates
+    from app.engines.live_paper_parity import is_live_execution
 
     if (
-        armed_trading_book_applies_entry_gates(settings)
+        is_live_execution(settings)
         and bool(
             getattr(
                 settings,

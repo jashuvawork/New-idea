@@ -5,8 +5,6 @@ from pathlib import Path
 from app.config import Settings
 from app.engines.live_paper_parity import (
     PAPER_BOOK_LIVE_PARITY_FIELDS,
-    armed_trading_book_applies_entry_gates,
-    is_live_execution,
     live_paper_parity_status,
     paper_book_entry_fill_slippage_applies,
     scan_enable_live_outside_allowlist,
@@ -17,29 +15,6 @@ from app.engines.live_paper_parity import (
 def test_paper_book_settings_defaults_aligned():
     ok, drift = verify_paper_book_live_settings(Settings())
     assert ok, drift
-
-
-def test_armed_paper_and_live_share_entry_gate_scope():
-    paper = Settings(
-        enable_live_trading=False,
-        auto_trading_enabled=True,
-        paper_trading=True,
-    )
-    live = Settings(
-        enable_live_trading=True,
-        auto_trading_enabled=True,
-        paper_trading=False,
-    )
-    assert armed_trading_book_applies_entry_gates(paper) is True
-    assert armed_trading_book_applies_entry_gates(live) is True
-    assert is_live_execution(paper) is False
-    assert is_live_execution(live) is True
-    disarmed = Settings(
-        enable_live_trading=False,
-        auto_trading_enabled=False,
-        paper_trading=True,
-    )
-    assert armed_trading_book_applies_entry_gates(disarmed) is False
 
 
 def test_live_entry_slippage_sizing_when_match_paper_book():
