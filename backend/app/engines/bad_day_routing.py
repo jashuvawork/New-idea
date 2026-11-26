@@ -348,14 +348,32 @@ def check_bad_day_candidate(
     if not settings.bad_day_routing_enabled:
         return True, "ok", meta
 
+    sym = candidate.symbol.upper()
+    snap = snapshots.get(sym) or candidate.snap
+    suspended, suspend_reasons = expiry_index_priority_suspended(sym, state, snapshots)
+    meta["expiryPrioritySuspended"] = suspended
+    meta["expiryPrioritySuspendReasons"] = suspend_reasons
+    if suspended:
+        meta["expiryPriorityAlternate"] = cross_index_alternate_for_suspend(sym, snapshots)
+        if bool(getattr(settings, "expiry_priority_suspend_hard_block_enabled", False)):
+            mode_early = str(getattr(candidate, "mode", "") or "")
+            score_early = float(getattr(candidate, "score", 0) or 0)
+            if mode_early == "explosion" and not _extreme_explosion_bypass(candidate):
+                min_rank = float(
+                    getattr(
+                        settings, "expiry_priority_suspend_hard_block_min_rank", 88.0
+                    )
+                    or 88.0
+                )
+                if score_early < min_rank:
+                    return False, "expiry_priority_suspend_route_alternate", meta
+
     active, session_reasons = bad_day_session_active(state, snapshots)
     meta["badDaySession"] = active
     meta["badDayReasons"] = session_reasons
     if not active:
         return True, "ok", meta
 
-    sym = candidate.symbol.upper()
-    snap = snapshots.get(sym) or candidate.snap
     score = float(getattr(candidate, "score", 0) or 0)
     mode = str(getattr(candidate, "mode", "") or "")
     tier = str(getattr(candidate, "tier", "") or "").upper()
@@ -880,6 +898,134 @@ def check_expiry_afternoon_cross_index_explosion(
     return False, "expiry_afternoon_prefer_expiring_deep_itm", meta
 
 
+def _symbol_spot_volatile(
+    snap: SymbolSnapshot,
+    settings: Any,
+) -> tuple[bool, list[str]]:
+    """Fast intraday whip on the index spot chart (CE/PE symmetric)."""
+    reasons: list[str] = []
+    chart = getattr(snap, "spotChart", None)
+    if chart is None:
+        return False, reasons
+    min_mom = float(
+        getattr(settings, "expiry_priority_suspend_min_spot_momentum5_pct", 0.12) or 0.12
+    )
+    mom5 = abs(float(getattr(chart, "momentum5Pct", 0) or 0))
+    if mom5 >= min_mom - 1e-6:
+        reasons.append(f"spot_mom5_{mom5:.2f}")
+    return bool(reasons), reasons
+
+
+def _symbol_material_loss_count(
+    symbol: str,
+    state: AutoTraderState,
+    settings: Any,
+) -> int:
+    sym = symbol.upper()
+    min_inr = float(
+        getattr(settings, "expiry_priority_suspend_loss_min_inr", 500.0) or 500.0
+    )
+    count = 0
+    for t in collect_session_trades(state):
+        if str(t.symbol).upper() != sym:
+            continue
+        if float(t.pnl_inr or 0) < -min_inr:
+            count += 1
+    return count
+
+
+def cross_index_alternate_for_suspend(
+    punished_symbol: str,
+    snapshots: dict[str, SymbolSnapshot],
+) -> Optional[str]:
+    """Other tradable index when one is loss/volatile-punished (may be near-expiry)."""
+    punished = punished_symbol.upper()
+    best: Optional[str] = None
+    best_tqs = -1.0
+    for sym, snap in snapshots.items():
+        su = sym.upper()
+        if su == punished or not snap.dataAvailable:
+            continue
+        tqs = float(snap.tradeQualityScore or 0)
+        if tqs > best_tqs:
+            best_tqs = tqs
+            best = su
+    return best
+
+
+def expiry_index_priority_suspended(
+    symbol: str,
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> tuple[bool, list[str]]:
+    """Suspend nearest-expiry sort/rank priority after symbol loss or whip tape."""
+    settings = get_settings()
+    if not bool(getattr(settings, "expiry_priority_suspend_enabled", True)):
+        return False, []
+    if not settings.bad_day_routing_enabled:
+        return False, []
+    sym = symbol.upper()
+    snap = snapshots.get(sym)
+    if snap is None or not snap.dataAvailable:
+        return False, []
+
+    reasons: list[str] = []
+    sym_pnl = symbol_session_pnl(sym, state)
+    loss_thr = float(
+        getattr(settings, "expiry_priority_suspend_symbol_loss_inr", -3000.0) or -3000.0
+    )
+    if sym_pnl <= loss_thr:
+        reasons.append(f"symbol_loss_{sym_pnl:.0f}")
+
+    book_pct = float(
+        getattr(settings, "expiry_priority_suspend_symbol_loss_pct_book", 0.10) or 0.10
+    )
+    if book_pct > 0:
+        from app.engines.capital_allocator import entry_capital_book_inr
+
+        book = entry_capital_book_inr(settings)
+        if book > 0 and sym_pnl <= -book * book_pct:
+            reasons.append(f"symbol_loss_pct_book_{book_pct:.0f}")
+
+    min_losses = int(
+        getattr(settings, "expiry_priority_suspend_same_symbol_loss_count", 2) or 2
+    )
+    loss_n = _symbol_material_loss_count(sym, state, settings)
+    if loss_n >= min_losses:
+        reasons.append(f"same_symbol_losses_{loss_n}")
+
+    volatile, vol_reasons = _symbol_spot_volatile(snap, settings)
+    vol_need = int(
+        getattr(settings, "expiry_priority_suspend_volatile_requires_loss_count", 1) or 1
+    )
+    if volatile and loss_n >= vol_need:
+        reasons.extend(vol_reasons)
+
+    # Dedupe while preserving order
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for r in reasons:
+        if r in seen:
+            continue
+        seen.add(r)
+        uniq.append(r)
+    return bool(uniq), uniq
+
+
+def expiry_index_priority_suspended_map(
+    state: AutoTraderState,
+    snapshots: dict[str, SymbolSnapshot],
+) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for sym, snap in snapshots.items():
+        if not snap.dataAvailable:
+            continue
+        ok, reasons = expiry_index_priority_suspended(sym, state, snapshots)
+        if ok:
+            out[sym.upper()] = reasons
+    return out
+
+
 def cross_index_rank_adjustment(
     candidate: Any,
     state: AutoTraderState,
@@ -896,15 +1042,21 @@ def cross_index_rank_adjustment(
         return 0.0
 
     fading_map = fading_expiry_symbols(state, snapshots)
+    suspend_map = expiry_index_priority_suspended_map(state, snapshots)
     sym = candidate.symbol.upper()
     snap = snapshots.get(sym) or candidate.snap
     bonus = 0.0
 
     if getattr(settings, "expiry_day_prefer_same_day_enabled", True):
         nearest, nxt = expiry_proximity_ranks(snapshots)
-        if not nearest and not nxt and not fading_map:
+        if not nearest and not nxt and not fading_map and not suspend_map:
             return 0.0
         if sym in nearest:
+            if sym in suspend_map:
+                bonus -= float(
+                    getattr(settings, "expiry_priority_suspend_rank_penalty", 40.0) or 40.0
+                )
+                return bonus
             bonus += float(getattr(settings, "expiry_day_symbol_rank_bonus", 22.0) or 22.0)
             if sym in fading_map:
                 from app.engines.best_side_selection import best_side_fading_rank_waive
@@ -917,18 +1069,30 @@ def cross_index_rank_adjustment(
                 getattr(settings, "expiry_day_same_week_next_rank_bonus", 12.0) or 12.0
             )
             return bonus
-        # Far index: only boost if nearest expiry index is fading hard.
-        if fading_map and any(s in fading_map for s in nearest):
-            for restricted_sym in nearest:
-                if restricted_sym not in fading_map:
-                    continue
-                alt = alternate_index_for(restricted_sym, snapshots)
+        restricted_nearest = {
+            s for s in nearest if s in fading_map or s in suspend_map
+        }
+        if restricted_nearest:
+            for restricted_sym in restricted_nearest:
+                alt = cross_index_alternate_for_suspend(restricted_sym, snapshots)
+                if not alt:
+                    alt = alternate_index_for(restricted_sym, snapshots)
                 if alt and sym == alt:
-                    fading_snap = snapshots.get(restricted_sym)
-                    if fading_snap and float(snap.tradeQualityScore or 0) >= float(
-                        fading_snap.tradeQualityScore or 0
+                    punished_snap = snapshots.get(restricted_sym)
+                    if punished_snap and float(snap.tradeQualityScore or 0) >= float(
+                        punished_snap.tradeQualityScore or 0
                     ) - 5:
-                        bonus += settings.bad_day_alternate_index_bonus
+                        if restricted_sym in suspend_map:
+                            bonus += float(
+                                getattr(
+                                    settings,
+                                    "expiry_priority_suspend_alternate_bonus",
+                                    28.0,
+                                )
+                                or 28.0
+                            )
+                        else:
+                            bonus += settings.bad_day_alternate_index_bonus
                     if _breadth_aligned(candidate, snap):
                         bonus += settings.bad_day_alternate_aligned_bonus
         return bonus
@@ -1097,5 +1261,6 @@ def bad_day_routing_summary(
         "dailyLossStopExpiryTopBypass": expiry_daily_loss_stop_bypass_active(
             state, snapshots,
         ),
+        "expiryPrioritySuspended": expiry_index_priority_suspended_map(state, snapshots),
         "sessionPnlInr": round(compute_session_pnl(state), 2),
     }
