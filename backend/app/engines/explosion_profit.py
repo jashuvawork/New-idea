@@ -231,9 +231,68 @@ def _is_chop_second_tier_trade(trade: PaperTrade, *, settings: Any = None) -> bo
     return True
 
 
+def trade_option_dte_days(trade: PaperTrade, *, as_of: Optional[datetime] = None) -> Optional[int]:
+    """Calendar days from session/open day to option chain expiry (0 = expiry day)."""
+    from datetime import date
+    from zoneinfo import ZoneInfo
+
+    ctx = trade.entryContext or {}
+    raw = ctx.get("optionExpiry") or ctx.get("option_expiry")
+    if not raw:
+        return None
+    try:
+        expiry = date.fromisoformat(str(raw)[:10])
+    except ValueError:
+        return None
+    ist = ZoneInfo("Asia/Kolkata")
+    if as_of is not None:
+        ref = as_of.astimezone(ist) if as_of.tzinfo else as_of.replace(tzinfo=ist)
+    else:
+        ref = trade.openedAt
+        if ref.tzinfo is None:
+            ref = ref.replace(tzinfo=ist)
+        else:
+            ref = ref.astimezone(ist)
+    session = str(ctx.get("sessionDate") or "")[:10]
+    if session:
+        try:
+            ref_day = date.fromisoformat(session)
+        except ValueError:
+            ref_day = ref.date()
+    else:
+        ref_day = ref.date()
+    return (expiry - ref_day).days
+
+
+def near_expiry_price_stop_active(
+    trade: PaperTrade,
+    *,
+    settings: Any = None,
+    as_of: Optional[datetime] = None,
+) -> bool:
+    """True when planned stop should fire on price for 0–1 DTE (CE + PE)."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "near_expiry_price_stop_enabled", True)):
+        return False
+    dte = trade_option_dte_days(trade, as_of=as_of)
+    if dte is None:
+        return False
+    max_dte = int(getattr(settings, "near_expiry_price_stop_max_dte_days", 1) or 1)
+    return 0 <= dte <= max_dte
+
+
+def _near_expiry_price_stop_min_hold(trade: PaperTrade, *, settings: Any = None) -> float:
+    settings = settings or get_settings()
+    return float(
+        getattr(settings, "near_expiry_price_stop_min_hold_seconds", 15.0) or 15.0
+    )
+
+
 def _executed_entry_min_hold_before_loss(trade: PaperTrade, *, settings: Any = None) -> int:
     """Minimum seconds before adaptive SL may cut an executed best-trade entry."""
     settings = settings or get_settings()
+    if near_expiry_price_stop_active(trade, settings=settings):
+        return int(_near_expiry_price_stop_min_hold(trade, settings=settings))
     if not sl_only_loss_exits_enabled(settings):
         return 0
     if _is_chop_second_tier_trade(trade, settings=settings):
@@ -1444,6 +1503,8 @@ def _adaptive_stop_min_hold(trade: PaperTrade, settings) -> int:
     """Minimum hold before adaptive SL — longer when chart/breadth support the trade."""
     from app.engines.confidence_hold import chart_confidence_for_trade, is_confidence_runner_hold
 
+    if near_expiry_price_stop_active(trade, settings=settings):
+        return int(_near_expiry_price_stop_min_hold(trade, settings=settings))
     base = settings.explosion_stop_min_hold_seconds
     executed_min = _executed_entry_min_hold_before_loss(trade, settings=settings)
     if executed_min > 0:
@@ -1528,6 +1589,14 @@ def _defer_adaptive_stop(
 
     if hard_floor > 0 and pnl_pts <= -hard_floor:
         return False
+    if near_expiry_price_stop_active(trade, settings=settings):
+        breach = float(
+            getattr(settings, "near_expiry_price_stop_breach_ratio", 1.0) or 1.0
+        )
+        threshold = hard_floor * breach if hard_floor > 0 else 0.0
+        min_hold = _near_expiry_price_stop_min_hold(trade, settings=settings)
+        if threshold > 0 and pnl_pts <= -threshold and hold >= min_hold:
+            return False
     if bool(getattr(settings, "peak_keep_block_adaptive_stop_defer", True)):
         min_best = _cfg_float(settings, "peak_velocity_reversal_min_best_points", 8.0)
         if best >= min_best:
@@ -1537,6 +1606,11 @@ def _defer_adaptive_stop(
                 return False
     # Never defer a never-green loser — except ICT/HC base-rip grace and executed min-hold.
     if best <= 0 and pnl_pts < 0:
+        if near_expiry_price_stop_active(trade, settings=settings):
+            min_hold = _near_expiry_price_stop_min_hold(trade, settings=settings)
+            if hold < min_hold:
+                return True
+            return False
         min_loss_hold = _executed_entry_min_hold_before_loss(trade, settings=settings)
         if min_loss_hold > 0 and hold < min_loss_hold:
             return True
@@ -2332,6 +2406,8 @@ def peak_velocity_reversal_keep_reason(
 
 def _never_green_min_hold_seconds(trade: PaperTrade, settings: Any) -> float:
     """Minimum hold before never-green hard stop — longer on ELITE/EXPLODING."""
+    if near_expiry_price_stop_active(trade, settings=settings):
+        return _near_expiry_price_stop_min_hold(trade, settings=settings)
     base = _cfg_float(settings, "never_green_hard_stop_min_hold_seconds", 300.0)
     ctx = getattr(trade, "entryContext", None) or {}
     tier = str(ctx.get("explosionTier") or "").upper()
