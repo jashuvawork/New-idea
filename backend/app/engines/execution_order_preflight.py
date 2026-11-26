@@ -133,6 +133,19 @@ def execution_order_preflight_blocked(
     meta["freshAlertPremium"] = alert.get("premium")
     meta["freshAlertVelocity3s"] = alert.get("velocity3s")
 
+    from app.engines.index_extreme_launch_block import index_extreme_launch_preflight_blocked
+
+    extreme_blocked, extreme_reason, extreme_meta = index_extreme_launch_preflight_blocked(
+        getattr(candidate, "side", None),
+        snap,
+        premium_chart=premium_chart,
+        alert=alert,
+        settings=settings,
+    )
+    meta["indexExtremeLaunch"] = extreme_meta
+    if extreme_blocked:
+        return True, extreme_reason, meta
+
     if premium_chart is not None:
         meta["premiumMomentum3Pct"] = float(premium_chart.momentum3Pct or 0)
         meta["premiumMomentum5Pct"] = float(premium_chart.momentum5Pct or 0)
