@@ -121,7 +121,6 @@ def execution_order_preflight_blocked(
             mom5 = float(premium_chart.momentum5Pct or 0)
             if mom3 < 0 and mom5 < 0:
                 return True, "exec_preflight_falling_premium_momentum", meta
-
         side = _side_val(getattr(candidate, "side", None))
         sym = str(getattr(candidate, "symbol", "") or alert.get("symbol") or "")
         candles = premium_candles_1m

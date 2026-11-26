@@ -70,8 +70,6 @@ def test_preflight_blocks_falling_momentum():
     )
     assert blocked is True
     assert reason == "exec_preflight_falling_premium_momentum"
-
-
 def test_preflight_blocks_bearish_premium_in_drawdown():
     settings = Settings()
     cand = _candidate()
