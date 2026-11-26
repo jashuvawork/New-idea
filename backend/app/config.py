@@ -1107,7 +1107,10 @@ class Settings(BaseSettings):
     index_lift_turn_option_rip_respect_session_fall: bool = True
     index_lift_turn_put_rip_requires_slide_or_not_bullish_breadth: bool = True
     new_session_base_identify_enabled: bool = True
+    # Nov26: session_trough stamped CE chase-at-high (0% off peak). Keep post_rip_pullback only by default.
+    new_session_base_session_trough_stamp_enabled: bool = False
     new_session_base_trough_max_off_low_pct: float = 14.0
+    new_session_base_trough_min_fall_from_peak_pct: float = 0.08
     new_session_base_post_rip_min_session_run_pct: float = 0.30
     new_session_base_post_rip_min_peak_pullback_pct: float = 0.12
     new_session_base_post_rip_max_pad_pct: float = 18.0

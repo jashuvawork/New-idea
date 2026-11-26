@@ -26,6 +26,8 @@ IST = ZoneInfo("Asia/Kolkata")
 def _settings():
     s = settings_mock()
     s.new_session_base_identify_enabled = True
+    s.new_session_base_session_trough_stamp_enabled = True
+    s.new_session_base_trough_min_fall_from_peak_pct = 0.08
     s.new_session_base_trough_max_off_low_pct = 14.0
     s.new_session_base_post_rip_min_session_run_pct = 0.30
     s.new_session_base_post_rip_min_peak_pullback_pct = 0.12
@@ -56,6 +58,29 @@ def teardown_function(_):
     ed._session_low.clear()
     ed._session_peak.clear()
     ed._local_base_hist.clear()
+
+
+def test_session_trough_stamp_disabled_by_default():
+    s = settings_mock()
+    s.new_session_base_identify_enabled = True
+    _seed_session("SENSEX", 83600.0, Side.PUT, 175.0, 550.0)
+    ok, kind, _ = new_session_base_identify(
+        "SENSEX", 83600.0, Side.PUT, 190.0, settings=s,
+    )
+    assert ok is False
+    assert kind == ""
+
+
+def test_session_trough_rejects_chase_at_session_high():
+    """Nov26 class: few % off session low but still at session premium peak."""
+    s = _settings()
+    _seed_session("SENSEX", 84000.0, Side.CALL, 372.85, 414.0)
+    ok, kind, meta = new_session_base_identify(
+        "SENSEX", 84000.0, Side.CALL, 383.97, settings=s,
+    )
+    assert ok is False
+    assert kind == ""
+    assert meta.get("fallFromPeakPct", 100) < 8.0
 
 
 def test_identifies_session_trough_base():
@@ -118,6 +143,7 @@ def test_resolve_prefers_effective_over_stale_ict():
 def test_session_base_guard_summary_keys():
     s = session_base_guard_summary(_settings())
     assert s["newSessionBaseIdentifyEnabled"] is True
+    assert s["newSessionBaseSessionTroughStampEnabled"] is True
     assert s["explosionSessionRipFallBlockEnabled"] is True
     assert s["fakeExplosionTrapPostWinArmedBaseBypassEnabled"] is False
 
