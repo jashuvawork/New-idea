@@ -46,6 +46,14 @@ def is_phantom_session_trade(trade: Any) -> bool:
         return True
     if ctx.get("brokerAdopted") and entry <= 0:
         return True
+    broker_id = ctx.get("brokerOrderId")
+    brosim = ctx.get("brokerSimulated")
+    is_live_row = (
+        str(ctx.get("executionMode") or "").upper() == "LIVE"
+        or (broker_id and brosim is False)
+    )
+    if is_live_row and not ctx.get("brokerEntryFillPremium"):
+        return True
     if (
         ctx.get("brokerAdopted")
         and exit_reason == "explosion_target_hit"

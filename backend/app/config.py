@@ -103,6 +103,11 @@ class Settings(BaseSettings):
     chop_second_tier_stop_breach_ratio: float = 0.85
     chop_second_tier_min_hold_before_loss_seconds: int = 120
     live_broker_reconciliation_enabled: bool = True
+    # Live open only after broker average price is known (no ghost strategy rows).
+    live_entry_require_broker_fill_enabled: bool = True
+    # Live: block CE on SLIDE / PE on RALLY without trend breakout (paper waivers stay).
+    live_index_leg_hard_align_enabled: bool = True
+    live_index_leg_hard_align_symbols_csv: str = "NIFTY,SENSEX"
     # Ignored. October 1 paper kept session lift on. Live does too.
     chop_live_disable_session_lift: bool = False
     # Ignored. October 1 paper never applied this blanket (it required live).

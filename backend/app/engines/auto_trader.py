@@ -3423,6 +3423,15 @@ async def _open_from_candidate(
         _record_deferred_candidate_fallback(candidate, pre_reason)
         return False, pre_reason
 
+    if is_live and snapshots:
+        from app.engines.live_entry_integrity import live_index_leg_hard_blocks_entry
+
+        leg_blocked, leg_reason, _leg_meta = live_index_leg_hard_blocks_entry(
+            candidate, state, snapshots, settings=settings,
+        )
+        if leg_blocked:
+            return False, leg_reason
+
     if is_live or use_parity:
         if not client:
             return False, "broker client required for live / paper-live-parity"
@@ -3439,6 +3448,11 @@ async def _open_from_candidate(
                     "brokerSimulated": False,
                 })
                 entry_fill = await live_order_fill(client, str(order.get("order_id") or ""))
+                require_broker_fill = bool(
+                    getattr(settings, "live_entry_require_broker_fill_enabled", True)
+                )
+                if live_order_fill_rejected(entry_fill) and require_broker_fill:
+                    return False, "live_entry_broker_rejected"
                 if live_order_fill_complete(entry_fill):
                     fill_premium = round(float(entry_fill["averagePrice"]), 2)
                     slip_meta = dict(slip_meta or {})
@@ -3446,7 +3460,11 @@ async def _open_from_candidate(
                     slip_meta["fillPremium"] = fill_premium
                     ctx_extra["slippage"] = slip_meta
                     ctx_extra["brokerEntryFillPremium"] = fill_premium
-                state.liveOrdersPlaced += 1
+                    state.liveOrdersPlaced += 1
+                elif require_broker_fill:
+                    return False, "live_entry_broker_fill_incomplete"
+                else:
+                    state.liveOrdersPlaced += 1
             else:
                 order = await simulate_entry_order(
                     client,
