@@ -3486,6 +3486,12 @@ async def _open_from_candidate(
             logger.error("Entry failed for %s (%s): %s", symbol, _execution_mode(settings), e)
             return False, f"entry failed: {e}"
 
+    if is_live and bool(
+        getattr(settings, "live_entry_require_broker_fill_enabled", True)
+    ):
+        if not ctx_extra.get("brokerEntryFillPremium"):
+            return False, "live_entry_broker_fill_required"
+
     paper = PaperTrade(
         id=str(uuid.uuid4())[:8],
         symbol=symbol,

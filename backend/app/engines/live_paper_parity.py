@@ -13,6 +13,7 @@ _ENABLE_LIVE_ALLOWLIST: tuple[str, ...] = (
     "app/engines/auto_trader.py",
     "app/engines/capital_allocator.py",
     "app/engines/chop_live_guards.py",
+    "app/engines/live_entry_integrity.py",
     "app/engines/live_paper_parity.py",
     "app/engines/open_setup_policy.py",
     "app/engines/risk_engine.py",
@@ -42,10 +43,13 @@ PAPER_BOOK_LIVE_PARITY_FIELDS: dict[str, Any] = {
 
 def is_live_execution(settings: Any = None) -> bool:
     settings = settings or get_settings()
-    return bool(
-        getattr(settings, "enable_live_trading", False)
-        and getattr(settings, "auto_trading_enabled", True)
-    )
+    live = getattr(settings, "enable_live_trading", False)
+    armed = getattr(settings, "auto_trading_enabled", True)
+    if live is not True:
+        return False
+    if armed is False:
+        return False
+    return armed is True
 
 
 def uses_paper_live_broker_sim(settings: Any = None) -> bool:

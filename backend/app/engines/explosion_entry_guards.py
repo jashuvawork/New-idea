@@ -2053,10 +2053,9 @@ def _live_post_win_hard_block_active(settings: Any) -> bool:
     """When mega-session / extended blocks apply to armed live only (paper replay unchanged)."""
     if not bool(getattr(settings, "fake_trap_post_win_mega_session_block_live_only", True)):
         return True
-    live = getattr(settings, "enable_live_trading", False)
-    armed = getattr(settings, "auto_trading_enabled", False)
-    # MagicMock settings in unit tests must not read as live-armed.
-    return live is True and armed is True
+    from app.engines.live_paper_parity import is_live_execution
+
+    return is_live_execution(settings)
 
 
 def post_win_mega_session_reentry_blocked(
@@ -2071,9 +2070,11 @@ def post_win_mega_session_reentry_blocked(
         return False, meta
     if not _live_post_win_hard_block_active(settings):
         return False, meta
-    cap = float(
-        getattr(settings, "fake_trap_post_win_mega_session_move_pct", 40.0) or 40.0
-    )
+    cap_raw = getattr(settings, "fake_trap_post_win_mega_session_move_pct", 40.0)
+    try:
+        cap = float(cap_raw if cap_raw is not None else 40.0)
+    except (TypeError, ValueError):
+        cap = 40.0
     if float(session_move or 0) + 1e-6 < cap:
         return False, meta
     meta.update({
