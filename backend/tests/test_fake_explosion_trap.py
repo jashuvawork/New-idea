@@ -13,6 +13,7 @@ from app.engines.explosion_entry_guards import (
     detect_fake_explosion_trap,
     fake_explosion_trap_reject_reason,
     fake_trap_bypass_disallowed,
+    fake_trap_entry_rejected,
     post_win_afternoon_explosion_latched,
     record_post_win_afternoon_trap_reject,
     reset_post_win_afternoon_trap_latch,
@@ -976,6 +977,67 @@ def test_fake_trap_bypass_disallowed_on_post_win_hard_block():
     assert fake_explosion_trap_reject_reason(meta) == (
         "fake_explosion_trap_post_win_not_top_confidence"
     )
+
+
+def test_fake_trap_entry_rejected_on_action_block_despite_building_rip():
+    """Nov26 SENSEX 83900 CE pattern — block must win over fast_bullish building rip."""
+    meta = {
+        "fakeExplosionTrap": True,
+        "action": "block",
+        "conflictFlags": [
+            "midday_chop",
+            "elite_hot",
+            "post_small_win",
+            "post_session_win",
+        ],
+        "psychologyEscalate": "FOMO",
+    }
+    cand = MagicMock()
+    cand.alert = {
+        "ictBuildingRipReady": True,
+        "buildingLiftHelping": True,
+        "ictBaseReadinessReason": "fast_bullish",
+    }
+    reject, reason = fake_trap_entry_rejected(
+        meta, must_take=False, candidate=cand, settings=Settings(),
+    )
+    assert reject
+    assert reason == "fake_explosion_trap_block"
+
+
+def test_fake_trap_entry_allowed_on_cut_size_with_building_rip():
+    meta = {
+        "fakeExplosionTrap": True,
+        "action": "cut_size",
+        "lotCap": 8,
+    }
+    cand = MagicMock()
+    cand.alert = {
+        "ictBuildingRipReady": True,
+        "buildingLiftHelping": True,
+    }
+    reject, _ = fake_trap_entry_rejected(meta, candidate=cand, settings=Settings())
+    assert not reject
+
+
+def test_fake_trap_action_block_allows_must_take_only():
+    meta = {"fakeExplosionTrap": True, "action": "block"}
+    reject, _ = fake_trap_entry_rejected(
+        meta,
+        must_take=True,
+        candidate=MagicMock(alert={"tier": "ELITE"}),
+        settings=Settings(),
+    )
+    assert not reject
+
+
+def test_fake_trap_action_block_allows_grade_a_armed_base():
+    meta = {"fakeExplosionTrap": True, "action": "block"}
+    cand = MagicMock()
+    cand.alert = {"ictBaseReadinessReason": "armed_base_option_led_ready"}
+    cand.pretrade_meta = {}
+    reject, _ = fake_trap_entry_rejected(meta, candidate=cand, settings=Settings())
+    assert not reject
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")

@@ -1195,25 +1195,27 @@ def _explosion_candidates(
         trap_block, _trap_reason, trap_meta = detect_fake_explosion_trap(
             cand_probe, snap, state=state, ict=ict,
         )
-        from app.engines.explosion_entry_guards import fake_trap_bypass_disallowed
+        from app.engines.explosion_entry_guards import fake_trap_entry_rejected
 
-        if fake_trap_bypass_disallowed(trap_meta, settings=settings):
-            continue
-        if (
-            (trap_block or trap_meta.get("action") == "block")
-            and not first_lift_ready
-            and not building_rip_bypasses_fake_trap(
-                alert=alert if isinstance(alert, dict) else None,
-                readiness_reason=first_lift_readiness_reason,
-            )
-            and not top_must_take_bypasses_fake_trap(
+        if trap_block or trap_meta.get("action") == "block":
+            trap_action = str(trap_meta.get("action") or "")
+            if trap_action == "block":
+                building_ok = first_lift_ready
+            else:
+                building_ok = first_lift_ready or building_rip_bypasses_fake_trap(
+                    alert=alert if isinstance(alert, dict) else None,
+                    readiness_reason=first_lift_readiness_reason,
+                )
+            reject, _reject_reason = fake_trap_entry_rejected(
+                trap_meta,
+                settings=settings,
                 must_take=must_take,
-                alert=alert if isinstance(alert, dict) else None,
                 candidate=cand_probe,
                 snap=snap,
+                building_rip_ready=building_ok,
             )
-        ):
-            continue
+            if reject:
+                continue
         # Displacement-only without flat base / FVG / real rip — skip (Jul20 noise).
         # Raised floor to early-window min (28%) so ~22% displacement spikes stay out.
         if (
