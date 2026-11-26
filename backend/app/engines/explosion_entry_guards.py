@@ -2049,10 +2049,59 @@ def armed_base_late_entry_blocked(
     return False, ""
 
 
+def _live_post_win_hard_block_active(settings: Any) -> bool:
+    """When mega-session / extended blocks apply to armed live only (paper replay unchanged)."""
+    if not bool(getattr(settings, "fake_trap_post_win_mega_session_block_live_only", True)):
+        return True
+    live = getattr(settings, "enable_live_trading", False)
+    armed = getattr(settings, "auto_trading_enabled", False)
+    # MagicMock settings in unit tests must not read as live-armed.
+    return live is True and armed is True
+
+
+def post_win_mega_session_reentry_blocked(
+    session_move: float,
+    *,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    """After session win, block when the option session rip is already printed (Nov26 84400)."""
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "fake_trap_post_win_mega_session_block_enabled", True)):
+        return False, meta
+    if not _live_post_win_hard_block_active(settings):
+        return False, meta
+    cap = float(
+        getattr(settings, "fake_trap_post_win_mega_session_move_pct", 40.0) or 40.0
+    )
+    if float(session_move or 0) + 1e-6 < cap:
+        return False, meta
+    meta.update({
+        "postWinMegaSessionBlock": True,
+        "sessionMovePct": round(float(session_move or 0), 2),
+        "megaSessionCapPct": round(cap, 2),
+    })
+    return True, meta
+
+
+def _post_win_side_continuation_waives_chase_gates(
+    session_move: float,
+    *,
+    settings: Any = None,
+) -> bool:
+    settings = settings or get_settings()
+    cap = float(
+        getattr(settings, "fake_trap_post_win_continuation_max_session_move_pct", 45.0)
+        or 45.0
+    )
+    return float(session_move or 0) + 1e-6 < cap
+
+
 def post_win_fresh_near_base_blocked(
     candidate: Any,
     *,
     local_pad: float,
+    session_move: float = 0.0,
     ict: Any = None,
     state: Any = None,
     alert: Optional[dict[str, Any]] = None,
@@ -2070,26 +2119,39 @@ def post_win_fresh_near_base_blocked(
     if not post_session_win:
         return False, "", meta
 
+    mega, mega_meta = post_win_mega_session_reentry_blocked(
+        session_move, settings=settings,
+    )
+    meta.update(mega_meta)
+    if mega:
+        meta.update({
+            "fakeExplosionTrap": True,
+            "action": "block",
+            "psychologyEscalate": "FOMO",
+        })
+        return True, "fake_explosion_trap_post_win_mega_session", meta
+
     snap = getattr(candidate, "snap", None)
     sym = str(getattr(candidate, "symbol", "") or "").upper()
     from app.engines.pe_win_ce_mirror import session_win_side_continuation_ok
 
-    cont_ok, cont_reason, cont_meta = session_win_side_continuation_ok(
-        getattr(candidate, "side", ""),
-        state,
-        snap,
-        sym,
-        strike=float(getattr(candidate, "strike", 0) or 0),
-        premium=float(getattr(candidate, "premium", 0) or 0),
-        velocity_3s=float(
-            getattr(getattr(candidate, "explosion_event", None), "velocity_3s", 0) or 0
-        ),
-        alert=alert if isinstance(alert, dict) else None,
-    )
-    if cont_ok:
-        meta["sessionWinSideContinuation"] = cont_reason
-        meta.update(cont_meta)
-        return False, "", meta
+    if _post_win_side_continuation_waives_chase_gates(session_move, settings=settings):
+        cont_ok, cont_reason, cont_meta = session_win_side_continuation_ok(
+            getattr(candidate, "side", ""),
+            state,
+            snap,
+            sym,
+            strike=float(getattr(candidate, "strike", 0) or 0),
+            premium=float(getattr(candidate, "premium", 0) or 0),
+            velocity_3s=float(
+                getattr(getattr(candidate, "explosion_event", None), "velocity_3s", 0) or 0
+            ),
+            alert=alert if isinstance(alert, dict) else None,
+        )
+        if cont_ok:
+            meta["sessionWinSideContinuation"] = cont_reason
+            meta.update(cont_meta)
+            return False, "", meta
 
     fresh, fresh_meta = fresh_near_local_base(
         local_pad=local_pad, ict=ict, alert=alert, settings=settings,
@@ -2130,6 +2192,18 @@ def _post_win_extended_chase_blocked(
     if not post_session_win:
         return False, "", meta
 
+    mega, mega_meta = post_win_mega_session_reentry_blocked(
+        session_move, settings=settings,
+    )
+    meta.update(mega_meta)
+    if mega:
+        meta.update({
+            "fakeExplosionTrap": True,
+            "action": "block",
+            "psychologyEscalate": "FOMO",
+        })
+        return True, "fake_explosion_trap_post_win_mega_session", meta
+
     from app.engines.paper_lab_base_rip import paper_lab_extended_chase_waive
 
     if paper_lab_extended_chase_waive(
@@ -2145,22 +2219,23 @@ def _post_win_extended_chase_blocked(
     sym = str(getattr(candidate, "symbol", "") or "").upper()
     from app.engines.pe_win_ce_mirror import session_win_side_continuation_ok
 
-    cont_ok, cont_reason, cont_meta = session_win_side_continuation_ok(
-        getattr(candidate, "side", ""),
-        state,
-        snap,
-        sym,
-        strike=float(getattr(candidate, "strike", 0) or 0),
-        premium=float(getattr(candidate, "premium", 0) or 0),
-        velocity_3s=float(v3 or 0),
-        alert=getattr(candidate, "alert", None)
-        if isinstance(getattr(candidate, "alert", None), dict)
-        else None,
-    )
-    if cont_ok:
-        meta["sessionWinSideContinuation"] = cont_reason
-        meta.update(cont_meta)
-        return False, "", meta
+    if _post_win_side_continuation_waives_chase_gates(session_move, settings=settings):
+        cont_ok, cont_reason, cont_meta = session_win_side_continuation_ok(
+            getattr(candidate, "side", ""),
+            state,
+            snap,
+            sym,
+            strike=float(getattr(candidate, "strike", 0) or 0),
+            premium=float(getattr(candidate, "premium", 0) or 0),
+            velocity_3s=float(v3 or 0),
+            alert=getattr(candidate, "alert", None)
+            if isinstance(getattr(candidate, "alert", None), dict)
+            else None,
+        )
+        if cont_ok:
+            meta["sessionWinSideContinuation"] = cont_reason
+            meta.update(cont_meta)
+            return False, "", meta
 
     pad_floor = float(
         getattr(settings, "tier_promotion_pad_chase_min_base_rel_pct", 8.0) or 8.0
@@ -2718,6 +2793,7 @@ def detect_fake_explosion_trap(
     fresh_block, fresh_reason, fresh_meta = post_win_fresh_near_base_blocked(
         candidate,
         local_pad=local_pad,
+        session_move=move,
         ict=ict,
         state=state,
         alert=getattr(candidate, "alert", None)
@@ -3156,6 +3232,7 @@ def fake_explosion_trap_reject_reason(
         ("postWinVelocityBlock", "fake_explosion_trap_post_win_cold_velocity"),
         ("postWinTopConfidenceBlock", "fake_explosion_trap_post_win_not_top_confidence"),
         ("postWinOppositeBreadthBlock", "fake_explosion_trap_post_win_opposite_breadth"),
+        ("postWinMegaSessionBlock", "fake_explosion_trap_post_win_mega_session"),
     ):
         if meta.get(flag):
             return code
