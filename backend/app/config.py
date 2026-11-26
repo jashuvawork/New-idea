@@ -2322,6 +2322,13 @@ class Settings(BaseSettings):
     execution_order_preflight_block_falling_momentum: bool = True
     execution_order_preflight_block_deep_near_low_falling: bool = True
     execution_order_preflight_deep_near_low_min_drawdown_pct: float = 25.0
+    # Live wire: extended chase fades at order boundary (mom3<0 while mom5 still +).
+    execution_order_preflight_live_extended_fade_enabled: bool = True
+    execution_order_preflight_live_extended_session_range_min: float = 0.85
+    execution_order_preflight_live_extended_pad_pct_min: float = 8.0
+    execution_order_preflight_live_near_base_pad_max_pct: float = 5.0
+    execution_order_preflight_live_near_base_range_max: float = 0.35
+    execution_order_preflight_live_extended_strip_pad_fade_waivers: bool = True
     # After a winning close on the same CE/PE strike, the next entry needs
     # live 3s velocity back at or above explosion_post_peak_reentry_min_velocity_3s.
     win_reentry_requires_velocity_enabled: bool = True

@@ -43,10 +43,13 @@ PAPER_BOOK_LIVE_PARITY_FIELDS: dict[str, Any] = {
 
 def is_live_execution(settings: Any = None) -> bool:
     settings = settings or get_settings()
-    return bool(
-        getattr(settings, "enable_live_trading", False)
-        and getattr(settings, "auto_trading_enabled", True)
-    )
+    live = getattr(settings, "enable_live_trading", False)
+    armed = getattr(settings, "auto_trading_enabled", True)
+    if live is not True:
+        return False
+    if armed is False:
+        return False
+    return armed is True
 
 
 def uses_paper_live_broker_sim(settings: Any = None) -> bool:

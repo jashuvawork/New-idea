@@ -70,6 +70,95 @@ def test_preflight_blocks_falling_momentum():
     )
     assert blocked is True
     assert reason == "exec_preflight_falling_premium_momentum"
+
+
+def test_preflight_live_extended_blocks_neg_mom3_while_mom5_positive():
+    """Nov26 chase: mom5 still + at wire while premium fades — must block live only."""
+    paper_settings = Settings(
+        enable_live_trading=False,
+        auto_trading_enabled=False,
+        paper_trading=True,
+        execution_order_preflight_min_live_score_recheck=False,
+    )
+    live_settings = Settings(
+        enable_live_trading=True,
+        auto_trading_enabled=True,
+        paper_trading=False,
+        execution_order_preflight_min_live_score_recheck=False,
+    )
+    alert = {
+        "symbol": "NIFTY",
+        "side": "CALL",
+        "strike": 25850.0,
+        "premium": 95.0,
+        "sessionRangePosition": 0.97,
+        "localPadPct": 12.0,
+    }
+    cand = SimpleNamespace(
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=25850.0,
+        alert=alert,
+        explosion_event=None,
+    )
+    prem = PremiumChart(
+        lastPremium=95.0,
+        momentum3Pct=-0.35,
+        momentum5Pct=2.1,
+        direction="NEUTRAL",
+        drawdownFromHighPct=-5.0,
+        postSpikeDump=False,
+    )
+    blocked_paper, _, _ = execution_order_preflight_blocked(
+        cand, None, premium_chart=prem, settings=paper_settings,
+    )
+    assert blocked_paper is False
+    blocked_live, reason, meta = execution_order_preflight_blocked(
+        cand, None, premium_chart=prem, settings=live_settings,
+    )
+    assert blocked_live is True
+    assert reason == "exec_preflight_live_extended_fade_mom3"
+    assert meta.get("liveExtendedChaseContext", {}).get("liveExtendedChase") is True
+
+
+def test_preflight_live_near_base_allows_shallow_fade_retest():
+    live_settings = Settings(
+        enable_live_trading=True,
+        auto_trading_enabled=True,
+        paper_trading=False,
+        execution_order_preflight_min_live_score_recheck=False,
+    )
+    alert = {
+        "symbol": "SENSEX",
+        "side": "CALL",
+        "strike": 84000.0,
+        "premium": 180.0,
+        "sessionRangePosition": 0.22,
+        "localPadPct": 3.5,
+        "fastBullishLocalBase": True,
+    }
+    cand = SimpleNamespace(
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=84000.0,
+        alert=alert,
+        explosion_event=None,
+    )
+    prem = PremiumChart(
+        lastPremium=180.0,
+        momentum3Pct=-0.2,
+        momentum5Pct=1.5,
+        direction="BULLISH",
+        drawdownFromHighPct=-1.0,
+        postSpikeDump=False,
+    )
+    blocked, reason, _ = execution_order_preflight_blocked(
+        cand, None, premium_chart=prem, settings=live_settings,
+    )
+    assert blocked is False
+    assert reason == "ok"
+
+
 def test_preflight_blocks_bearish_premium_in_drawdown():
     settings = Settings()
     cand = _candidate()

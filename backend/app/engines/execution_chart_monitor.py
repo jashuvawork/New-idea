@@ -641,6 +641,54 @@ async def monitor_trade_chart_before_execution(
         if nifty_expiry_flip_bypass:
             premium_fade_pad_lane = True
 
+    from app.engines.live_paper_parity import is_live_execution
+
+    if (
+        is_live_execution(settings)
+        and bool(
+            getattr(
+                settings,
+                "execution_order_preflight_live_extended_strip_pad_fade_waivers",
+                True,
+            )
+        )
+    ):
+        alert_map = alert if isinstance(alert, dict) else {}
+        pad = float(alert_map.get("localPadPct") or alert_map.get("padPct") or 0)
+        sr = float(alert_map.get("sessionRangePosition") or 0)
+        pad_max = float(
+            getattr(settings, "execution_order_preflight_live_near_base_pad_max_pct", 5.0)
+            or 5.0
+        )
+        range_max = float(
+            getattr(settings, "execution_order_preflight_live_near_base_range_max", 0.35)
+            or 0.35
+        )
+        pad_min = float(
+            getattr(settings, "execution_order_preflight_live_extended_pad_pct_min", 8.0)
+            or 8.0
+        )
+        sr_min = float(
+            getattr(
+                settings,
+                "execution_order_preflight_live_extended_session_range_min",
+                0.85,
+            )
+            or 0.85
+        )
+        near_base = pad <= pad_max + 1e-6 and sr <= range_max + 1e-6
+        extended = pad >= pad_min - 1e-6 or sr >= sr_min - 1e-6
+        if extended and not near_base:
+            premium_fade_pad_lane = bool(strict_first_lift_bypass or atm_armed_fade_bypass)
+            building_rip_fade_bypass = False
+            symmetric_fade_bypass = False
+            open_setup_fade_bypass = False
+            open_caution_fade_bypass = False
+            post_open_fade_bypass = False
+            if not strict_first_lift_bypass:
+                pe_win_mirror_bypass = False
+                nifty_expiry_flip_bypass = False
+
     try:
         meta = await fetch_live_trade_charts(
             client, symbol, side, strike, snap, instrument_key=instrument_key,

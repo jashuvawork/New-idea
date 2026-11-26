@@ -41,6 +41,54 @@ def _fresh_alert_for_contract(
     return alert
 
 
+def _live_near_base_retest(alert: dict[str, Any], settings: Any) -> bool:
+    pad = float(alert.get("localPadPct") or alert.get("padPct") or 0)
+    sr = float(alert.get("sessionRangePosition") or 0)
+    pad_max = float(
+        getattr(settings, "execution_order_preflight_live_near_base_pad_max_pct", 5.0)
+        or 5.0
+    )
+    range_max = float(
+        getattr(settings, "execution_order_preflight_live_near_base_range_max", 0.35)
+        or 0.35
+    )
+    return pad <= pad_max + 1e-6 and sr <= range_max + 1e-6
+
+
+def _live_extended_chase_context(
+    alert: dict[str, Any],
+    settings: Any,
+) -> tuple[bool, dict[str, Any]]:
+    from app.engines.live_paper_parity import is_live_execution
+
+    meta: dict[str, Any] = {}
+    if not is_live_execution(settings):
+        return False, meta
+    if not bool(
+        getattr(settings, "execution_order_preflight_live_extended_fade_enabled", True)
+    ):
+        return False, meta
+    if _live_near_base_retest(alert, settings):
+        return False, meta
+    pad = float(alert.get("localPadPct") or alert.get("padPct") or 0)
+    sr = float(alert.get("sessionRangePosition") or 0)
+    pad_min = float(
+        getattr(settings, "execution_order_preflight_live_extended_pad_pct_min", 8.0)
+        or 8.0
+    )
+    sr_min = float(
+        getattr(settings, "execution_order_preflight_live_extended_session_range_min", 0.85)
+        or 0.85
+    )
+    extended = pad >= pad_min - 1e-6 or sr >= sr_min - 1e-6
+    meta.update(
+        localPadPct=round(pad, 2),
+        sessionRangePosition=round(sr, 3),
+        liveExtendedChase=extended,
+    )
+    return extended, meta
+
+
 def _sync_live_event_premium(candidate: Any, premium_chart: Optional[PremiumChart]) -> None:
     ev = getattr(candidate, "explosion_event", None)
     if ev is None or premium_chart is None:
@@ -121,6 +169,10 @@ def execution_order_preflight_blocked(
             mom5 = float(premium_chart.momentum5Pct or 0)
             if mom3 < 0 and mom5 < 0:
                 return True, "exec_preflight_falling_premium_momentum", meta
+            extended, ext_meta = _live_extended_chase_context(alert, settings)
+            meta["liveExtendedChaseContext"] = ext_meta
+            if extended and mom3 < 0:
+                return True, "exec_preflight_live_extended_fade_mom3", meta
         side = _side_val(getattr(candidate, "side", None))
         sym = str(getattr(candidate, "symbol", "") or alert.get("symbol") or "")
         candles = premium_candles_1m
