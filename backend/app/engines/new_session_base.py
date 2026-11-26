@@ -53,13 +53,23 @@ def new_session_base_identify(
     if sess_peak > 0:
         meta["sessionPeakPremium"] = round(sess_peak, 2)
 
-    # 1) Session trough base — V-bottom / new pad at session low.
-    trough_max = float(
-        getattr(settings, "new_session_base_trough_max_off_low_pct", 14.0) or 14.0
-    )
-    if sess_low > 0:
+    # 1) Session trough base — V-bottom / new pad at session low (not chase-at-session-high).
+    if bool(getattr(settings, "new_session_base_session_trough_stamp_enabled", False)) and sess_low > 0:
+        trough_max = float(
+            getattr(settings, "new_session_base_trough_max_off_low_pct", 14.0) or 14.0
+        )
+        min_off_peak = float(
+            getattr(settings, "new_session_base_trough_min_fall_from_peak_pct", 0.08) or 0.08
+        )
         off_low = (live - sess_low) / sess_low * 100.0
-        if 0.0 <= off_low <= trough_max + 1e-6:
+        fall_from_peak = (
+            (sess_peak - live) / sess_peak if sess_peak > live > 0 else 0.0
+        )
+        meta["fallFromPeakPct"] = round(fall_from_peak * 100, 1)
+        if (
+            0.0 <= off_low <= trough_max + 1e-6
+            and fall_from_peak >= min_off_peak - 1e-6
+        ):
             try:
                 from app.engines.explosion_detector import mid_rip_armed_coil
 
@@ -328,6 +338,13 @@ def session_base_guard_summary(settings: Any = None) -> dict[str, Any]:
         "newSessionBaseIdentifyEnabled": bool(
             getattr(settings, "new_session_base_identify_enabled", True)
         ),
+        "newSessionBaseSessionTroughStampEnabled": bool(
+            getattr(settings, "new_session_base_session_trough_stamp_enabled", False)
+        ),
+        "newSessionBaseTroughMinFallFromPeakPct": float(
+            getattr(settings, "new_session_base_trough_min_fall_from_peak_pct", 0.08) or 0.08
+        )
+        * 100.0,
         "explosionSessionRipFallBlockEnabled": bool(
             getattr(settings, "explosion_session_rip_fall_entry_block_enabled", True)
         ),
