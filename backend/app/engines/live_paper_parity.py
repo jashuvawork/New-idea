@@ -13,6 +13,7 @@ _ENABLE_LIVE_ALLOWLIST: tuple[str, ...] = (
     "app/engines/auto_trader.py",
     "app/engines/capital_allocator.py",
     "app/engines/chop_live_guards.py",
+    "app/engines/live_entry_integrity.py",
     "app/engines/live_paper_parity.py",
     "app/engines/open_setup_policy.py",
     "app/engines/risk_engine.py",
