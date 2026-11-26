@@ -2891,6 +2891,15 @@ class Settings(BaseSettings):
     fast_bullish_opposite_put_min_ce_drawdown_pct: float = 10.0
     fast_bullish_opposite_put_min_velocity3s: float = 0.25
     fast_bullish_opposite_put_max_ce_mom3_pct: float = 2.5
+    # PUT slide / PE rally — mirror Nov25–26 opposite-leg exec discipline (CE rips while PE dumps).
+    put_slide_block_fading_exec_fill: bool = True
+    put_slide_exec_min_premium_mom3_pct: float = 0.0
+    put_slide_block_post_spike_red_candle_exec: bool = True
+    put_slide_post_spike_min_big_red_bars: int = 1
+    put_slide_block_when_opposite_call_rips: bool = True
+    put_slide_opposite_call_min_put_drawdown_pct: float = 10.0
+    put_slide_opposite_call_min_velocity3s: float = 0.25
+    put_slide_opposite_call_max_put_mom3_pct: float = 2.5
     pe_win_mirror_fade_waiver_requires_nonneg_mom3: bool = True
     # Slow-grind coil in the pad band — catch the flat base before volume/velocity spike.
     # Aug24 24200 PE: 18–23 LTP for ~45min, then sudden lift at 11:15.

@@ -10,9 +10,11 @@ from app.engines.premium_spike_dump_guard import (
     alert_premium_spike_dump_meta,
     fast_bullish_post_spike_red_candle_blocked,
     live_execution_trade_score,
+    opposite_call_rip_blocks_put_dump,
     opposite_put_rip_blocks_call_dump,
     post_spike_premium_dump_blocked,
     premium_chart_spike_dump_read,
+    put_slide_post_spike_red_candle_blocked,
 )
 from app.models.schemas import PremiumChart, Side
 
@@ -214,3 +216,54 @@ def test_opposite_put_rip_blocks_call_dump(mock_settings):
     assert blocked
     assert reason == "exec_opposite_put_rip_blocks_call_dump"
     assert meta["oppositePutVelocity3s"] >= 0.25
+
+
+@patch("app.engines.premium_spike_dump_guard.get_settings")
+def test_put_slide_post_spike_blocked_single_red(mock_settings):
+    s = MagicMock()
+    s.premium_post_spike_dump_chart_bars = 24
+    s.premium_post_spike_dump_min_drawdown_pct = 12.0
+    s.premium_post_spike_dump_min_spike_run_pct = 35.0
+    s.premium_post_spike_dump_big_body_mult = 1.1
+    s.put_slide_block_post_spike_red_candle_exec = True
+    s.put_slide_post_spike_min_big_red_bars = 1
+    mock_settings.return_value = s
+
+    candles = _make_candles_spike_dump(base=80.0, peak=350.0, ltp=220.0)
+    candles = candles[:-2]
+    blocked, reason, _ = put_slide_post_spike_red_candle_blocked(candles, 220.0, settings=s)
+    assert blocked
+    assert reason == "exec_premium_post_spike_red_candle_trap"
+
+
+@patch("app.engines.premium_spike_dump_guard.get_settings")
+def test_opposite_call_rip_blocks_put_dump(mock_settings):
+    s = MagicMock()
+    s.put_slide_block_when_opposite_call_rips = True
+    s.put_slide_opposite_call_min_put_drawdown_pct = 10.0
+    s.put_slide_opposite_call_min_velocity3s = 0.25
+    s.put_slide_opposite_call_max_put_mom3_pct = 2.5
+    mock_settings.return_value = s
+
+    prem = PremiumChart(
+        drawdownFromHighPct=-22.0,
+        momentum3Pct=0.4,
+        lastPremium=180.0,
+    )
+    snap = SimpleNamespace(
+        explosionAlerts=[
+            {
+                "symbol": "SENSEX",
+                "side": "CALL",
+                "strike": 84200.0,
+                "velocity3s": 1.5,
+                "tier": "ELITE",
+            }
+        ],
+    )
+    blocked, reason, meta = opposite_call_rip_blocks_put_dump(
+        "SENSEX", snap, prem, settings=s,
+    )
+    assert blocked
+    assert reason == "exec_opposite_call_rip_blocks_put_dump"
+    assert meta["oppositeCallVelocity3s"] >= 0.25

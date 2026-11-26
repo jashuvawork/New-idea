@@ -295,6 +295,31 @@ def fast_bullish_post_spike_red_candle_blocked(
     return False, "ok", read
 
 
+def put_slide_post_spike_red_candle_blocked(
+    candles: list,
+    ltp: float,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Mirror fast_bullish trap for PUT slide / PE rally lanes at execution."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "put_slide_block_post_spike_red_candle_exec", True)):
+        return False, "ok", {}
+    min_red = int(
+        getattr(settings, "put_slide_post_spike_min_big_red_bars", 1) or 1
+    )
+    read = premium_chart_spike_dump_read(
+        candles,
+        ltp,
+        settings=settings,
+        min_big_red_bars=min_red,
+        ignore_near_low=True,
+    )
+    if read.get("active"):
+        return True, "exec_premium_post_spike_red_candle_trap", read
+    return False, "ok", read
+
+
 def opposite_put_rip_blocks_call_dump(
     symbol: str,
     snap: SymbolSnapshot,
@@ -346,6 +371,59 @@ def opposite_put_rip_blocks_call_dump(
         "ceMomentum3Pct": ce_mom3,
     }
     return True, "exec_opposite_put_rip_blocks_call_dump", meta
+
+
+def opposite_call_rip_blocks_put_dump(
+    symbol: str,
+    snap: SymbolSnapshot,
+    premium_chart: Optional[PremiumChart],
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """When PUT is off highs and CALL on the same index is lifting, do not buy the PUT dump."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "put_slide_block_when_opposite_call_rips", True)):
+        return False, "ok", {}
+    if premium_chart is None:
+        return False, "ok", {}
+    dd = float(getattr(premium_chart, "drawdownFromHighPct", 0) or 0)
+    min_dd = float(
+        getattr(settings, "put_slide_opposite_call_min_put_drawdown_pct", 10.0) or 10.0
+    )
+    if dd > -min_dd:
+        return False, "ok", {"drawdownFromHighPct": dd}
+    sym_u = str(symbol or "").upper()
+    min_call_v3 = float(
+        getattr(settings, "put_slide_opposite_call_min_velocity3s", 0.25) or 0.25
+    )
+    best_call: dict[str, Any] | None = None
+    best_v3 = 0.0
+    for alert in snap.explosionAlerts or []:
+        if not isinstance(alert, dict):
+            continue
+        if str(alert.get("symbol") or "").upper() != sym_u:
+            continue
+        if str(alert.get("side") or "").upper() != "CALL":
+            continue
+        v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
+        if v3 >= min_call_v3 and v3 > best_v3:
+            best_v3 = v3
+            best_call = alert
+    if not best_call:
+        return False, "ok", {"drawdownFromHighPct": dd}
+    put_mom3 = float(getattr(premium_chart, "momentum3Pct", 0) or 0)
+    max_put_mom3 = float(
+        getattr(settings, "put_slide_opposite_call_max_put_mom3_pct", 2.5) or 2.5
+    )
+    if put_mom3 > max_put_mom3:
+        return False, "ok", {"drawdownFromHighPct": dd, "putMom3": put_mom3}
+    meta = {
+        "drawdownFromHighPct": dd,
+        "oppositeCallStrike": best_call.get("strike"),
+        "oppositeCallVelocity3s": round(best_v3, 3),
+        "putMomentum3Pct": put_mom3,
+    }
+    return True, "exec_opposite_call_rip_blocks_put_dump", meta
 
 
 def opposite_side_dump_capture_rank_bonus(
