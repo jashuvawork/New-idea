@@ -114,6 +114,13 @@ def execution_order_preflight_blocked(
             ):
                 return True, "exec_preflight_bearish_premium_tape", meta
 
+        if bool(
+            getattr(settings, "execution_order_preflight_block_falling_momentum", True)
+        ):
+            mom3 = float(premium_chart.momentum3Pct or 0)
+            mom5 = float(premium_chart.momentum5Pct or 0)
+            if mom3 < 0 and mom5 < 0:
+                return True, "exec_preflight_falling_premium_momentum", meta
         side = _side_val(getattr(candidate, "side", None))
         sym = str(getattr(candidate, "symbol", "") or alert.get("symbol") or "")
         candles = premium_candles_1m
@@ -193,6 +200,31 @@ def execution_order_preflight_blocked(
         meta["alertDumpRecheck"] = dump_meta
         if dump_meta.get("active"):
             return True, "exec_preflight_premium_post_spike_dump", meta
+        if bool(
+            getattr(settings, "execution_order_preflight_block_deep_near_low_falling", True)
+        ):
+            dd_peak = float(dump_meta.get("drawdownFromPeakPct") or 0)
+            min_dd_peak = float(
+                getattr(
+                    settings,
+                    "execution_order_preflight_deep_near_low_min_drawdown_pct",
+                    25.0,
+                )
+                or 25.0
+            )
+            if dump_meta.get("nearSessionLow") and dd_peak <= -min_dd_peak:
+                mom3 = meta.get("premiumMomentum3Pct")
+                mom5 = meta.get("premiumMomentum5Pct")
+                if mom3 is None and premium_chart is not None:
+                    mom3 = float(premium_chart.momentum3Pct or 0)
+                    mom5 = float(premium_chart.momentum5Pct or 0)
+                try:
+                    m3 = float(mom3 or 0)
+                    m5 = float(mom5 or 0)
+                except (TypeError, ValueError):
+                    m3 = m5 = 0.0
+                if m3 < 0 or m5 < 0:
+                    return True, "exec_preflight_deep_near_low_falling", meta
     else:
         dump_blocked, dump_reason, dump_meta = post_spike_premium_dump_blocked(
             getattr(candidate, "explosion_event", None),

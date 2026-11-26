@@ -247,6 +247,180 @@ def _latest_same_strike_explosion_close(
     return latest
 
 
+def _latest_same_side_explosion_close(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+) -> Optional[Any]:
+    """Latest closed explosion on symbol+side (any strike). CE/PE symmetric."""
+    sym = str(symbol or "").upper()
+    side_v = _side_key(side)
+    latest: Optional[Any] = None
+    latest_ts = None
+
+    def _is_explosion_side_match(t: Any) -> bool:
+        if str(getattr(t, "symbol", "") or "").upper() != sym:
+            return False
+        if _side_key(getattr(t, "side", "")) != side_v:
+            return False
+        ctx = getattr(t, "entryContext", None) or {}
+        mode = str(ctx.get("selectionMode") or getattr(t, "mode", "") or "").lower()
+        st = str(getattr(t, "strategyType", "") or "")
+        st_u = st.upper() if not hasattr(st, "value") else str(st.value).upper()
+        return mode == "explosion" or st_u == "EXPLOSIVE"
+
+    for t in getattr(state, "closedPaperTrades", []) or []:
+        if not _is_explosion_side_match(t):
+            continue
+        ts = getattr(t, "closedAt", None) or getattr(t, "openedAt", None)
+        if latest is None or (ts is not None and (latest_ts is None or ts > latest_ts)):
+            latest = t
+            latest_ts = ts
+
+    try:
+        from app.engines.pretrade_validator import collect_session_trades
+        from types import SimpleNamespace
+
+        for rec in collect_session_trades(state):
+            if str(rec.symbol or "").upper() != sym:
+                continue
+            rec_side = rec.side.value if hasattr(rec.side, "value") else str(rec.side or "").upper()
+            if rec_side != side_v:
+                continue
+            stub = SimpleNamespace(
+                id=rec.trade_id,
+                symbol=rec.symbol,
+                side=rec.side,
+                strike=rec.strike,
+                pnlInr=rec.pnl_inr,
+                closedAt=None,
+                entryContext={"selectionMode": "explosion"},
+            )
+            if latest is None or rec.trade_id:
+                latest = stub
+    except Exception:
+        pass
+    return latest
+
+
+def side_post_close_wait_base_blocked(
+    state: AutoTraderState,
+    *,
+    symbol: str,
+    side: Any,
+    strike: float,
+    premium: float,
+    velocity_3s: float,
+    alert: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+  After a same-index CE/PE close, block until the candidate strike forms a fresh
+  post-close base (reacceleration or consolidated pad) — do not chase while falling.
+  """
+    settings = get_settings()
+    meta: dict[str, Any] = {"sidePostCloseWaitBase": True}
+    if not bool(getattr(settings, "side_post_close_wait_base_enabled", True)):
+        meta["sidePostCloseWaitBase"] = False
+        return False, "", meta
+
+    prior = _latest_same_side_explosion_close(state, symbol=symbol, side=side)
+    if prior is None:
+        meta["reason"] = "no_prior_same_side_close"
+        return False, "", meta
+    closed_at = getattr(prior, "closedAt", None)
+    if closed_at is None:
+        meta["reason"] = "prior_missing_close_ts"
+        return False, "", meta
+    if closed_at.tzinfo is None:
+        closed_at = closed_at.replace(tzinfo=_IST)
+    now = datetime.now(_IST)
+    age = max(0.0, (now - closed_at.astimezone(_IST)).total_seconds())
+    lookback = float(
+        getattr(settings, "side_post_close_wait_base_lookback_seconds", 1800) or 1800
+    )
+    meta["priorTradeId"] = getattr(prior, "id", None)
+    meta["priorStrike"] = float(getattr(prior, "strike", 0) or 0)
+    meta["secondsSincePriorClose"] = round(age, 1)
+    if age > lookback:
+        meta["reason"] = "prior_close_outside_lookback"
+        return False, "", meta
+
+    alert_d = alert if isinstance(alert, dict) else {}
+    if _alert_premium_already_fading(alert_d, velocity_3s):
+        meta["reason"] = "falling_premium_tape"
+        return True, "side_post_close_falling_premium", meta
+
+    min_v3 = float(
+        getattr(settings, "explosion_post_peak_reentry_min_velocity_3s", 1.5) or 1.5
+    )
+    from app.engines.explosion_detector import (
+        post_close_base_reacceleration,
+        post_close_local_base_consolidation,
+    )
+
+    reset, reset_meta = post_close_base_reacceleration(
+        symbol,
+        float(strike or 0),
+        side,
+        closed_at=closed_at,
+        current_premium=float(premium or 0),
+        velocity_3s=float(velocity_3s or 0),
+        min_base_samples=int(
+            getattr(settings, "explosion_post_peak_reentry_base_samples", 3) or 3
+        ),
+        min_base_span_seconds=float(
+            getattr(settings, "explosion_post_peak_reentry_base_span_seconds", 6.0) or 6.0
+        ),
+        min_reacceleration_pct=float(
+            getattr(settings, "explosion_post_peak_reentry_min_reacceleration_pct", 8.0)
+            or 8.0
+        ),
+        min_velocity_3s=min_v3,
+    )
+    meta["reacceleration"] = reset_meta
+    if reset:
+        meta["baseProven"] = "reacceleration"
+        meta["reason"] = "ok"
+        return False, "", meta
+
+    fast_window = float(
+        getattr(settings, "side_post_close_wait_base_fast_window_seconds", 1200.0) or 1200.0
+    )
+    if age <= fast_window:
+        consol_span = float(
+            getattr(
+                settings, "side_post_close_wait_base_consolidation_span_seconds", 90.0
+            )
+            or 90.0
+        )
+        consol, consol_meta = post_close_local_base_consolidation(
+            symbol,
+            float(strike or 0),
+            side,
+            closed_at=closed_at,
+            current_premium=float(premium or 0),
+            min_consolidation_span_seconds=consol_span,
+        )
+        meta["consolidation"] = consol_meta
+        min_reaccel = float(
+            getattr(settings, "side_post_close_wait_base_min_reacceleration_pct", 6.0)
+            or 6.0
+        )
+        reaccel = float(consol_meta.get("reaccelerationPct") or 0)
+        if (
+            consol
+            and reaccel >= min_reaccel
+            and float(velocity_3s or 0) >= min_v3
+        ):
+            meta["baseProven"] = "consolidation"
+            meta["reason"] = "ok"
+            return False, "", meta
+
+    meta["reason"] = "base_not_ready"
+    return True, "side_post_close_wait_for_base", meta
+
+
 def _recent_opposite_side_session_win(
     state: AutoTraderState | None,
     *,

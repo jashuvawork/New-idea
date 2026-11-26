@@ -2300,6 +2300,16 @@ class Settings(BaseSettings):
     explosion_post_peak_reentry_base_span_seconds: float = 6.0
     explosion_post_peak_reentry_min_reacceleration_pct: float = 8.0
     explosion_post_peak_reentry_min_velocity_3s: float = 1.5
+    # After any same-index CE/PE close, wait for a fresh base on the candidate strike
+    # before rotation / ladder re-entry (fast sessions — Nov26 84000 → 83900 chase).
+    side_post_close_wait_base_enabled: bool = True
+    side_post_close_wait_base_lookback_seconds: int = 1800
+    side_post_close_wait_base_fast_window_seconds: float = 1200.0
+    side_post_close_wait_base_consolidation_span_seconds: float = 90.0
+    side_post_close_wait_base_min_reacceleration_pct: float = 6.0
+    execution_order_preflight_block_falling_momentum: bool = True
+    execution_order_preflight_block_deep_near_low_falling: bool = True
+    execution_order_preflight_deep_near_low_min_drawdown_pct: float = 25.0
     # After a winning close on the same CE/PE strike, the next entry needs
     # live 3s velocity back at or above explosion_post_peak_reentry_min_velocity_3s.
     win_reentry_requires_velocity_enabled: bool = True
