@@ -22,6 +22,8 @@ def premium_chart_spike_dump_read(
     ltp: float,
     *,
     settings: Any = None,
+    min_big_red_bars: Optional[int] = None,
+    ignore_near_low: bool = False,
 ) -> dict[str, Any]:
     """1m premium candles at execution — spike + dump pattern."""
     settings = settings or get_settings()
@@ -56,7 +58,11 @@ def premium_chart_spike_dump_read(
             getattr(settings, "premium_post_spike_dump_big_body_mult", 1.25) or 1.25
         )
     )
-    min_red = int(getattr(settings, "premium_post_spike_dump_min_big_red_bars", 2) or 2)
+    min_red = int(
+        min_big_red_bars
+        if min_big_red_bars is not None
+        else getattr(settings, "premium_post_spike_dump_min_big_red_bars", 2) or 2
+    )
     min_dd = float(getattr(settings, "premium_post_spike_dump_min_drawdown_pct", 12.0) or 12.0)
     min_run = float(getattr(settings, "premium_post_spike_dump_min_spike_run_pct", 35.0) or 35.0)
 
@@ -70,7 +76,7 @@ def premium_chart_spike_dump_read(
         run_pct >= min_run
         and drawdown_pct <= -min_dd
         and big_red >= min_red
-        and not near_low
+        and (ignore_near_low or not near_low)
     )
     return {
         "active": active,
@@ -257,6 +263,89 @@ def live_execution_trade_score(
     meta["liveScore"] = round(live, 2)
     meta["liveScorePenalty"] = round(penalty, 2)
     return live, meta
+
+
+def fast_bullish_post_spike_red_candle_blocked(
+    candles: list,
+    ltp: float,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Block call-rally / fast-bullish CE fills on a dead-cat bounce after a spike dump.
+
+    Large red premium bar then a brief green bounce can show positive mom3 at execution
+    while still far off session high — momentum-only fade waivers pass incorrectly.
+    """
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "fast_bullish_block_post_spike_red_candle_exec", True)):
+        return False, "ok", {}
+    min_red = int(
+        getattr(settings, "fast_bullish_post_spike_min_big_red_bars", 1) or 1
+    )
+    read = premium_chart_spike_dump_read(
+        candles,
+        ltp,
+        settings=settings,
+        min_big_red_bars=min_red,
+        ignore_near_low=True,
+    )
+    if read.get("active"):
+        return True, "exec_premium_post_spike_red_candle_trap", read
+    return False, "ok", read
+
+
+def opposite_put_rip_blocks_call_dump(
+    symbol: str,
+    snap: SymbolSnapshot,
+    premium_chart: Optional[PremiumChart],
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """When CE is off highs and PUT on the same index is lifting, do not buy the CE dump."""
+    settings = settings or get_settings()
+    if not bool(getattr(settings, "fast_bullish_block_call_when_opposite_put_rips", True)):
+        return False, "ok", {}
+    if premium_chart is None:
+        return False, "ok", {}
+    dd = float(getattr(premium_chart, "drawdownFromHighPct", 0) or 0)
+    min_dd = float(
+        getattr(settings, "fast_bullish_opposite_put_min_ce_drawdown_pct", 10.0) or 10.0
+    )
+    if dd > -min_dd:
+        return False, "ok", {"drawdownFromHighPct": dd}
+    sym_u = str(symbol or "").upper()
+    min_put_v3 = float(
+        getattr(settings, "fast_bullish_opposite_put_min_velocity3s", 0.25) or 0.25
+    )
+    best_put: dict[str, Any] | None = None
+    best_v3 = 0.0
+    for alert in snap.explosionAlerts or []:
+        if not isinstance(alert, dict):
+            continue
+        if str(alert.get("symbol") or "").upper() != sym_u:
+            continue
+        if str(alert.get("side") or "").upper() != "PUT":
+            continue
+        v3 = float(alert.get("velocity3s") or alert.get("velocity_3s") or 0)
+        if v3 >= min_put_v3 and v3 > best_v3:
+            best_v3 = v3
+            best_put = alert
+    if not best_put:
+        return False, "ok", {"drawdownFromHighPct": dd}
+    ce_mom3 = float(getattr(premium_chart, "momentum3Pct", 0) or 0)
+    max_ce_mom3 = float(
+        getattr(settings, "fast_bullish_opposite_put_max_ce_mom3_pct", 2.5) or 2.5
+    )
+    if ce_mom3 > max_ce_mom3:
+        return False, "ok", {"drawdownFromHighPct": dd, "ceMom3": ce_mom3}
+    meta = {
+        "drawdownFromHighPct": dd,
+        "oppositePutStrike": best_put.get("strike"),
+        "oppositePutVelocity3s": round(best_v3, 3),
+        "ceMomentum3Pct": ce_mom3,
+    }
+    return True, "exec_opposite_put_rip_blocks_call_dump", meta
 
 
 def opposite_side_dump_capture_rank_bonus(
