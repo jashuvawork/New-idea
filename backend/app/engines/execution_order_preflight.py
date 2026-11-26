@@ -59,10 +59,10 @@ def _live_extended_chase_context(
     alert: dict[str, Any],
     settings: Any,
 ) -> tuple[bool, dict[str, Any]]:
-    from app.engines.live_paper_parity import is_live_execution
+    from app.engines.live_paper_parity import armed_trading_book_applies_entry_gates
 
     meta: dict[str, Any] = {}
-    if not is_live_execution(settings):
+    if not armed_trading_book_applies_entry_gates(settings):
         return False, meta
     if not bool(
         getattr(settings, "execution_order_preflight_live_extended_fade_enabled", True)

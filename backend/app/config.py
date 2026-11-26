@@ -2089,7 +2089,7 @@ class Settings(BaseSettings):
     # Nov26 SENSEX 84400 CE: +₹7.3k CE win then 87% session rip @ 6% pad — continuation waived all chase gates.
     fake_trap_post_win_mega_session_block_enabled: bool = True
     fake_trap_post_win_mega_session_move_pct: float = 40.0
-    fake_trap_post_win_mega_session_block_live_only: bool = True
+    fake_trap_post_win_mega_session_block_live_only: bool = False
     fake_trap_post_win_continuation_max_session_move_pct: float = 45.0
     fake_explosion_trap_post_win_extended_min_velocity_3s: float = 3.0
     fake_explosion_trap_post_win_streak_block_enabled: bool = True

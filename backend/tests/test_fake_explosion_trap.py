@@ -965,6 +965,7 @@ def test_post_win_mega_session_inactive_when_paper_only(
     cfg = _settings()
     cfg.enable_live_trading = False
     cfg.auto_trading_enabled = False
+    cfg.fake_trap_post_win_mega_session_block_live_only = False
     mock_settings.return_value = cfg
     mock_money_settings.return_value = cfg
 
@@ -973,6 +974,27 @@ def test_post_win_mega_session_inactive_when_paper_only(
     hit, meta = post_win_mega_session_reentry_blocked(87.0, settings=cfg)
     assert hit is False
     assert not meta.get("postWinMegaSessionBlock")
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_post_win_mega_session_blocks_on_armed_paper_book(
+    mock_money_settings, mock_settings,
+):
+    cfg = _settings()
+    cfg.enable_live_trading = False
+    cfg.auto_trading_enabled = True
+    cfg.paper_trading = True
+    cfg.fake_trap_post_win_mega_session_move_pct = 40.0
+    cfg.fake_trap_post_win_mega_session_block_live_only = False
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    from app.engines.explosion_entry_guards import post_win_mega_session_reentry_blocked
+
+    hit, meta = post_win_mega_session_reentry_blocked(87.0, settings=cfg)
+    assert hit is True
+    assert meta.get("postWinMegaSessionBlock")
 
 
 @patch("app.engines.explosion_entry_guards.get_settings")
