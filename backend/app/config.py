@@ -2885,6 +2885,12 @@ class Settings(BaseSettings):
     # Nov26 SENSEX 84400: rank velocity + but live premium mom3 negative — call_rally fade waive filled into dip.
     fast_bullish_local_base_block_fading_exec_fill: bool = True
     fast_bullish_local_base_exec_min_premium_mom3_pct: float = 0.0
+    fast_bullish_block_post_spike_red_candle_exec: bool = True
+    fast_bullish_post_spike_min_big_red_bars: int = 1
+    fast_bullish_block_call_when_opposite_put_rips: bool = True
+    fast_bullish_opposite_put_min_ce_drawdown_pct: float = 10.0
+    fast_bullish_opposite_put_min_velocity3s: float = 0.25
+    fast_bullish_opposite_put_max_ce_mom3_pct: float = 2.5
     pe_win_mirror_fade_waiver_requires_nonneg_mom3: bool = True
     # Slow-grind coil in the pad band — catch the flat base before volume/velocity spike.
     # Aug24 24200 PE: 18–23 LTP for ~45min, then sudden lift at 11:15.

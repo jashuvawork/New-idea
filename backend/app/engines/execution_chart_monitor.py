@@ -138,6 +138,7 @@ async def fetch_live_trade_charts(
             if not prem_ltp:
                 prem_ltp = float(strike)
             premium_chart = analyze_premium_chart(opt_candles, prem_ltp)
+            premium_candles_1m = list(opt_candles or [])
 
             if settings.execution_mtf_enabled:
                 try:
@@ -152,6 +153,9 @@ async def fetch_live_trade_charts(
                 premium_mtf = {}
         except Exception as exc:
             logger.warning("Option chart fetch failed for %s: %s", instrument_key, exc)
+            premium_candles_1m = []
+    else:
+        premium_candles_1m = []
 
     return {
         "source": "upstox_live",
@@ -174,6 +178,7 @@ async def fetch_live_trade_charts(
         "_premiumMtfReads": premium_mtf_reads,
         "_indexCandles1m": index_candles,
         "_indexCandles5m": candles_5m,
+        "_premiumCandles1m": premium_candles_1m,
     }
 
 
@@ -795,6 +800,41 @@ async def monitor_trade_chart_before_execution(
     )
     if falling_meta:
         meta["fallingPremiumExecFillGuard"] = falling_meta
+
+    from app.engines.winner_entry_guards import fast_bullish_call_rally_exec_lane
+    from app.engines.premium_spike_dump_guard import (
+        fast_bullish_post_spike_red_candle_blocked,
+        opposite_put_rip_blocks_call_dump,
+    )
+
+    prem_candles_1m = meta.pop("_premiumCandles1m", None) or []
+    if side == Side.CALL and fast_bullish_call_rally_exec_lane(alert_map):
+        prem_ltp = float(
+            getattr(premium_chart, "lastPremium", 0) or meta.get("strike") or 0
+        )
+        trap_blocked, trap_reason, trap_meta = fast_bullish_post_spike_red_candle_blocked(
+            prem_candles_1m,
+            prem_ltp,
+            settings=settings,
+        )
+        if trap_blocked:
+            meta["postSpikeRedCandleTrap"] = trap_meta
+            meta["enabled"] = True
+            meta["passed"] = False
+            meta["blockReason"] = trap_reason
+            return False, trap_reason, meta
+        opp_blocked, opp_reason, opp_meta = opposite_put_rip_blocks_call_dump(
+            symbol,
+            snap,
+            premium_chart,
+            settings=settings,
+        )
+        if opp_blocked:
+            meta["oppositePutRipBlock"] = opp_meta
+            meta["enabled"] = True
+            meta["passed"] = False
+            meta["blockReason"] = opp_reason
+            return False, opp_reason, meta
 
     passed, reason, mtf_meta = validate_execution_charts(
         side,

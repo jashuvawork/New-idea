@@ -8,7 +8,9 @@ import pytest
 from app.engines.explosion_detector import ExplosionEvent
 from app.engines.premium_spike_dump_guard import (
     alert_premium_spike_dump_meta,
+    fast_bullish_post_spike_red_candle_blocked,
     live_execution_trade_score,
+    opposite_put_rip_blocks_call_dump,
     post_spike_premium_dump_blocked,
     premium_chart_spike_dump_read,
 )
@@ -157,3 +159,58 @@ def test_premium_blocks_entry_on_post_spike_dump(mock_settings):
     blocked, reason = premium_blocks_entry(Side.PUT, prem, trade_score=100.0)
     assert blocked
     assert reason == "premium_post_spike_dump"
+
+
+@patch("app.engines.premium_spike_dump_guard.get_settings")
+def test_fast_bullish_blocks_single_big_red_bounce(mock_settings):
+    """One large red then green bounce: default dump needs 2 reds; fast-bullish lane uses 1."""
+    s = MagicMock()
+    s.premium_post_spike_dump_chart_bars = 24
+    s.premium_post_spike_dump_min_drawdown_pct = 12.0
+    s.premium_post_spike_dump_min_spike_run_pct = 35.0
+    s.premium_post_spike_dump_big_body_mult = 1.1
+    s.fast_bullish_block_post_spike_red_candle_exec = True
+    s.fast_bullish_post_spike_min_big_red_bars = 1
+    mock_settings.return_value = s
+
+    candles = _make_candles_spike_dump(base=80.0, peak=350.0, ltp=232.0)
+    candles = candles[:-2]
+    blocked, reason, meta = fast_bullish_post_spike_red_candle_blocked(
+        candles, 232.0, settings=s,
+    )
+    assert blocked
+    assert reason == "exec_premium_post_spike_red_candle_trap"
+    assert meta["bigRedBars"] >= 1
+
+
+@patch("app.engines.premium_spike_dump_guard.get_settings")
+def test_opposite_put_rip_blocks_call_dump(mock_settings):
+    s = MagicMock()
+    s.fast_bullish_block_call_when_opposite_put_rips = True
+    s.fast_bullish_opposite_put_min_ce_drawdown_pct = 10.0
+    s.fast_bullish_opposite_put_min_velocity3s = 0.25
+    s.fast_bullish_opposite_put_max_ce_mom3_pct = 2.5
+    mock_settings.return_value = s
+
+    prem = PremiumChart(
+        drawdownFromHighPct=-28.0,
+        momentum3Pct=0.5,
+        lastPremium=232.0,
+    )
+    snap = SimpleNamespace(
+        explosionAlerts=[
+            {
+                "symbol": "SENSEX",
+                "side": "PUT",
+                "strike": 84500.0,
+                "velocity3s": 1.2,
+                "tier": "ELITE",
+            }
+        ],
+    )
+    blocked, reason, meta = opposite_put_rip_blocks_call_dump(
+        "SENSEX", snap, prem, settings=s,
+    )
+    assert blocked
+    assert reason == "exec_opposite_put_rip_blocks_call_dump"
+    assert meta["oppositePutVelocity3s"] >= 0.25
