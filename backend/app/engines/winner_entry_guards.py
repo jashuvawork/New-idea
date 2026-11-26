@@ -24,6 +24,23 @@ def fast_bullish_call_rally_exec_lane(alert: dict | Any | None) -> bool:
     )
 
 
+def put_slide_rally_exec_lane(alert: dict | Any | None) -> bool:
+    """PE rally / index-slide PUT lanes (mirror of fast_bullish call_rally on CE)."""
+    if not isinstance(alert, dict):
+        return False
+    reason = str(alert.get("ictBaseReadinessReason") or "")
+    moment = str(alert.get("momentType") or "")
+    base_reason = str(alert.get("callAtBaseBestTradeReason") or "")
+    return bool(
+        "put_slide" in reason
+        or "pe_slide" in reason
+        or base_reason in ("put_slide_unlock", "index_slide_side_flip")
+        or moment in ("put_slide_unlock", "pe_slide_breakdown", "index_slide_side_flip")
+        or alert.get("putSlideUnlock")
+        or alert.get("putSlideEntryUnlock")
+    )
+
+
 def apply_falling_premium_exec_fill_guard(
     settings: Any,
     *,
@@ -35,15 +52,22 @@ def apply_falling_premium_exec_fill_guard(
 ) -> tuple[bool, bool, dict[str, Any]]:
     """Drop fade waivers when live premium 3s momentum is still negative."""
     meta: dict[str, Any] = {}
-    if not bool(getattr(settings, "fast_bullish_local_base_block_fading_exec_fill", True)):
-        return pe_win_mirror_bypass, premium_fade_pad_lane, meta
     side_u = side.value if isinstance(side, Side) else str(side or "").upper()
-    if side_u != "CALL" or not fast_bullish_call_rally_exec_lane(alert):
+    call_lane = side_u == "CALL" and fast_bullish_call_rally_exec_lane(alert)
+    put_lane = side_u == "PUT" and put_slide_rally_exec_lane(alert)
+    block_call = bool(getattr(settings, "fast_bullish_local_base_block_fading_exec_fill", True))
+    block_put = bool(getattr(settings, "put_slide_block_fading_exec_fill", True))
+    if not ((call_lane and block_call) or (put_lane and block_put)):
         return pe_win_mirror_bypass, premium_fade_pad_lane, meta
     pm3 = float(getattr(premium_chart, "momentum3Pct", 0) or 0) if premium_chart else 0.0
-    floor = float(
-        getattr(settings, "fast_bullish_local_base_exec_min_premium_mom3_pct", 0.0) or 0.0
-    )
+    if call_lane:
+        floor = float(
+            getattr(settings, "fast_bullish_local_base_exec_min_premium_mom3_pct", 0.0) or 0.0
+        )
+    else:
+        floor = float(
+            getattr(settings, "put_slide_exec_min_premium_mom3_pct", 0.0) or 0.0
+        )
     if pm3 >= floor - 1e-9:
         return pe_win_mirror_bypass, premium_fade_pad_lane, meta
     meta.update(

@@ -9,6 +9,7 @@ from app.engines.winner_entry_guards import (
     apply_falling_premium_exec_fill_guard,
     fast_bullish_call_rally_exec_lane,
     premium_fading_blocks_entry,
+    put_slide_rally_exec_lane,
 )
 from app.models.schemas import PremiumChart, Side
 
@@ -55,3 +56,28 @@ def test_premium_fading_blocks_negative_mom3_with_pe_win_mirror():
     )
     assert blocked is True
     assert reason in ("premium_fading_at_execution", "premium_fading_high_score")
+
+
+def test_put_slide_lane_detects_unlock():
+    assert put_slide_rally_exec_lane(
+        {
+            "ictBaseReadinessReason": "put_slide_unlock_ready",
+            "callAtBaseBestTradeReason": "put_slide_unlock",
+        }
+    )
+
+
+def test_falling_guard_strips_bypass_on_put_slide_negative_mom3():
+    settings = Settings()
+    prem = PremiumChart(momentum3Pct=-0.5, momentum5Pct=-0.1, direction="BEARISH")
+    alert = {"ictBaseReadinessReason": "put_slide_unlock", "putSlideUnlock": True}
+    mirror, pad, meta = apply_falling_premium_exec_fill_guard(
+        settings,
+        side=Side.PUT,
+        premium_chart=prem,
+        alert=alert,
+        pe_win_mirror_bypass=True,
+        premium_fade_pad_lane=True,
+    )
+    assert mirror is False
+    assert meta.get("fallingPremiumExecFillGuard") is True
