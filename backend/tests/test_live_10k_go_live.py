@@ -83,8 +83,8 @@ def test_arm_live_rewrites_a_stale_10k_env_back_to_the_paper_book(tmp_path):
         if "=" in line and not line.lstrip().startswith("#"):
             key, value = line.split("=", 1)
             values[key] = value
-    assert values["FALLBACK_CAPITAL_INR"] == "50000"
-    assert values["MAX_SIZING_CAPITAL_INR"] == "50000"
+    assert values["FALLBACK_CAPITAL_INR"] == "30000"
+    assert values["MAX_SIZING_CAPITAL_INR"] == "30000"
     assert values["DAILY_LOSS_STOP_CAPITAL_PCT"] == "0.35"
     assert values["DAILY_LOSS_STOP_INR"] == "0"
     assert values["EMERGENCY_STOP_INR"] == "20000"
@@ -111,8 +111,8 @@ def test_live_arm_live_capital_inr_override(tmp_path):
             [
                 "ENABLE_LIVE_TRADING=true",
                 "PAPER_TRADING=false",
-                "FALLBACK_CAPITAL_INR=50000",
-                "MAX_SIZING_CAPITAL_INR=50000",
+                "FALLBACK_CAPITAL_INR=30000",
+                "MAX_SIZING_CAPITAL_INR=30000",
                 "",
             ]
         )
@@ -125,13 +125,13 @@ def test_live_arm_live_capital_inr_override(tmp_path):
             "ENV_FILE": str(env_file),
             "REPO_DIR": str(ROOT),
             "SKIP_RESTART": "1",
-            "LIVE_CAPITAL_INR": "50000",
+            "LIVE_CAPITAL_INR": "30000",
         },
         cwd=ROOT,
     )
     text = env_file.read_text()
-    assert "FALLBACK_CAPITAL_INR=50000" in text
-    assert "MAX_SIZING_CAPITAL_INR=50000" in text
+    assert "FALLBACK_CAPITAL_INR=30000" in text
+    assert "MAX_SIZING_CAPITAL_INR=30000" in text
     assert "ENABLE_LIVE_TRADING=true" in text
     assert "PAPER_TRADING=false" in text
 
