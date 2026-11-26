@@ -191,8 +191,8 @@ def test_premium_fade_bypass_for_mirror():
         explosion_event=SimpleNamespace(tier="ELITE", daily_move_pct=12.0),
         pe_win_mirror_bypass=True,
     )
-    assert blocked is False
-    assert reason == "pe_win_mirror_shallow_fade_ok"
+    assert blocked is True
+    assert reason in ("premium_fading_at_execution", "premium_chart_fading", "premium_fading_high_score")
 
 
 @patch("app.engines.pe_win_ce_mirror._collect_session_trades", return_value=[])

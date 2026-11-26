@@ -780,6 +780,22 @@ async def monitor_trade_chart_before_execution(
         settings=settings,
     )
 
+    from app.engines.winner_entry_guards import apply_falling_premium_exec_fill_guard
+
+    alert_map = alert if isinstance(alert, dict) else {}
+    pe_win_mirror_bypass, premium_fade_pad_lane, falling_meta = (
+        apply_falling_premium_exec_fill_guard(
+            settings,
+            side=side,
+            premium_chart=premium_chart,
+            alert=alert_map,
+            pe_win_mirror_bypass=pe_win_mirror_bypass,
+            premium_fade_pad_lane=premium_fade_pad_lane,
+        )
+    )
+    if falling_meta:
+        meta["fallingPremiumExecFillGuard"] = falling_meta
+
     passed, reason, mtf_meta = validate_execution_charts(
         side,
         index_chart,
