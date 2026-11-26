@@ -107,7 +107,7 @@ def test_flag_off_leaves_exit_to_legacy_trail_ce_pe(side):
 
 @pytest.mark.parametrize("side", SIDES)
 def test_oct21_mega_projected_runner_hole_not_ftv_peak_keep_at_plus_10_ce_pe(side):
-    """Oct 21 22700: FTV pct trail stays off under +28pt. A falling hole is sold."""
+    """Oct 21 22700: pct trail and unified peak-keep stay off before stage 1 completes."""
     from app.engines.moment_stage_trail import ftv_runner_pct_floor
 
     s = _settings()
@@ -126,8 +126,7 @@ def test_oct21_mega_projected_runner_hole_not_ftv_peak_keep_at_plus_10_ce_pe(sid
             "explosionTier": "ELITE",
         },
     )
-    floor, layer = profit_ladder_floor(trade, 21.48, settings=s)
-    assert layer == "peak_keep"
+    assert profit_ladder_floor(trade, 21.48, settings=s) is None
     assert ftv_runner_pct_floor(trade, 21.48, settings=s) is None
     flat_trade = _trade(
         side,
@@ -140,8 +139,43 @@ def test_oct21_mega_projected_runner_hole_not_ftv_peak_keep_at_plus_10_ce_pe(sid
     with _use(s):
         falling, _ = evaluate_explosion_exit(trade, 150.38, "ELITE", 65, live_velocity_3s=-0.5)
         flat, _ = evaluate_explosion_exit(flat_trade, 150.38, "ELITE", 65, live_velocity_3s=0.0)
-    assert falling == "explosion_profit_ladder_peak_keep"
+    assert falling is None or not str(falling).startswith("explosion_profit_ladder")
     assert flat is None or not str(flat).startswith("explosion_profit_ladder")
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_nov26_pre_stage_elite_unified_peak_keep_deferred_ce_pe(side):
+    """26 Nov NIFTY 25800 CE: +37pt peak pre stage-1 must not book 75% peak_keep at ~+28."""
+    s = _settings()
+    entry = 207.97
+    best = 37.63
+    trade = _trade(
+        side,
+        entry,
+        best,
+        strike=25800.0,
+        seconds=250,
+        ctx={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 800.0,
+            "stageSize": 75.0,
+            "explosionTier": "ELITE",
+            "chartExitLive": {"letRun": True},
+            "tpRungLadder": True,
+        },
+    )
+    trade.maxLtpAt = datetime.now(IST) - timedelta(seconds=120)
+    with _use(s):
+        reason = unified_profit_ladder_exit_reason(
+            trade,
+            best=best,
+            pnl_pts=28.0,
+            hold_seconds=250.0,
+            live_velocity_3s=-0.5,
+        )
+    assert reason is None
+    assert profit_ladder_floor(trade, best, settings=s) is None
 
 
 @pytest.mark.parametrize("side", SIDES)
@@ -395,15 +429,10 @@ def test_oct16_23150_shape_books_seventy_five_pct_ce_pe(side):
 
 @pytest.mark.parametrize("side", SIDES)
 def test_oct21_22700_falling_hole_sells_flat_hole_holds_ce_pe(side):
-    """A falling print under the 75% line sells. A flat hole still holds.
-
-    Oct 21 SENSEX 73400 PE was held through that fall and stopped out at a loss.
-    A downtick on the line still sells. A rising tick on the line holds.
-    """
+    """Pre stage-1 mega projected: unified peak_keep stays off through early pullback."""
     s = _settings()
     entry = 140.02
     best = 21.48
-    floor = round(best * 0.75, 2)
     trade = _trade(
         side,
         entry,
@@ -424,7 +453,7 @@ def test_oct21_22700_falling_hole_sells_flat_hole_holds_ce_pe(side):
     trade.maxLtp = 161.50
     trade.maxLtpAt = datetime.now(IST) - timedelta(seconds=180)
     trade.lots = 19
-    near_pts = floor - 0.13
+    near_pts = round(best * 0.75, 2) - 0.13
     with _use(s):
         falling = unified_profit_ladder_exit_reason(
             trade, best=best, pnl_pts=10.36, hold_seconds=549, live_velocity_3s=-0.4,
@@ -441,9 +470,5 @@ def test_oct21_22700_falling_hole_sells_flat_hole_holds_ce_pe(side):
         reason, _ = evaluate_explosion_exit(
             trade, entry + 10.36, "ELITE", 65, live_velocity_3s=-0.4,
         )
-    assert floor == pytest.approx(16.11)
-    assert falling == "explosion_profit_ladder_peak_keep"
-    assert flat is None
-    assert near == "explosion_profit_ladder_peak_keep"
-    assert rising is None
-    assert reason == "explosion_profit_ladder_peak_keep"
+    for r in (falling, flat, near, rising, reason):
+        assert r is None or not str(r).startswith("explosion_profit_ladder")
