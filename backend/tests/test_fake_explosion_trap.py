@@ -912,6 +912,71 @@ def test_post_win_extended_chase_allows_hot_reacceleration(
 
 @patch("app.engines.explosion_entry_guards.get_settings")
 @patch("app.engines.moneyness.get_settings")
+def test_post_win_mega_session_blocks_nov26_sensex_84400_style(
+    mock_money_settings, mock_settings,
+):
+    """After CE win, 87% session rip with small pad must not re-enter on live."""
+    cfg = _settings()
+    cfg.enable_live_trading = True
+    cfg.auto_trading_enabled = True
+    cfg.fake_trap_post_win_mega_session_block_enabled = True
+    cfg.fake_trap_post_win_mega_session_move_pct = 40.0
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    snap = _snap(regime=Regime.TREND_EXPANSION, or_pos="ABOVE")
+    snap.symbol = "SENSEX"
+    event = _event(daily=87.0, v3=5.61, tier="ELITE", strike=84400.0)
+    event.symbol = "SENSEX"
+    cand = _candidate(event, snap)
+    cand.pretrade_meta = {"causalRanking": {"topRankEligible": True, "fullSleeveEligible": True}}
+
+    ict = _confirmed_ict(6.35)
+    ict.base_relative_move_pct = 6.35
+    ict.session_move_pct = 87.49
+
+    with patch(
+        "app.engines.pretrade_validator.collect_session_trades",
+        return_value=[
+            TradeRecord(
+                symbol="NIFTY",
+                side=Side.CALL,
+                pnl_inr=7308.6,
+                exit_reason="explosion_profit_ladder_peak_keep",
+                strike=25800.0,
+            ),
+        ],
+    ), patch("app.engines.explosion_entry_guards._midday_chop_active", return_value=False):
+        blocked, reason, meta = detect_fake_explosion_trap(
+            cand, snap, state=MagicMock(), ict=ict,
+        )
+
+    assert blocked is True
+    assert reason == "fake_explosion_trap_post_win_mega_session"
+    assert meta.get("postWinMegaSessionBlock") is True
+    assert meta.get("action") == "block"
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
+def test_post_win_mega_session_inactive_when_paper_only(
+    mock_money_settings, mock_settings,
+):
+    cfg = _settings()
+    cfg.enable_live_trading = False
+    cfg.auto_trading_enabled = False
+    mock_settings.return_value = cfg
+    mock_money_settings.return_value = cfg
+
+    from app.engines.explosion_entry_guards import post_win_mega_session_reentry_blocked
+
+    hit, meta = post_win_mega_session_reentry_blocked(87.0, settings=cfg)
+    assert hit is False
+    assert not meta.get("postWinMegaSessionBlock")
+
+
+@patch("app.engines.explosion_entry_guards.get_settings")
+@patch("app.engines.moneyness.get_settings")
 def test_post_win_extended_chase_allows_fresh_near_base_entry(
     mock_money_settings, mock_settings,
 ):
