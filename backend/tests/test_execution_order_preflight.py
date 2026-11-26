@@ -54,6 +54,24 @@ def test_preflight_blocks_post_spike_dump_flag_on_chart():
     assert reason == "exec_preflight_post_spike_dump"
 
 
+def test_preflight_blocks_falling_momentum():
+    settings = Settings()
+    cand = _candidate()
+    prem = PremiumChart(
+        lastPremium=440.0,
+        momentum3Pct=-0.4,
+        momentum5Pct=-1.0,
+        direction="NEUTRAL",
+        drawdownFromHighPct=-30.0,
+        postSpikeDump=False,
+    )
+    blocked, reason, _ = execution_order_preflight_blocked(
+        cand, None, premium_chart=prem, settings=settings,
+    )
+    assert blocked is True
+    assert reason == "exec_preflight_falling_premium_momentum"
+
+
 def test_preflight_blocks_bearish_premium_in_drawdown():
     settings = Settings()
     cand = _candidate()

@@ -739,6 +739,7 @@ async def _open_from_candidate(
     if candidate.mode == "explosion":
         from app.engines.session_mode_feedback import (
             exhausted_ftv_reentry_blocked,
+            side_post_close_wait_base_blocked,
             open_duplicate_leg_blocked,
             same_strike_post_win_premium_blowout_blocked,
             win_reentry_velocity_blocked,
@@ -893,6 +894,18 @@ async def _open_from_candidate(
             return False, "exhausted_ftv_requires_new_base_reacceleration"
 
         alert_d = candidate.alert if isinstance(getattr(candidate, "alert", None), dict) else {}
+        wait_base, wait_reason, _wait_meta = side_post_close_wait_base_blocked(
+            state,
+            symbol=symbol,
+            side=candidate.side,
+            strike=float(candidate.strike or 0),
+            premium=float(candidate.premium or 0),
+            velocity_3s=reentry_velocity,
+            alert=alert_d,
+        )
+        if wait_base:
+            return False, wait_reason or "side_post_close_wait_for_base"
+
         late_peak_blocked, late_peak_reason = session_peak_late_reentry_blocked(
             symbol=symbol,
             side=candidate.side,

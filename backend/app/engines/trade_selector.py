@@ -2187,36 +2187,53 @@ def find_best_entry(
                     getattr(c.explosion_event, "velocity_3s", 0) or 0
                 ),
             )
-            if not exhausted:
-                from app.engines.session_mode_feedback import (
-                    session_peak_late_reentry_blocked,
-                )
+            if exhausted:
+                _record_selector_gate_rejection(c, "exhausted_ftv_requires_new_base_reacceleration")
+                continue
+            from app.engines.session_mode_feedback import side_post_close_wait_base_blocked
 
-                alert_d = c.alert if isinstance(getattr(c, "alert", None), dict) else {}
-                late_peak, late_reason = session_peak_late_reentry_blocked(
-                    symbol=c.symbol,
-                    side=c.side,
-                    strike=float(c.strike or 0),
-                    premium=float(c.premium or 0),
-                    velocity_3s=float(
-                        getattr(c.explosion_event, "velocity_3s", 0) or 0
-                    ),
-                    alert=alert_d,
-                    state=state,
-                    snap=c.snap,
-                )
-                if late_peak:
-                    late_block_reason = late_reason or "late_reentry_near_session_peak"
-                    c.pretrade_meta = {
-                        **(c.pretrade_meta or {}),
-                        "lateReentryBlocked": True,
-                        "causalRanking": {
-                            "grade": "REJECT",
-                            "reasons": [late_block_reason],
-                        },
-                    }
-                    _record_selector_gate_rejection(c, late_block_reason)
-                    continue
+            alert_d = c.alert if isinstance(getattr(c, "alert", None), dict) else {}
+            wait_base, wait_reason, _ = side_post_close_wait_base_blocked(
+                state,
+                symbol=c.symbol,
+                side=c.side,
+                strike=float(c.strike or 0),
+                premium=float(c.premium or 0),
+                velocity_3s=float(getattr(c.explosion_event, "velocity_3s", 0) or 0),
+                alert=alert_d,
+            )
+            if wait_base:
+                _record_selector_gate_rejection(c, wait_reason or "side_post_close_wait_for_base")
+                continue
+            from app.engines.session_mode_feedback import (
+                session_peak_late_reentry_blocked,
+            )
+
+            alert_d = c.alert if isinstance(getattr(c, "alert", None), dict) else {}
+            late_peak, late_reason = session_peak_late_reentry_blocked(
+                symbol=c.symbol,
+                side=c.side,
+                strike=float(c.strike or 0),
+                premium=float(c.premium or 0),
+                velocity_3s=float(
+                    getattr(c.explosion_event, "velocity_3s", 0) or 0
+                ),
+                alert=alert_d,
+                state=state,
+                snap=c.snap,
+            )
+            if late_peak:
+                late_block_reason = late_reason or "late_reentry_near_session_peak"
+                c.pretrade_meta = {
+                    **(c.pretrade_meta or {}),
+                    "lateReentryBlocked": True,
+                    "causalRanking": {
+                        "grade": "REJECT",
+                        "reasons": [late_block_reason],
+                    },
+                }
+                _record_selector_gate_rejection(c, late_block_reason)
+                continue
         from app.engines.trade_ranking import (
             ftv_authorization_policy,
             ftv_policy_settings,

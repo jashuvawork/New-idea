@@ -2079,6 +2079,12 @@ def post_win_fresh_near_base_blocked(
         state,
         snap,
         sym,
+        strike=float(getattr(candidate, "strike", 0) or 0),
+        premium=float(getattr(candidate, "premium", 0) or 0),
+        velocity_3s=float(
+            getattr(getattr(candidate, "explosion_event", None), "velocity_3s", 0) or 0
+        ),
+        alert=alert if isinstance(alert, dict) else None,
     )
     if cont_ok:
         meta["sessionWinSideContinuation"] = cont_reason
@@ -2144,6 +2150,12 @@ def _post_win_extended_chase_blocked(
         state,
         snap,
         sym,
+        strike=float(getattr(candidate, "strike", 0) or 0),
+        premium=float(getattr(candidate, "premium", 0) or 0),
+        velocity_3s=float(v3 or 0),
+        alert=getattr(candidate, "alert", None)
+        if isinstance(getattr(candidate, "alert", None), dict)
+        else None,
     )
     if cont_ok:
         meta["sessionWinSideContinuation"] = cont_reason

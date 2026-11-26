@@ -671,6 +671,7 @@ def validate_candidate(
         from app.engines.moneyness import atm_itm_entry_allows
         from app.engines.session_mode_feedback import (
             exhausted_ftv_reentry_blocked,
+            side_post_close_wait_base_blocked,
             session_peak_late_reentry_blocked,
         )
         from app.engines.trade_ranking import (
@@ -697,33 +698,56 @@ def validate_candidate(
                     or 0
                 ),
             )
-            if not exhausted:
-                alert_d = (
-                    candidate.alert
-                    if isinstance(getattr(candidate, "alert", None), dict)
-                    else {}
-                )
-                late_peak, late_reason = session_peak_late_reentry_blocked(
-                    symbol=str(getattr(candidate, "symbol", "") or ""),
-                    side=getattr(candidate, "side", ""),
-                    strike=float(getattr(candidate, "strike", 0) or 0),
-                    premium=float(getattr(candidate, "premium", 0) or 0),
-                    velocity_3s=float(
-                        getattr(
-                            getattr(candidate, "explosion_event", None),
-                            "velocity_3s",
-                            0,
-                        )
-                        or 0
-                    ),
-                    alert=alert_d,
-                    state=state,
-                    snap=getattr(candidate, "snap", None),
-                )
-                if late_peak:
-                    return False, late_reason or "late_reentry_near_session_peak", {
-                        "lateReentryBlocked": True,
-                    }
+            if exhausted:
+                return False, "exhausted_ftv_requires_new_base_reacceleration", {
+                    "exhaustedPostPeakReentry": True,
+                }
+            alert_d = (
+                candidate.alert
+                if isinstance(getattr(candidate, "alert", None), dict)
+                else {}
+            )
+            wait_base, wait_reason, _ = side_post_close_wait_base_blocked(
+                state,
+                symbol=str(getattr(candidate, "symbol", "") or ""),
+                side=getattr(candidate, "side", ""),
+                strike=float(getattr(candidate, "strike", 0) or 0),
+                premium=float(getattr(candidate, "premium", 0) or 0),
+                velocity_3s=float(
+                    getattr(
+                        getattr(candidate, "explosion_event", None),
+                        "velocity_3s",
+                        0,
+                    )
+                    or 0
+                ),
+                alert=alert_d,
+            )
+            if wait_base:
+                return False, wait_reason or "side_post_close_wait_for_base", {
+                    "sidePostCloseWaitBase": True,
+                }
+            late_peak, late_reason = session_peak_late_reentry_blocked(
+                symbol=str(getattr(candidate, "symbol", "") or ""),
+                side=getattr(candidate, "side", ""),
+                strike=float(getattr(candidate, "strike", 0) or 0),
+                premium=float(getattr(candidate, "premium", 0) or 0),
+                velocity_3s=float(
+                    getattr(
+                        getattr(candidate, "explosion_event", None),
+                        "velocity_3s",
+                        0,
+                    )
+                    or 0
+                ),
+                alert=alert_d,
+                state=state,
+                snap=getattr(candidate, "snap", None),
+            )
+            if late_peak:
+                return False, late_reason or "late_reentry_near_session_peak", {
+                    "lateReentryBlocked": True,
+                }
         causal_ranking = rank_entry_candidate(
             candidate,
             exhausted_reentry=exhausted,

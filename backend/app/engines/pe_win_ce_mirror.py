@@ -1337,6 +1337,10 @@ def session_win_side_continuation_ok(
     snap: Optional[SymbolSnapshot],
     symbol: str = "",
     *,
+    strike: float = 0.0,
+    premium: float = 0.0,
+    velocity_3s: float = 0.0,
+    alert: Optional[dict[str, Any]] = None,
     settings: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """After a session win, allow same-index same-side re-entry when rally/slide unlock is armed."""
@@ -1365,6 +1369,21 @@ def session_win_side_continuation_ok(
 
         if index_trend_breakout(sym, "CALL", snap).get("breakout"):
             meta["indexBreakout"] = True
+        if strike > 0 and premium > 0 and state is not None:
+            from app.engines.session_mode_feedback import side_post_close_wait_base_blocked
+
+            wait, wait_reason, wait_meta = side_post_close_wait_base_blocked(
+                state,
+                symbol=sym,
+                side=side_u,
+                strike=float(strike),
+                premium=float(premium),
+                velocity_3s=float(velocity_3s or 0),
+                alert=alert,
+            )
+            meta["postCloseBaseGate"] = wait_meta
+            if wait:
+                return False, wait_reason or "side_post_close_wait_for_base", meta
         return True, "call_win_rally_continuation", meta
     if side_u == "PUT":
         from app.engines.put_slide_ce_mirror import put_slide_entry_unlock_armed
@@ -1383,6 +1402,21 @@ def session_win_side_continuation_ok(
 
         if index_trend_breakout(sym, "PUT", snap).get("breakout"):
             meta["indexBreakout"] = True
+        if strike > 0 and premium > 0 and state is not None:
+            from app.engines.session_mode_feedback import side_post_close_wait_base_blocked
+
+            wait, wait_reason, wait_meta = side_post_close_wait_base_blocked(
+                state,
+                symbol=sym,
+                side=side_u,
+                strike=float(strike),
+                premium=float(premium),
+                velocity_3s=float(velocity_3s or 0),
+                alert=alert,
+            )
+            meta["postCloseBaseGate"] = wait_meta
+            if wait:
+                return False, wait_reason or "side_post_close_wait_for_base", meta
         return True, "put_win_slide_continuation", meta
     return False, "unknown_side", meta
 
