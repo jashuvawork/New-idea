@@ -90,6 +90,11 @@ def _settings(**overrides):
     s.explosion_cheap_rip_min_premium_inr = 8.0
     s.explosion_cheap_rip_min_peak_pct = 25.0
     s.expiry_day_guards_enabled = True
+    # MagicMock auto-attrs break float(getattr(...)) suspend thresholds — keep off unless testing #1005.
+    s.expiry_priority_suspend_enabled = False
+    s.expiry_priority_suspend_symbol_loss_inr = -3_000.0
+    s.expiry_priority_suspend_rank_penalty = 40.0
+    s.expiry_priority_suspend_alternate_bonus = 28.0
     for k, v in overrides.items():
         setattr(s, k, v)
     return s

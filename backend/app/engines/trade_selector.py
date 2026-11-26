@@ -2634,14 +2634,31 @@ def find_best_entry(
             from app.engines.capital_allocator import expiry_index_priority_suppressed
 
             if not expiry_index_priority_suppressed(settings):
-                from app.engines.bad_day_routing import expiry_proximity_ranks
+                from app.engines.bad_day_routing import (
+                    expiry_index_priority_suspended,
+                    expiry_proximity_ranks,
+                )
 
                 nearest, nxt = expiry_proximity_ranks(snapshots)
                 sym_u = c.symbol.upper()
                 if sym_u in nearest:
-                    bonus += float(
-                        getattr(settings, "expiry_day_sort_priority_bonus", 30.0) or 30.0
+                    pun, _pun_reasons = expiry_index_priority_suspended(
+                        sym_u, state, snapshots,
                     )
+                    if pun:
+                        bonus -= float(
+                            getattr(
+                                settings,
+                                "expiry_priority_suspend_sort_penalty",
+                                45.0,
+                            )
+                            or 45.0
+                        )
+                    else:
+                        bonus += float(
+                            getattr(settings, "expiry_day_sort_priority_bonus", 30.0)
+                            or 30.0
+                        )
                 elif sym_u in nxt:
                     bonus += float(
                         getattr(settings, "expiry_day_same_week_next_sort_bonus", 15.0) or 15.0

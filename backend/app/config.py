@@ -4132,6 +4132,19 @@ class Settings(BaseSettings):
     bad_day_fading_symbol_penalty: float = 18.0
     bad_day_alternate_index_bonus: float = 14.0
     bad_day_alternate_aligned_bonus: float = 8.0
+    # After symbol loss / whip on an index: suspend nearest-expiry rank priority (CE+PE).
+    expiry_priority_suspend_enabled: bool = True
+    expiry_priority_suspend_symbol_loss_inr: float = -3_000.0
+    expiry_priority_suspend_symbol_loss_pct_book: float = 0.10
+    expiry_priority_suspend_same_symbol_loss_count: int = 2
+    expiry_priority_suspend_loss_min_inr: float = 500.0
+    expiry_priority_suspend_min_spot_momentum5_pct: float = 0.12
+    expiry_priority_suspend_volatile_requires_loss_count: int = 1
+    expiry_priority_suspend_rank_penalty: float = 40.0
+    expiry_priority_suspend_alternate_bonus: float = 28.0
+    expiry_priority_suspend_sort_penalty: float = 45.0
+    expiry_priority_suspend_hard_block_enabled: bool = False
+    expiry_priority_suspend_hard_block_min_rank: float = 88.0
     cross_index_elite_priority_enabled: bool = True
     cross_index_elite_min_session_move_pct: float = 40.0
     cross_index_elite_priority_bonus: float = 22.0
