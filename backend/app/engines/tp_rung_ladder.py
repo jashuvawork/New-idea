@@ -373,10 +373,26 @@ def tp_rung_exit_reason(
     if floor <= 0:
         return None
 
+    from app.engines.moment_stage_trail import (
+        defer_unified_peak_keep_for_mega_projected_runner,
+        trade_uses_moment_stage_ladder,
+    )
+
+    ctx_mpc = trade.entryContext or {}
+    pre_stage_tp_rung_hold = bool(
+        ctx_mpc.get("maxProfitCapture")
+        and trade_uses_moment_stage_ladder(trade)
+        and defer_unified_peak_keep_for_mega_projected_runner(trade, best, settings=s)
+    )
+
     if falling_under or (falling and pnl_pts + 1e-6 <= floor + touch):
+        if pre_stage_tp_rung_hold:
+            return None
         return "explosion_tp_rung_floor"
 
     if falling and pnl_pts + 1e-6 < floor - touch - 1e-6:
+        if pre_stage_tp_rung_hold:
+            return None
         return "explosion_tp_rung_floor_hole"
 
     return None

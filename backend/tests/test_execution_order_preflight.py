@@ -73,10 +73,10 @@ def test_preflight_blocks_falling_momentum():
 
 
 def test_preflight_live_extended_blocks_neg_mom3_while_mom5_positive():
-    """Nov26 chase: mom5 still + at wire while premium fades — must block live only."""
+    """Nov26 chase: mom5 still + at wire while premium fades — armed paper + live parity."""
     paper_settings = Settings(
         enable_live_trading=False,
-        auto_trading_enabled=False,
+        auto_trading_enabled=True,
         paper_trading=True,
         execution_order_preflight_min_live_score_recheck=False,
     )
@@ -109,16 +109,13 @@ def test_preflight_live_extended_blocks_neg_mom3_while_mom5_positive():
         drawdownFromHighPct=-5.0,
         postSpikeDump=False,
     )
-    blocked_paper, _, _ = execution_order_preflight_blocked(
-        cand, None, premium_chart=prem, settings=paper_settings,
-    )
-    assert blocked_paper is False
-    blocked_live, reason, meta = execution_order_preflight_blocked(
-        cand, None, premium_chart=prem, settings=live_settings,
-    )
-    assert blocked_live is True
-    assert reason == "exec_preflight_live_extended_fade_mom3"
-    assert meta.get("liveExtendedChaseContext", {}).get("liveExtendedChase") is True
+    for settings in (paper_settings, live_settings):
+        blocked, reason, meta = execution_order_preflight_blocked(
+            cand, None, premium_chart=prem, settings=settings,
+        )
+        assert blocked is True
+        assert reason == "exec_preflight_live_extended_fade_mom3"
+        assert meta.get("liveExtendedChaseContext", {}).get("liveExtendedChase") is True
 
 
 def test_preflight_live_near_base_allows_shallow_fade_retest():
