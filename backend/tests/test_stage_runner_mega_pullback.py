@@ -176,7 +176,7 @@ def test_oct21_73400_holds_at_peak(mock_ms, mock_s, _mp):
 
 
 def test_oct21_73400_falling_through_75_line_sells_before_three_minutes():
-    """After the high, a falling print under the 75% line sells. A 12s dip holds."""
+    """Pre stage-1 (projected 800): unified peak_keep stays off; fresh peak dip still holds."""
     from app.config import Settings
     from app.engines.explosion_profit import unified_profit_ladder_exit_reason
 
@@ -197,9 +197,9 @@ def test_oct21_73400_falling_through_75_line_sells_before_three_minutes():
             )
 
     assert _at(12, under, -1.0) is None
-    assert _at(50, under, -1.0) == "explosion_profit_ladder_peak_keep"
+    assert _at(50, under, -1.0) is None
     assert _at(50, under, 0.4) is None
-    assert _at(50, -8.0, -1.0) == "explosion_profit_ladder_peak_keep"
+    assert _at(50, -8.0, -1.0) is None
 
 
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
@@ -246,7 +246,7 @@ def test_oct29_sensex_73000_shallow_hole_defers_stage_runner_hole_take(_mp):
             live_velocity_3s=-0.5,
         )
     assert reason is None
-    # Deep hole like Oct 21 still books.
+    # Deep hole still pre stage-1 — defer hole-take until stageSize completes.
     deep_pnl = 10.7
     trade.currentPremium = entry + deep_pnl
     with patch("app.engines.explosion_profit.get_settings", return_value=s), patch(
@@ -259,7 +259,7 @@ def test_oct29_sensex_73000_shallow_hole_defers_stage_runner_hole_take(_mp):
             hold_seconds=400,
             live_velocity_3s=-0.5,
         )
-    assert reason == "explosion_stage_runner_hole_take"
+    assert reason is None
 
 
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
