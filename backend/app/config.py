@@ -1783,7 +1783,7 @@ class Settings(BaseSettings):
     # ~258) still use modest peak-keep via unified ladder / ftv_runner_pct_trail.
     stage_runner_defer_pct_keep_min_projected_tp: float = 400.0
     # Unified 75% peak-keep waits until stage 1 completes when projected TP ≥ this (Nov5 ~1409).
-    stage_runner_defer_unified_peak_keep_min_projected_tp: float = 1200.0
+    stage_runner_defer_unified_peak_keep_min_projected_tp: float = 400.0
     # Nov6 NIFTY 24650 CE: pre-stage-1 — defer micro trail + max-hold giveback trail_sl.
     stage_runner_defer_pre_stage_trail_min_projected_tp: float = 500.0
     stage_runner_pre_stage_hot_defer_min_velocity_3s: float = 1.0
@@ -2089,7 +2089,7 @@ class Settings(BaseSettings):
     # Nov26 SENSEX 84400 CE: +₹7.3k CE win then 87% session rip @ 6% pad — continuation waived all chase gates.
     fake_trap_post_win_mega_session_block_enabled: bool = True
     fake_trap_post_win_mega_session_move_pct: float = 40.0
-    fake_trap_post_win_mega_session_block_live_only: bool = True
+    fake_trap_post_win_mega_session_block_live_only: bool = False
     fake_trap_post_win_continuation_max_session_move_pct: float = 45.0
     fake_explosion_trap_post_win_extended_min_velocity_3s: float = 3.0
     fake_explosion_trap_post_win_streak_block_enabled: bool = True

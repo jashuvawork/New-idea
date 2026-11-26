@@ -145,8 +145,10 @@ def test_oct21_73400_between_rung_fade(_mp):
         reason, pnl_inr = evaluate_explosion_exit(
             trade, trade.currentPremium, "EXPLODING", 20, live_velocity_3s=-2.0,
         )
-    assert reason in ("explosion_tp_rung_between_fade", "explosion_tp_rung_floor")
-    assert pnl_inr > 0
+    # Pre stage-1 on projected 800 legs: hold through rung floor/between fades when still < stageSize.
+    assert reason in (None, "explosion_tp_rung_between_fade", "explosion_tp_rung_floor")
+    if reason is not None:
+        assert pnl_inr > 0
 
 
 @patch("app.engines.ict_breakout_monitor._ict_max_profit_trade", return_value=True)
@@ -299,6 +301,47 @@ def test_sub_28_best_does_not_arm_tp_rung_exit():
         pnl_pts=10.36,
         hold_seconds=540.0,
         live_velocity_3s=-0.5,
+        settings=s,
+    )
+    assert reason is None
+
+
+def test_nov26_pre_stage_mega_projected_defers_tp_rung_floor():
+    """26 Nov SENSEX 84000: pre stage-1 must not book tp_rung_floor in first rip."""
+    s = Settings()
+    entry = 383.97
+    best = 30.0
+    trade = PaperTrade(
+        id="sensex-84000",
+        symbol="SENSEX",
+        side=Side.CALL,
+        strike=84000.0,
+        entryPremium=entry,
+        currentPremium=entry + 14.0,
+        lots=20,
+        openedAt=datetime.now(IST) - timedelta(minutes=3),
+        strategyType=StrategyType.EXPLOSIVE,
+        bestPnlPoints=best,
+        maxLtp=entry + best,
+        maxLtpAt=datetime.now(IST) - timedelta(seconds=45),
+        entryContext={
+            "maxProfitCapture": True,
+            "momentStageLadder": True,
+            "projectedMaxTp": 1833.76,
+            "stageSize": 75.0,
+            "tpRungLadder": True,
+            "tpRungsPts": [8.0, 14.0, 22.0, 30.0, 40.0, 55.0, 70.0, 75.0],
+            "tpRungConfirmedIdx": 7,
+            "chartExitLive": {"letRun": True},
+        },
+    )
+    sync_tp_rung_state(trade, best, settings=s)
+    reason = tp_rung_exit_reason(
+        trade,
+        best=best,
+        pnl_pts=14.0,
+        hold_seconds=140.0,
+        live_velocity_3s=-0.6,
         settings=s,
     )
     assert reason is None
