@@ -2882,6 +2882,10 @@ class Settings(BaseSettings):
     fast_bullish_local_base_min_velocity_3s: float = 0.8
     fast_bullish_local_base_soft_min_score: float = 45.0
     fast_bullish_local_base_soft_min_confidence: float = 60.0
+    # Nov26 SENSEX 84400: rank velocity + but live premium mom3 negative — call_rally fade waive filled into dip.
+    fast_bullish_local_base_block_fading_exec_fill: bool = True
+    fast_bullish_local_base_exec_min_premium_mom3_pct: float = 0.0
+    pe_win_mirror_fade_waiver_requires_nonneg_mom3: bool = True
     # Slow-grind coil in the pad band — catch the flat base before volume/velocity spike.
     # Aug24 24200 PE: 18–23 LTP for ~45min, then sudden lift at 11:15.
     slow_grind_sudden_lift_enabled: bool = True

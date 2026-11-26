@@ -7,7 +7,53 @@ from typing import Any, Optional
 from app.config import get_settings
 from app.engines.edge_engine import session_pf_feedback
 from app.engines.pretrade_validator import analyze_last_n_trades, collect_session_trades
-from app.models.schemas import AutoTraderState, SymbolSnapshot
+from app.models.schemas import AutoTraderState, Side, SymbolSnapshot
+
+
+def fast_bullish_call_rally_exec_lane(alert: dict | Any | None) -> bool:
+    """Lanes that waived exec fade on Nov25–26 SENSEX 84400 CE fade-at-fill losses."""
+    if not isinstance(alert, dict):
+        return False
+    reason = str(alert.get("ictBaseReadinessReason") or "")
+    moment = str(alert.get("momentType") or "")
+    return bool(
+        alert.get("fastBullishLocalBase")
+        or "fast_bullish" in reason
+        or moment in ("fast_bullish_local_base", "slow_grind_sudden_lift")
+        or str(alert.get("callAtBaseBestTradeReason") or "") == "call_rally_unlock"
+    )
+
+
+def apply_falling_premium_exec_fill_guard(
+    settings: Any,
+    *,
+    side: Side | str,
+    premium_chart: Any,
+    alert: dict | Any | None,
+    pe_win_mirror_bypass: bool,
+    premium_fade_pad_lane: bool,
+) -> tuple[bool, bool, dict[str, Any]]:
+    """Drop fade waivers when live premium 3s momentum is still negative."""
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "fast_bullish_local_base_block_fading_exec_fill", True)):
+        return pe_win_mirror_bypass, premium_fade_pad_lane, meta
+    side_u = side.value if isinstance(side, Side) else str(side or "").upper()
+    if side_u != "CALL" or not fast_bullish_call_rally_exec_lane(alert):
+        return pe_win_mirror_bypass, premium_fade_pad_lane, meta
+    pm3 = float(getattr(premium_chart, "momentum3Pct", 0) or 0) if premium_chart else 0.0
+    floor = float(
+        getattr(settings, "fast_bullish_local_base_exec_min_premium_mom3_pct", 0.0) or 0.0
+    )
+    if pm3 >= floor - 1e-9:
+        return pe_win_mirror_bypass, premium_fade_pad_lane, meta
+    meta.update(
+        {
+            "fallingPremiumExecFillGuard": True,
+            "premiumMomentum3Pct": pm3,
+            "minPremiumMom3Pct": floor,
+        }
+    )
+    return False, False if pe_win_mirror_bypass else premium_fade_pad_lane, meta
 
 
 def premium_fading_blocks_entry(
@@ -81,11 +127,16 @@ def premium_fading_blocks_entry(
         and bool(getattr(settings, "pe_win_ce_mirror_waive_premium_fade", True))
         and tier in ("ELITE", "EXPLODING")
     ):
+        require_nonneg = bool(
+            getattr(settings, "pe_win_mirror_fade_waiver_requires_nonneg_mom3", True)
+        )
         shallow_floor = float(
             getattr(settings, "pe_win_ce_mirror_premium_fade_max_drawdown_pct", -1.0)
             or -1.0
         )
-        if premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
+        if require_nonneg and premium_momentum_3s < 0:
+            pass
+        elif premium_momentum_5s >= shallow_floor and premium_momentum_3s >= shallow_floor:
             return False, "pe_win_mirror_shallow_fade_ok"
 
     if (
