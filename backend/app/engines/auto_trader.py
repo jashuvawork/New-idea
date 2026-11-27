@@ -1783,6 +1783,7 @@ async def _open_from_candidate(
 
     live_score_meta = refresh_candidate_live_entry_score(candidate, snap)
     trade_score = candidate_trade_score(candidate)
+    prem_chart_obj = None
 
     if not settings.execution_chart_gate_enabled or not client:
         from app.engines.live_entry_score import live_entry_score_blocks_entry
@@ -3050,6 +3051,47 @@ async def _open_from_candidate(
         if chop_live_guard_day_active(state, snap, snapshots):
             ctx_extra["chopLiveGuard"] = True
             ctx_extra.update({k: v for k, v in chop_meta.items() if k != "chopLiveGuard"})
+
+    from app.engines.execution_order_preflight import execution_order_preflight_blocked
+
+    pre_blocked, pre_reason, pre_meta = execution_order_preflight_blocked(
+        candidate,
+        snap,
+        premium_chart=prem_chart_obj,
+        premium_candles_1m=(chart_meta or {}).get("_premiumCandles1m"),
+        chart_meta=chart_meta if chart_meta else None,
+        settings=settings,
+    )
+    ctx_extra["executionOrderPreflight"] = pre_meta
+    if pre_blocked:
+        _record_deferred_candidate_fallback(candidate, pre_reason)
+        return False, pre_reason
+
+    snapshots_for_order_time = dict(snapshots or {})
+    sym_u = str(symbol or "").upper()
+    if sym_u:
+        snapshots_for_order_time[sym_u] = snap
+    from app.engines.order_time_entry_pass import order_time_entry_blocked
+
+    ot_blocked, ot_reason, ot_meta = order_time_entry_blocked(
+        candidate,
+        state,
+        snapshots_for_order_time,
+        premium_chart=prem_chart_obj,
+        chart_meta=chart_meta if chart_meta else None,
+        preflight_meta=pre_meta,
+        is_live=is_live,
+        settings=settings,
+    )
+    snap = snapshots_for_order_time.get(sym_u) or snap
+    try:
+        candidate.snap = snap
+    except Exception:
+        pass
+    ctx_extra["orderTimeEntryPass"] = ot_meta
+    if ot_blocked:
+        _record_deferred_candidate_fallback(candidate, ot_reason)
+        return False, ot_reason
 
     if needs_broker_order_path(settings):
         if not client:

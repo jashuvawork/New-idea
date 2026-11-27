@@ -518,6 +518,20 @@ def live_paper_parity_active(settings: Any | None = None) -> bool:
     )
 
 
+def armed_trading_book_applies_entry_gates(settings: Any = None) -> bool:
+    """Armed paper book and live execution share the same entry gates (VM paper = live setup)."""
+    from app.config import get_settings
+    from app.engines.execution_backend import is_live_execution
+
+    settings = settings or get_settings()
+    armed = getattr(settings, "auto_trading_enabled", True)
+    if armed is False or armed is not True:
+        return False
+    if is_live_execution(settings):
+        return True
+    return bool(getattr(settings, "paper_trading", True)) is True
+
+
 def entry_gates_match_paper(settings: Any | None = None) -> bool:
     """True when live entry/selection gates should match paper (parity flags or Frozen Oct live)."""
     from app.config import get_settings

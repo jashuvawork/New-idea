@@ -52,6 +52,43 @@ def index_session_extremes(symbol: str) -> dict[str, Any]:
     return dict(source.get(str(symbol or "").upper()) or {})
 
 
+def resolve_index_session(symbol: str, snap: Any = None) -> dict[str, Any]:
+    """Broker/tape unified session open/high/low/last — preflight + session-intent compat."""
+    sym = str(symbol or "").upper()
+    ext = index_session_extremes(sym)
+    hi = float(ext.get("hi") or 0)
+    lo = float(ext.get("lo") or 0)
+    last = float(ext.get("last") or 0)
+    open_ = float(ext.get("open") or 0)
+    if snap is not None:
+        snap_hi, snap_lo = _snap_session_extremes(snap)
+        if snap_hi > 0:
+            hi = max(hi, snap_hi)
+        if snap_lo > 0:
+            lo = min(lo, snap_lo) if lo > 0 else snap_lo
+        if last <= 0:
+            last = float(getattr(snap, "spot", 0) or 0)
+        try:
+            ca = getattr(snap, "chartAnalysis", None)
+            inst = getattr(ca, "institutional", None) if ca is not None else None
+            if isinstance(inst, dict):
+                for hi_k, lo_k in (
+                    ("dayHigh", "dayLow"),
+                    ("sessionHigh", "sessionLow"),
+                ):
+                    dh = float(inst.get(hi_k) or 0)
+                    dl = float(inst.get(lo_k) or 0)
+                    if dh > 0:
+                        hi = max(hi, dh)
+                    if dl > 0:
+                        lo = min(lo, dl) if lo > 0 else dl
+                if open_ <= 0:
+                    open_ = float(inst.get("dayOpen") or 0)
+        except Exception:
+            pass
+    return {"hi": hi, "lo": lo, "last": last, "open": open_}
+
+
 def install_replay_session_extremes(
     extremes: dict[str, dict[str, Any]],
 ) -> contextvars.Token:

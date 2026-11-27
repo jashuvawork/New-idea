@@ -277,3 +277,34 @@ def session_winner_gate(
             return False, f"session_winner_gate_score_{cand_score:.0f}<{min_score:.0f}", meta
 
     return True, "ok", meta
+
+
+def fast_bullish_call_rally_exec_lane(alert: dict | Any | None) -> bool:
+    """Lanes that waived exec fade on Nov25–26 SENSEX 84400 CE fade-at-fill losses."""
+    if not isinstance(alert, dict):
+        return False
+    reason = str(alert.get("ictBaseReadinessReason") or "")
+    moment = str(alert.get("momentType") or "")
+    return bool(
+        alert.get("fastBullishLocalBase")
+        or "fast_bullish" in reason
+        or moment in ("fast_bullish_local_base", "slow_grind_sudden_lift")
+        or str(alert.get("callAtBaseBestTradeReason") or "") == "call_rally_unlock"
+    )
+
+
+def put_slide_rally_exec_lane(alert: dict | Any | None) -> bool:
+    """PE rally / index-slide PUT lanes (mirror of fast_bullish call_rally on CE)."""
+    if not isinstance(alert, dict):
+        return False
+    reason = str(alert.get("ictBaseReadinessReason") or "")
+    moment = str(alert.get("momentType") or "")
+    base_reason = str(alert.get("callAtBaseBestTradeReason") or "")
+    return bool(
+        "put_slide" in reason
+        or "pe_slide" in reason
+        or base_reason in ("put_slide_unlock", "index_slide_side_flip")
+        or moment in ("put_slide_unlock", "pe_slide_breakdown", "index_slide_side_flip")
+        or alert.get("putSlideUnlock")
+        or alert.get("putSlideEntryUnlock")
+    )
