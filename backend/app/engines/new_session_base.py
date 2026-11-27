@@ -25,6 +25,7 @@ def index_participation_allows_base_side(
     state: Any = None,
     *,
     settings: Any = None,
+    scope: str = "new_session",
 ) -> tuple[bool, str, dict[str, Any]]:
     """
     Base formation follows index participation: CALL off rally/session-low lift,
@@ -32,7 +33,14 @@ def index_participation_allows_base_side(
     """
     settings = settings or get_settings()
     meta: dict[str, Any] = {}
-    if not bool(getattr(settings, "new_session_base_require_index_participation", True)):
+    scope_l = str(scope or "new_session").lower()
+    if scope_l == "new_session" and not bool(
+        getattr(settings, "new_session_base_require_index_participation", True)
+    ):
+        return True, "ok", meta
+    if scope_l == "ict" and not bool(
+        getattr(settings, "ict_armed_base_require_index_participation", True)
+    ):
         return True, "ok", meta
     if snap is None:
         meta["indexBaseFormationSkipped"] = "no_snapshot"
@@ -278,6 +286,8 @@ def resolve_effective_base_premium_inr(
     premium: float = 0.0,
     velocity_3s: float = 0.0,
     fallback: float = 0.0,
+    snap: Any = None,
+    state: Any = None,
     settings: Any = None,
 ) -> tuple[float, dict[str, Any]]:
     """Prefer identified new base; else alert ICT base; else fallback."""
@@ -309,6 +319,8 @@ def resolve_effective_base_premium_inr(
             live,
             velocity_3s=v3,
             stale_ict_base=stale,
+            snap=snap,
+            state=state,
             settings=settings,
         )
         if ok:
@@ -320,6 +332,20 @@ def resolve_effective_base_premium_inr(
         try:
             v = float(row.get(key) or 0)
             if v > 0:
+                if sym and side_v in ("CALL", "PUT") and snap is not None:
+                    allowed, reason, idx_meta = index_participation_allows_base_side(
+                        sym,
+                        side_v,
+                        snap,
+                        state,
+                        settings=settings,
+                        scope="ict",
+                    )
+                    meta.update(idx_meta)
+                    if not allowed:
+                        meta["indexBaseFormationBlocked"] = reason
+                        meta["indexBaseIctFallbackRejected"] = key
+                        return float(fallback or 0), meta
                 return v, meta
         except (TypeError, ValueError):
             pass
@@ -409,6 +435,9 @@ def session_base_guard_summary(settings: Any = None) -> dict[str, Any]:
         ),
         "newSessionBaseRequireIndexParticipation": bool(
             getattr(settings, "new_session_base_require_index_participation", True)
+        ),
+        "ictArmedBaseRequireIndexParticipation": bool(
+            getattr(settings, "ict_armed_base_require_index_participation", True)
         ),
         "newSessionBaseSessionTroughStampEnabled": bool(
             getattr(settings, "new_session_base_session_trough_stamp_enabled", False)
