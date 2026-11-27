@@ -17,7 +17,16 @@ from app.engines.new_session_base import (
     session_base_observability_bundle,
     stamp_new_session_base_fields,
 )
-from app.models.schemas import Side
+from app.models.schemas import (
+    AutoTraderState,
+    Breadth,
+    ChartAnalysis,
+    MarketPhase,
+    Regime,
+    Side,
+    SpotChart,
+    SymbolSnapshot,
+)
 from tests.mock_defaults import settings_mock
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -180,6 +189,70 @@ def test_near_miss_waive_rejects_chase_pad():
         "velocity3s": 2.0,
     }
     assert new_session_base_near_miss_waive(alert, settings=_settings()) is False
+
+
+def _slide_snap() -> SymbolSnapshot:
+    IST = ZoneInfo("Asia/Kolkata")
+    return SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=25700.0,
+        regime=Regime.CHOP,
+        tradeQualityScore=50.0,
+        breadth=Breadth(bias="BEARISH", score=40, aligned=True),
+        spotChart=SpotChart(direction="BEARISH", momentum5Pct=-0.05),
+        chartAnalysis=ChartAnalysis(consensus="BEARISH"),
+    )
+
+
+@patch(
+    "app.engines.index_tick_helpers.index_trend_breakout",
+    return_value={},
+)
+@patch(
+    "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+    return_value=("SLIDE", {"rallyPoints": 20, "slidePoints": 60}),
+)
+def test_call_base_rejected_on_index_slide_leg(_m0, _m1):
+    """CE must not stamp a session base when index participation is slide."""
+    _seed_session("NIFTY", 25750.0, Side.CALL, 200.0, 280.0)
+    ok, kind, meta = new_session_base_identify(
+        "NIFTY",
+        25750.0,
+        Side.CALL,
+        215.0,
+        snap=_slide_snap(),
+        state=AutoTraderState(),
+        settings=_settings(),
+    )
+    assert ok is False
+    assert kind == ""
+    assert meta.get("indexBaseFormationBlocked") == "index_base_counter_participation"
+
+
+@patch(
+    "app.engines.index_tick_helpers.index_trend_breakout",
+    return_value={},
+)
+@patch(
+    "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+    return_value=("SLIDE", {}),
+)
+def test_put_base_allowed_on_index_slide_leg(_m0, _m1):
+    _seed_session("SENSEX", 83600.0, Side.PUT, 175.0, 550.0)
+    ok, kind, _ = new_session_base_identify(
+        "SENSEX",
+        83600.0,
+        Side.PUT,
+        190.0,
+        snap=_slide_snap(),
+        state=AutoTraderState(),
+        settings=_settings(),
+    )
+    assert ok is True
+    assert kind == "session_trough"
 
 
 def test_observability_bundle_merges_rip_fall_and_alert():

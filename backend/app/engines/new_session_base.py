@@ -18,6 +18,58 @@ def _side_val(side: Side | str | None) -> str:
     return side.value if isinstance(side, Side) else str(side).upper()
 
 
+def index_participation_allows_base_side(
+    sym: str,
+    side: Side | str,
+    snap: Any,
+    state: Any = None,
+    *,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Base formation follows index participation: CALL off rally/session-low lift,
+    PUT off slide/session-high roll — not counter-leg premium pads.
+    """
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    if not bool(getattr(settings, "new_session_base_require_index_participation", True)):
+        return True, "ok", meta
+    if snap is None:
+        meta["indexBaseFormationSkipped"] = "no_snapshot"
+        return True, "ok", meta
+
+    side_u = _side_val(side)
+    if side_u not in ("CALL", "PUT"):
+        return True, "ok", meta
+
+    from app.engines.index_session_dominant_trend import (
+        index_session_dominant_trend,
+        side_aligns_with_dominant_trend,
+    )
+
+    dom, trend_meta = index_session_dominant_trend(sym, snap, state, settings=settings)
+    meta["indexDominantTrend"] = dom
+    if isinstance(trend_meta, dict):
+        meta["indexTrendMetrics"] = trend_meta.get("indexTrendMetrics")
+    meta["indexBaseFormationLeg"] = dom
+
+    if dom in ("", "NEUTRAL"):
+        return True, "ok", meta
+
+    if side_aligns_with_dominant_trend(side_u, dom):
+        meta["indexBaseSideAlign"] = True
+        return True, "ok", meta
+
+    from app.engines.index_tick_helpers import index_trend_breakout
+
+    if index_trend_breakout(sym, side_u, snap, settings=settings).get("breakout"):
+        meta["indexBaseSideAlign"] = "trend_breakout"
+        return True, "ok", meta
+
+    meta["indexBaseSideAlign"] = False
+    return False, "index_base_counter_participation", meta
+
+
 def new_session_base_identify(
     symbol: str,
     strike: float,
@@ -26,6 +78,8 @@ def new_session_base_identify(
     *,
     velocity_3s: float = 0.0,
     stale_ict_base: float = 0.0,
+    snap: Any = None,
+    state: Any = None,
     settings: Any = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Return (identified, kind, meta) when a proper new base is the launch pad."""
@@ -52,6 +106,17 @@ def new_session_base_identify(
         meta["sessionLowPremium"] = round(sess_low, 2)
     if sess_peak > 0:
         meta["sessionPeakPremium"] = round(sess_peak, 2)
+
+    def _finalize(kind: str, payload: dict[str, Any]) -> tuple[bool, str, dict[str, Any]]:
+        out = {**meta, **payload}
+        allowed, reason, idx_meta = index_participation_allows_base_side(
+            sym, side, snap, state, settings=settings,
+        )
+        out.update(idx_meta)
+        if not allowed:
+            out["indexBaseFormationBlocked"] = reason
+            return False, "", out
+        return True, kind, out
 
     # 1) Session trough base — V-bottom / new pad at session low (not chase-at-session-high).
     if bool(getattr(settings, "new_session_base_session_trough_stamp_enabled", False)) and sess_low > 0:
@@ -80,23 +145,23 @@ def new_session_base_identify(
                     session_peak=sess_peak,
                     settings=settings,
                 ):
-                    meta.update(
+                    return _finalize(
+                        "session_trough",
                         {
                             "effectiveBasePremium": round(sess_low, 2),
                             "offBasePct": round(off_low, 2),
                             "newBaseKind": "session_trough",
-                        }
+                        },
                     )
-                    return True, "session_trough", meta
             except Exception:
-                meta.update(
+                return _finalize(
+                    "session_trough",
                     {
                         "effectiveBasePremium": round(sess_low, 2),
                         "offBasePct": round(off_low, 2),
                         "newBaseKind": "session_trough",
-                    }
+                    },
                 )
-                return True, "session_trough", meta
 
     # 2) Post-rip pullback new base — coil off peak, not stale mid-rip armed.
     min_run = float(
@@ -143,15 +208,15 @@ def new_session_base_identify(
                     meta["staleVsTroughGapPct"] = round(gap, 1)
                 if stale or ref <= 0:
                     if velocity_3s >= min_v3 or base_rel <= max_pad * 0.6:
-                        meta.update(
+                        return _finalize(
+                            "post_rip_pullback",
                             {
                                 "effectiveBasePremium": round(recent_base, 2),
                                 "offBasePct": round(base_rel, 2),
                                 "newBaseKind": "post_rip_pullback",
                                 "recentWindowBase": True,
-                            }
+                            },
                         )
-                        return True, "post_rip_pullback", meta
 
     return False, "", meta
 
@@ -164,6 +229,8 @@ def stamp_new_session_base_fields(
     side: Side | str,
     premium: float,
     velocity_3s: float = 0.0,
+    snap: Any = None,
+    state: Any = None,
     settings: Any = None,
 ) -> dict[str, Any]:
     """Merge new-base stamps into a radar / execution alert."""
@@ -181,6 +248,8 @@ def stamp_new_session_base_fields(
         premium,
         velocity_3s=velocity_3s,
         stale_ict_base=stale,
+        snap=snap,
+        state=state,
         settings=settings,
     )
     if not ok:
@@ -337,6 +406,9 @@ def session_base_guard_summary(settings: Any = None) -> dict[str, Any]:
     return {
         "newSessionBaseIdentifyEnabled": bool(
             getattr(settings, "new_session_base_identify_enabled", True)
+        ),
+        "newSessionBaseRequireIndexParticipation": bool(
+            getattr(settings, "new_session_base_require_index_participation", True)
         ),
         "newSessionBaseSessionTroughStampEnabled": bool(
             getattr(settings, "new_session_base_session_trough_stamp_enabled", False)

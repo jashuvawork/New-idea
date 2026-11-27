@@ -3516,6 +3516,7 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
         side=e.side,
         premium=float(e.premium),
         velocity_3s=float(e.velocity_3s or 0),
+        snap=snap,
         settings=_settings,
     )
     if alert_out.get("newSessionBase") and float(
