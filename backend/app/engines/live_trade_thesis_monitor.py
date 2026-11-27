@@ -110,9 +110,58 @@ def _stamp_live_thesis(trade: PaperTrade, assessment: dict[str, Any]) -> None:
     if trade.entryContext is None:
         trade.entryContext = {}
     ctx = trade.entryContext
+    now = datetime.now(IST)
     ctx["liveThesisAssessment"] = assessment
-    ctx["liveThesisBroken"] = bool(assessment.get("thesisBroken"))
-    ctx["liveThesisRefreshedAt"] = datetime.now(IST).isoformat()
+    broken = bool(assessment.get("thesisBroken"))
+    ctx["liveThesisBroken"] = broken
+    ctx["liveThesisRefreshedAt"] = now.isoformat()
+    if broken:
+        if not ctx.get("liveThesisBrokenSince"):
+            ctx["liveThesisBrokenSince"] = now.isoformat()
+    else:
+        ctx.pop("liveThesisBrokenSince", None)
+
+
+def _thesis_broken_sustained_seconds(trade: PaperTrade, *, settings: Any) -> float:
+    ctx = trade.entryContext or {}
+    raw = ctx.get("liveThesisBrokenSince")
+    if not raw:
+        return 0.0
+    try:
+        since = datetime.fromisoformat(str(raw))
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=IST)
+        return max(0.0, (datetime.now(IST) - since.astimezone(IST)).total_seconds())
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _defer_to_normal_profit_booking(
+    trade: PaperTrade,
+    *,
+    pnl_pts: float,
+    best: float,
+    settings: Any,
+) -> bool:
+    """True when peak-fade, trail, rungs — not thesis scratch — should own the exit."""
+    max_action = float(
+        getattr(settings, "live_trade_thesis_max_action_pnl_pts", 12.0) or 12.0
+    )
+    if pnl_pts > max_action + 1e-6:
+        return True
+    book_best = float(
+        getattr(settings, "live_trade_thesis_profit_booking_min_best_points", 10.0) or 10.0
+    )
+    book_remain = float(
+        getattr(settings, "live_trade_thesis_profit_booking_min_remain_points", 4.0) or 4.0
+    )
+    if best + 1e-6 >= book_best and pnl_pts + 1e-6 >= book_remain:
+        return True
+    ctx = trade.entryContext or {}
+    if ctx.get("momentStageLadder") or ctx.get("eliteRunnerExitBundle"):
+        if best + 1e-6 >= book_best * 0.6:
+            return True
+    return False
 
 
 def _observed_worst_pnl(trade: PaperTrade, *, pnl_pts: float) -> float:
@@ -184,12 +233,23 @@ def live_wrong_side_thesis_exit_reason(
         return None
 
     min_hold = float(
-        getattr(settings, "live_trade_thesis_min_hold_seconds", 120.0) or 120.0
+        getattr(settings, "live_trade_thesis_min_hold_seconds", 180.0) or 180.0
     )
     if hold_seconds < min_hold:
         return None
 
+    broken_min = float(
+        getattr(settings, "live_trade_thesis_broken_min_seconds", 240.0) or 240.0
+    )
+    if _thesis_broken_sustained_seconds(trade, settings=settings) < broken_min:
+        return None
+
     if _skip_for_runner_hold(trade, best=best, settings=settings):
+        return None
+
+    if _defer_to_normal_profit_booking(
+        trade, pnl_pts=pnl_pts, best=best, settings=settings,
+    ):
         return None
 
     max_v3 = float(
@@ -242,5 +302,23 @@ def live_wrong_side_thesis_exit_reason(
         and worst <= -underwater_min
     ):
         return "live_wrong_side_thesis_never_green"
+
+    long_hold = float(
+        getattr(settings, "live_trade_thesis_long_fade_min_hold_seconds", 2700.0)
+        or 2700.0
+    )
+    long_max_pnl = float(
+        getattr(settings, "live_trade_thesis_long_fade_max_pnl_pts", 4.0) or 4.0
+    )
+    if (
+        hold_seconds >= long_hold
+        and pnl_pts <= long_max_pnl
+        and worst <= -underwater_min
+        and best + 1e-6 < float(
+            getattr(settings, "live_trade_thesis_runner_min_best_points", 18.0) or 18.0
+        )
+        and live_velocity_3s <= max_v3
+    ):
+        return "live_wrong_side_thesis_long_fade"
 
     return None
