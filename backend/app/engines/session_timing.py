@@ -74,7 +74,7 @@ def symbol_entry_market_live(symbol: str) -> bool:
 
 
 def entries_allowed_now() -> tuple[bool, str]:
-    """False until configured IST time (default 09:45) during live market."""
+    """False until configured IST time (default 10:00) during live market."""
     phase = get_market_phase()
     if phase == "LIVE_MARKET":
         current = _minutes_now()
