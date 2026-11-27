@@ -1,13 +1,30 @@
 """Armed-base pullback wait — block chase fills far above ICT base (CE/PE)."""
 
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import app.engines.explosion_detector as ed
 from app.engines.explosion_detector import _open_key
-from app.engines.local_base_pullback_entry import local_base_pullback_blocks_entry
-from app.models.schemas import PremiumChart, Side
+from app.engines.local_base_pullback_entry import (
+    _base_premium_inr,
+    local_base_pullback_blocks_entry,
+)
+from app.models.schemas import (
+    Breadth,
+    ChartAnalysis,
+    MarketPhase,
+    PremiumChart,
+    Regime,
+    Side,
+    SpotChart,
+    SymbolSnapshot,
+)
+
 from tests.mock_defaults import settings_mock
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def _seed_session(symbol, strike, side, low, peak):
@@ -150,6 +167,47 @@ def test_allows_armed_base_launch_above_chase_cap_ce_pe():
         assert blocked is False
         assert reason == "ok"
         assert meta.get("localBasePullbackFill") == "armed_base_launch_waiver"
+
+
+@patch(
+    "app.engines.index_tick_helpers.index_trend_breakout",
+    return_value={},
+)
+@patch(
+    "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+    return_value=("SLIDE", {}),
+)
+def test_base_premium_zero_when_ict_vetoed_on_counter_leg(_m0, _m1):
+    settings = _settings()
+    settings.new_session_base_identify_enabled = True
+    settings.ict_armed_base_require_index_participation = True
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=25700.0,
+        regime=Regime.CHOP,
+        tradeQualityScore=50.0,
+        breadth=Breadth(bias="BEARISH", score=40, aligned=True),
+        spotChart=SpotChart(direction="BEARISH", momentum5Pct=-0.05),
+        chartAnalysis=ChartAnalysis(consensus="BEARISH"),
+    )
+    cand = _candidate(
+        symbol="NIFTY",
+        side=Side.CALL,
+        strike=25750.0,
+        premium=232.0,
+        alert={
+            "symbol": "NIFTY",
+            "side": "CALL",
+            "strike": 25750.0,
+            "ictBasePremium": 210.0,
+            "premium": 232.0,
+        },
+    )
+    with patch("app.engines.local_base_pullback_entry.get_settings", return_value=settings):
+        assert _base_premium_inr(cand, snap) == 0.0
 
 
 def test_allows_after_pullback_from_session_high_ce():

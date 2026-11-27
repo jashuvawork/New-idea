@@ -328,6 +328,7 @@ def resolve_effective_base_premium_inr(
             if eff > 0:
                 return eff, {**id_meta, "newBaseKind": kind}
 
+    rejected_premiums: list[float] = []
     for key in ("effectiveBasePremium", "localBaseBasePremium", "ictBasePremium", "basePremium"):
         try:
             v = float(row.get(key) or 0)
@@ -345,11 +346,34 @@ def resolve_effective_base_premium_inr(
                     if not allowed:
                         meta["indexBaseFormationBlocked"] = reason
                         meta["indexBaseIctFallbackRejected"] = key
-                        return float(fallback or 0), meta
+                        rejected_premiums.append(v)
+                        continue
                 return v, meta
         except (TypeError, ValueError):
             pass
-    return float(fallback or 0), meta
+    safe_fallback = float(fallback or 0)
+    if safe_fallback > 0 and safe_fallback in rejected_premiums:
+        safe_fallback = 0.0
+    elif (
+        safe_fallback > 0
+        and sym
+        and side_v in ("CALL", "PUT")
+        and snap is not None
+    ):
+        allowed, reason, idx_meta = index_participation_allows_base_side(
+            sym,
+            side_v,
+            snap,
+            state,
+            settings=settings,
+            scope="ict",
+        )
+        meta.update(idx_meta)
+        if not allowed:
+            meta["indexBaseFormationBlocked"] = reason
+            meta["indexBaseIctFallbackRejected"] = "fallback"
+            safe_fallback = 0.0
+    return safe_fallback, meta
 
 
 def alert_pad_move_pct(alert: Mapping[str, Any] | None) -> float:

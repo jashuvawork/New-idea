@@ -84,7 +84,7 @@ def _base_premium_inr(candidate: Any, snap: Optional[SymbolSnapshot]) -> float:
                     break
             except (TypeError, ValueError):
                 pass
-        eff, _ = resolve_effective_base_premium_inr(
+        eff, base_meta = resolve_effective_base_premium_inr(
             alert,
             symbol=sym,
             strike=strike,
@@ -95,8 +95,12 @@ def _base_premium_inr(candidate: Any, snap: Optional[SymbolSnapshot]) -> float:
             snap=snap,
             settings=settings,
         )
+        if base_meta.get("indexBaseIctFallbackRejected"):
+            return 0.0
         if eff > 0:
             return eff
+        if base_meta.get("indexBaseFormationBlocked") and snap is not None:
+            return 0.0
     for key in ("ictBasePremium", "localBaseBasePremium", "basePremium"):
         try:
             v = float(alert.get(key) or 0)

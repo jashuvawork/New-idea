@@ -285,6 +285,70 @@ def test_resolve_rejects_stale_ict_base_on_counter_index_leg(_m0, _m1):
     "app.engines.index_session_dominant_trend.index_session_dominant_trend",
     return_value=("SLIDE", {}),
 )
+def test_resolve_rejects_matching_fallback_not_ict_row(_m0, _m1):
+    """Resolver must not return the same INR passed as fallback after ICT veto."""
+    prem, meta = resolve_effective_base_premium_inr(
+        {"ictBasePremium": 210.0, "symbol": "NIFTY", "side": "CALL", "strike": 25750.0},
+        premium=232.0,
+        fallback=210.0,
+        snap=_slide_snap(),
+        settings=_settings(),
+    )
+    assert prem == 0.0
+    assert meta.get("indexBaseIctFallbackRejected") == "ictBasePremium"
+
+
+@patch(
+    "app.engines.index_tick_helpers.index_trend_breakout",
+    return_value={},
+)
+@patch(
+    "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+    return_value=("SLIDE", {}),
+)
+def test_ict_breakout_probe_respects_participation_with_snap(_m0, _m1):
+    from collections import deque
+    from datetime import timedelta
+
+    from app.engines.ict_breakout_monitor import analyze_ict_breakout
+
+    ed._armed_base_anchors.clear()
+    settings = _settings()
+    side = Side.CALL
+    key = _open_key("NIFTY", 25750.0, side)
+    start = datetime.now(IST) - timedelta(seconds=30)
+    ed._local_base_hist[key] = deque(
+        [(start + timedelta(seconds=i * 3), 52.8 + (i % 2) * 0.2) for i in range(8)],
+        maxlen=1200,
+    )
+    _seed_session("NIFTY", 25750.0, side, 52.0, 120.0)
+    snap = _slide_snap()
+    sig = analyze_ict_breakout(
+        symbol="NIFTY",
+        side=side,
+        strike=25750.0,
+        premium=57.0,
+        session_move_pct=8.0,
+        peak_move_pct=8.0,
+        velocity_3s=1.2,
+        velocity_9s=0.8,
+        volume_surge=1.5,
+        volume=100000.0,
+        tier="WATCH",
+        reason="probe",
+        snap=snap,
+    )
+    assert not sig.base_armed
+
+
+@patch(
+    "app.engines.index_tick_helpers.index_trend_breakout",
+    return_value={},
+)
+@patch(
+    "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+    return_value=("SLIDE", {}),
+)
 def test_armed_base_call_blocked_on_index_slide(_m0, _m1):
     from collections import deque
     from datetime import timedelta
