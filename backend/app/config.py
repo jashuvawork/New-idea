@@ -4246,6 +4246,17 @@ class Settings(BaseSettings):
     index_trend_rank_flip_bonus: float = 5.0
     # Extra selector boost when dominant leg + Sep917 near-base shape (Sep30 CE miss fix).
     index_trend_rank_sep917_base_bonus_aligned: float = 12.0
+    # Session Intent: structural leg + 5m/15m/1h MTF authority (live week wrong-side fix).
+    session_intent_authority_enabled: bool = True
+    session_intent_symbols_csv: str = "NIFTY,SENSEX"
+    session_intent_mtf_anchor_labels_csv: str = "5m,15m,1h"
+    session_intent_mtf_htf_labels_csv: str = "15m,1h"
+    session_intent_mtf_min_htf_oppose_counter: int = 1
+    session_intent_counter_near_base_max_pct: float = 8.0
+    session_intent_counter_max_local_pad_pct: float = 12.0
+    session_intent_soft_mode_when_allow_counter: float = 0.0
+    # When rally/slide points tie, breadth wins over 5m mom before picking dominant leg.
+    index_trend_tie_break_breadth_over_mom5_enabled: bool = True
     worst_day_slow_bounce_min_rank: float = 55.0
   # Worst-day defensive ITM fade — alternate index, tight targets, 1 lot
     worst_day_itm_fade_enabled: bool = True

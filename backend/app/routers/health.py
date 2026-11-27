@@ -163,6 +163,14 @@ async def deployment_status():
             "paperLiveParityEnabled": settings.paper_live_parity_enabled,
             "sep917LegacyProfile": _sep917_legacy_profile_summary(settings),
             "sessionBaseGuards": session_base_guard_summary(settings),
+            "sessionIntentAuthority": {
+                "enabled": settings.session_intent_authority_enabled,
+                "symbols": settings.session_intent_symbols_csv,
+                "mtfLabels": settings.session_intent_mtf_anchor_labels_csv,
+                "htfLabels": settings.session_intent_mtf_htf_labels_csv,
+                "counterMaxPadPct": settings.session_intent_counter_max_local_pad_pct,
+                "breadthTieBreakOverMom5": settings.index_trend_tie_break_breadth_over_mom5_enabled,
+            },
         },
         "paperSlippage": slippage_config_summary(),
         "cadence": {
