@@ -2089,6 +2089,75 @@ def peak_capture_profit_lock_reason(
     return "explosion_peak_capture"
 
 
+def _observed_worst_pnl(trade: PaperTrade, *, pnl_pts: float) -> float:
+    ctx = trade.entryContext or {}
+    try:
+        worst = float(
+            getattr(trade, "worstPnlPoints", 0)
+            or ctx.get("worstPnlPoints")
+            or 0
+        )
+    except (TypeError, ValueError):
+        worst = 0.0
+    return min(worst, float(pnl_pts))
+
+
+def loss_recovery_entry_snatch_reason(
+    trade: PaperTrade,
+    *,
+    pnl_pts: float,
+    hold_seconds: float,
+    max_profit: bool = False,
+    live_velocity_3s: float = 0.0,
+) -> Optional[str]:
+    """Book a few points when a losing trade revisits entry green then fades again.
+
+    Weak CE / PE slides often bounce to breakeven / +2–8pt while index charts stay
+    bullish; near-base hold and bullish deferrals then block normal peak-fade locks.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "explosion_loss_recovery_snatch_enabled", True)):
+        return None
+    if max_profit and bool(
+        getattr(settings, "explosion_loss_recovery_skip_max_profit", True)
+    ):
+        return None
+    min_hold = float(
+        getattr(settings, "explosion_loss_recovery_min_hold_seconds", 45.0) or 45.0
+    )
+    if hold_seconds < min_hold:
+        return None
+
+    underwater_min = float(
+        getattr(settings, "explosion_loss_recovery_min_underwater_pts", 8.0) or 8.0
+    )
+    worst = _observed_worst_pnl(trade, pnl_pts=pnl_pts)
+    if worst > -underwater_min:
+        return None
+
+    profit_lo = float(
+        getattr(settings, "explosion_loss_recovery_profit_min_pts", 0.35) or 0.35
+    )
+    profit_hi = float(
+        getattr(settings, "explosion_loss_recovery_profit_max_pts", 9.0) or 9.0
+    )
+    if pnl_pts < profit_lo or pnl_pts > profit_hi:
+        return None
+
+    max_v3 = float(
+        getattr(settings, "explosion_loss_recovery_max_velocity_3s", 0.25) or 0.25
+    )
+    if live_velocity_3s > max_v3:
+        return None
+
+    if not _premium_rolling_over(
+        trade, settings=settings, live_velocity_3s=live_velocity_3s,
+    ):
+        return None
+
+    return "explosion_loss_recovery_snatch"
+
+
 def peak_fade_profit_lock_reason(
     trade: PaperTrade,
     *,
@@ -3084,6 +3153,16 @@ def evaluate_explosion_exit(
     )
     if reversal_keep:
         return reversal_keep, pnl_inr
+
+    recovery_snatch = loss_recovery_entry_snatch_reason(
+        trade,
+        pnl_pts=pnl_pts,
+        hold_seconds=hold,
+        max_profit=max_profit,
+        live_velocity_3s=v3,
+    )
+    if recovery_snatch:
+        return recovery_snatch, pnl_inr
 
     # Peak→fade toward losses: book remaining green / BE before hard SL.
     # Runs before trail-arm gates so unarmed trails cannot give winners back.

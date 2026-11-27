@@ -1688,6 +1688,16 @@ class Settings(BaseSettings):
     # (Aug19 SENSEX 76900 PE: best +5 → early_green_breakeven in ~4m). Use the
     # near-base hold floor so these runners can extend like prior max winners.
     explosion_early_green_lock_near_base_max_profit_min_best_points: float = 55.0
+    # After a deep underwater leg, premium often revisits entry / small green then
+    # dies again (Nov failure-week pattern). Bank a few points on that fade instead
+    # of riding back to adaptive_stop_loss.
+    explosion_loss_recovery_snatch_enabled: bool = True
+    explosion_loss_recovery_min_underwater_pts: float = 8.0
+    explosion_loss_recovery_profit_min_pts: float = 0.35
+    explosion_loss_recovery_profit_max_pts: float = 9.0
+    explosion_loss_recovery_max_velocity_3s: float = 0.25
+    explosion_loss_recovery_min_hold_seconds: float = 45.0
+    explosion_loss_recovery_skip_max_profit: bool = True
     # ICT max-profit / flat→vertical runners: hold through early pullbacks.
     # Aug6 SENSEX 78700 CE: best +15 → soft-locked +6.5 (OVERCONFIDENCE tightened
     # giveback to 50%) then LTP ran to ~460. Require a real expansion peak first.
