@@ -1007,6 +1007,8 @@ class Settings(BaseSettings):
     local_base_pullback_min_drawdown_from_high_pct: float = 3.0
     local_base_pullback_tiers_csv: str = "ELITE,EXPLODING"
     local_base_pullback_stale_trough_gap_pct: float = 15.0
+    # Within-chase-cap: mid/elevated pad at session extreme needs premium pullback (Nov26 84400 class).
+    local_base_pullback_chase_cap_require_pullback_above_pad_pct: float = 8.0
     # Nov 3 23550 CE — near_base_v bypass at ₹180/session-top after open rip.
     premium_extended_session_chase_block_enabled: bool = True
     premium_extended_session_afternoon_only: bool = True
