@@ -1357,7 +1357,12 @@ def armed_base_anchor(
         current = None
         mid_rip_rejected = True
 
-    if current is None and candidate is None and live > 0:
+    if (
+        current is None
+        and candidate is None
+        and live > 0
+        and bool(getattr(settings, "new_session_base_identify_enabled", False))
+    ):
         from app.engines.new_session_base import new_session_base_identify
 
         stale_ref = float(current.premium if current else 0)
@@ -3563,18 +3568,19 @@ def event_to_dict(e: ExplosionEvent, snap: Optional[Any] = None) -> dict[str, An
     from app.engines.live_entry_score import stamp_alert_live_entry_scores
 
     alert_out = stamp_alert_live_entry_scores(alert_out)
-    from app.engines.new_session_base import stamp_new_session_base_fields
+    if bool(getattr(_settings, "new_session_base_identify_enabled", False)):
+        from app.engines.new_session_base import stamp_new_session_base_fields
 
-    alert_out = stamp_new_session_base_fields(
-        alert_out,
-        symbol=e.symbol,
-        strike=float(e.strike),
-        side=e.side,
-        premium=float(e.premium),
-        velocity_3s=float(e.velocity_3s or 0),
-        snap=snap,
-        settings=_settings,
-    )
+        alert_out = stamp_new_session_base_fields(
+            alert_out,
+            symbol=e.symbol,
+            strike=float(e.strike),
+            side=e.side,
+            premium=float(e.premium),
+            velocity_3s=float(e.velocity_3s or 0),
+            snap=snap,
+            settings=_settings,
+        )
     if alert_out.get("newSessionBase") and float(
         alert_out.get("effectiveBasePremium") or 0
     ) > 0:
