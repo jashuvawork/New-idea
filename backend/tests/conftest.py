@@ -1,5 +1,8 @@
 """Shared pytest fixtures — isolate module-level state between tests.
 
+Set NEXUSQUANT_TESTING before collection so ``Settings()`` ignores local ``.env``
+(cloud VM paper-lab env otherwise drifts many tests vs CI).
+
 Several engines keep process-level globals (detector history, cooldown maps, the
 last composer brief, whipsaw/reentry timestamps, session gates). If a test leaves
 one set, it silently changes the outcome of a later test in a different file —
@@ -7,6 +10,10 @@ producing order-dependent "flaky" failures (e.g. a leaked composer stand-down
 brief later reads as `composer_stand_down`). Reset all of them around every test
 so the suite result is stable regardless of collection order.
 """
+
+import os
+
+os.environ.setdefault("NEXUSQUANT_TESTING", "1")
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
