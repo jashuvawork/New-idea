@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # Scalp timeframes — V3 intraday unit/interval (Upstox direct)
 SCALP_TIMEFRAMES: list[dict[str, Any]] = [
     {"label": "1m", "unit": "minutes", "interval": 1, "resample": 1},
+    {"label": "3m", "unit": "minutes", "interval": 3, "resample": 3},
     {"label": "5m", "unit": "minutes", "interval": 5, "resample": 5},
     {"label": "15m", "unit": "minutes", "interval": 15, "resample": 15},
     {"label": "1h", "unit": "hours", "interval": 1, "resample": 60},

@@ -4249,7 +4249,7 @@ class Settings(BaseSettings):
     # Session Intent: structural leg + 5m/15m/1h MTF authority (live week wrong-side fix).
     session_intent_authority_enabled: bool = True
     session_intent_symbols_csv: str = "NIFTY,SENSEX"
-    session_intent_mtf_anchor_labels_csv: str = "5m,15m,1h"
+    session_intent_mtf_anchor_labels_csv: str = "3m,5m,15m,1h"
     session_intent_mtf_htf_labels_csv: str = "15m,1h"
     session_intent_mtf_min_htf_oppose_counter: int = 1
     session_intent_counter_near_base_max_pct: float = 8.0
@@ -4257,6 +4257,19 @@ class Settings(BaseSettings):
     session_intent_soft_mode_when_allow_counter: float = 0.0
     # When rally/slide points tie, breadth wins over 5m mom before picking dominant leg.
     index_trend_tie_break_breadth_over_mom5_enabled: bool = True
+    session_intent_tactical_timeframe: str = "3m"  # 3m vs 5m tactical anchor for counter-side MTF
+    session_slide_open_lane_enabled: bool = True
+    session_slide_open_lane_start_hour: int = 9
+    session_slide_open_lane_start_minute: int = 45
+    session_slide_open_lane_end_hour: int = 10
+    session_slide_open_lane_end_minute: int = 45
+    session_slide_open_put_max_local_pad_pct: float = 22.0
+    session_call_near_day_high_block_enabled: bool = True
+    session_call_near_day_high_off_high_pct: float = 0.15
+    session_call_near_day_high_min_session_move_pct: float = 25.0
+    session_post_win_afternoon_hard_block_enabled: bool = True
+    session_post_win_afternoon_start_hour: int = 11
+    session_post_win_afternoon_start_minute: int = 30
     worst_day_slow_bounce_min_rank: float = 55.0
   # Worst-day defensive ITM fade — alternate index, tight targets, 1 lot
     worst_day_itm_fade_enabled: bool = True
