@@ -2437,6 +2437,8 @@ def scan_chain_explosions(
     atm: float,
     *,
     expiry_day: bool = False,
+    snap: Any = None,
+    state: Any = None,
 ) -> list[ExplosionEvent]:
     """
     Scan full chain for premium explosions.
@@ -2856,6 +2858,7 @@ def scan_chain_explosions(
                             volume=float(effective_volume or 0),
                             tier=tier,
                             reason=" ".join(reason_parts_open),
+                            snap=snap,
                         )
                         keep_first_lift = ict_probe.first_lift
                         keep_armed_base = ict_probe.base_armed
@@ -3106,7 +3109,12 @@ def scan_snapshot_explosions(
             },
         })
     return scan_chain_explosions(
-        snap.symbol, chain, float(snap.spot), atm, expiry_day=expiry_day,
+        snap.symbol,
+        chain,
+        float(snap.spot),
+        atm,
+        expiry_day=expiry_day,
+        snap=snap,
     )
 
 
