@@ -1,4 +1,4 @@
-"""Production defaults — symmetric capture book + audit session discipline (09:45, chop stand-aside)."""
+"""Production defaults — symmetric capture book + audit session discipline (10:00 entry, chop stand-aside)."""
 
 from app.config import Settings
 
@@ -20,8 +20,10 @@ def test_sep9_symmetric_profile_defaults():
 def test_audit_session_discipline_defaults():
     s = Settings()
     assert s.session_side_alignment_enabled is True
-    assert s.entry_earliest_minute == 45
-    assert s.explosion_entry_earliest_minute == 45
+    assert s.entry_earliest_hour == 10
+    assert s.entry_earliest_minute == 0
+    assert s.explosion_entry_earliest_hour == 10
+    assert s.explosion_entry_earliest_minute == 0
     assert s.top_trades_only_near_base_waives_chop is False
     assert s.top_trades_only_ce_at_base_waives_chop is False
     assert s.top_trades_only_pe_at_base_waives_chop is False

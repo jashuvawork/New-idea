@@ -3455,9 +3455,9 @@ class Settings(BaseSettings):
     open_setup_start_minute: int = 15
     open_caution_until_hour: int = 9
     open_caution_until_minute: int = 45
-    # First order clock — 09:45 IST (audit: avoid pre-09:45 chop losers); open setup book still 09:15–09:45 for radar only.
-    entry_earliest_hour: int = 9
-    entry_earliest_minute: int = 45
+    # First order clock — 10:00 IST (Nov27: defer first fill past post-open rip; open caution still until 09:45).
+    entry_earliest_hour: int = 10
+    entry_earliest_minute: int = 0
     # Macro side check 09:25–09:45. Idle before 09:25 and after 09:45.
     # The cash-candle hold covers 09:15–09:45. First order at 09:15 with open-setup guards.
     open_side_confirmation_enabled: bool = False
@@ -3734,8 +3734,8 @@ class Settings(BaseSettings):
     premium_led_explosion_bypass_enabled: bool = True
     # Open premium explosion aligns with open setup (09:15–09:45). Mid-rip still gated by lanes + first lift.
     explosion_open_entry_enabled: bool = True
-    explosion_entry_earliest_hour: int = 9
-    explosion_entry_earliest_minute: int = 45
+    explosion_entry_earliest_hour: int = 10
+    explosion_entry_earliest_minute: int = 0
     # Open premium explosion — NIFTY PE 60→160 style gap rips at 9:15
     open_premium_explosion_enabled: bool = True
     open_premium_min_move_pct: float = 25.0
