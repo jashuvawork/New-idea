@@ -17,6 +17,10 @@ from app.services.upstox import get_market_phase
 def open_setup_shadow_select_active() -> tuple[bool, str]:
     """True during open caution while live entry clock is still before entry_earliest."""
     settings = get_settings()
+    from app.engines.open_setup_policy import is_open_setup_book_enabled
+
+    if not is_open_setup_book_enabled(settings):
+        return False, "open_setup_book_disabled"
     if not bool(getattr(settings, "open_setup_shadow_record_enabled", True)):
         return False, "open_setup_shadow_disabled"
     if get_market_phase() != "LIVE_MARKET":
@@ -75,8 +79,11 @@ def assess_open_setup_shadow_preorder(
 
 def open_setup_shadow_summary(settings: Any = None) -> dict[str, Any]:
     settings = settings or get_settings()
+    from app.engines.open_setup_policy import is_open_setup_book_enabled
+
     active, reason = open_setup_shadow_select_active()
     return {
+        "openBookEnabled": is_open_setup_book_enabled(settings),
         "enabled": bool(getattr(settings, "open_setup_shadow_record_enabled", True)),
         "pretradeInShadow": bool(
             getattr(settings, "open_setup_shadow_pretrade_enabled", True)

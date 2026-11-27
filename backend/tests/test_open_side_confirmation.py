@@ -21,7 +21,12 @@ def _at(h: int, m: int, s: int = 0) -> datetime:
 
 
 def _settings(**kw) -> Settings:
-    return Settings(open_side_confirmation_enabled=True, open_side_confirmation_min_minutes=1.0, **kw)
+    return Settings(
+        open_setup_book_enabled=True,
+        open_side_confirmation_enabled=True,
+        open_side_confirmation_min_minutes=1.0,
+        **kw,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -119,18 +124,20 @@ def test_after_open_window_not_applied_ce_pe(side):
 
 def test_enabled_at_one_minute_by_default():
     s = Settings()
-    assert s.open_side_confirmation_enabled is True
+    assert s.open_setup_book_enabled is False
+    assert s.open_side_confirmation_enabled is False
     assert s.open_side_confirmation_start_minute == 25
     assert s.open_side_confirmation_min_minutes == 1.0
     assert s.entry_earliest_minute == 45
     assert s.explosion_entry_earliest_minute == 45
     assert s.open_setup_start_minute == 15
     snap = _tape("NIFTY", open_=22300.0, hi=22410.0, lo=22285.0, last=22395.0)
+    s_on = _settings()
     for clock in (_at(9, 15, 37), _at(9, 16, 18), _at(9, 20, 0)):
-        blocked, reason, _ = open_side_confirmation("NIFTY", Side.CALL, snap, now=clock, settings=s)
+        blocked, reason, _ = open_side_confirmation("NIFTY", Side.CALL, snap, now=clock, settings=s_on)
         assert blocked is False
         assert reason == ""
-    call_blocked, _, meta = open_side_confirmation("NIFTY", Side.CALL, snap, now=_at(9, 25), settings=s)
+    call_blocked, _, meta = open_side_confirmation("NIFTY", Side.CALL, snap, now=_at(9, 25), settings=s_on)
     assert call_blocked is False
     assert meta["movePct"] > 0.10
 

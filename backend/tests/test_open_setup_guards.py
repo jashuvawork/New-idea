@@ -41,6 +41,7 @@ def _cand(symbol: str, side: Side, strike: float, *, spot: float | None = None, 
 def test_nifty_call_lane_on_bullish_open_allows_non_lane_when_aligned(mock_session):
     mock_session.return_value = {"open": 22800.0, "last": 22950.0, "hi": 22950.0, "lo": 22800.0}
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_sensex_call_lane_enabled=True,
@@ -83,6 +84,7 @@ def test_call_blocked_on_bearish_open(mock_session):
 def test_sensex_put_allowed_on_bearish_open(mock_session):
     mock_session.return_value = {"open": 73500.0, "last": 73000.0, "hi": 73500.0, "lo": 73000.0}
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_side_align_index_enabled=True,
@@ -95,6 +97,7 @@ def test_sensex_put_allowed_on_bearish_open(mock_session):
 
 def test_open_blocks_nifty_put_when_legacy_block_puts_on():
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=True,
         open_sensex_call_lane_enabled=True,
@@ -111,6 +114,7 @@ def test_open_blocks_nifty_put_when_legacy_block_puts_on():
 
 def test_open_blocks_otm_sensex_call():
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_itm_band_enabled=True,
@@ -135,6 +139,7 @@ def test_itm_depth_cap_sensex():
 
 def test_sensex_call_itm_passes_lane_side():
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_non_lane_index_blocked=True,
@@ -151,6 +156,7 @@ def test_sensex_call_itm_passes_lane_side():
 @patch("app.engines.expiry_day_guards._today_str", return_value="2026-09-17")
 def test_daily_prefilter_drops_sensex_expiry_otm(_mock_today):
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_side_align_index_enabled=False,

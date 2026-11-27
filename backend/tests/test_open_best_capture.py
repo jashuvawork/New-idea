@@ -52,6 +52,7 @@ def test_sensex_call_waives_non_lane_on_bullish_open_when_expiry_ce_is_nifty(
         {"mode": "expiry_pair", "primaryCeIndex": "NIFTY", "secondaryPeIndex": "SENSEX"},
     )
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_non_lane_index_blocked=True,
@@ -105,6 +106,7 @@ def test_open_aligned_side_rank_bonus_and_counter_trend_penalty(mock_session):
 def test_open_index_lane_first_lift_waiver_for_exploding_local_base(mock_session):
     mock_session.return_value = {"open": 77000.0, "last": 77300.0}
     s = Settings(
+        open_setup_book_enabled=True,
         open_index_lane_enabled=True,
         open_index_lane_require_first_lift=True,
         open_index_lane_open_rip_first_lift_waiver_enabled=True,

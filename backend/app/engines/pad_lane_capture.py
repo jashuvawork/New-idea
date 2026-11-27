@@ -1600,6 +1600,10 @@ def open_caution_premium_fade_bypass(
 ) -> bool:
     """09:15–09:45 local-base first lift — exec premium dip is often noise, not a real fade."""
     settings = get_settings()
+    from app.engines.open_setup_policy import is_open_setup_book_enabled
+
+    if not is_open_setup_book_enabled(settings):
+        return False
     if not bool(getattr(settings, "open_caution_premium_fade_fill_enabled", True)):
         return False
     from app.engines.open_index_lane import in_open_caution_window_at
@@ -1635,6 +1639,10 @@ def post_open_setup_premium_fade_bypass(
 ) -> bool:
     """09:45–post_open_setup_until — capture open rip continuation without exec_mtf 5m choke."""
     settings = get_settings()
+    from app.engines.open_setup_policy import is_open_setup_book_enabled
+
+    if not is_open_setup_book_enabled(settings):
+        return False
     if not bool(getattr(settings, "post_open_setup_premium_fade_fill_enabled", True)):
         return False
     from app.engines.open_index_lane import in_post_open_setup_window_at

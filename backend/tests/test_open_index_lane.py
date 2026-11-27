@@ -53,13 +53,17 @@ def _candidate(
 def test_summary_defaults():
     s = Settings()
     summary = open_index_lane_summary(s)
-    assert summary["enabled"] is True
+    assert summary["enabled"] is False
     assert summary["sensexCallLane"] is True
     assert summary["niftyPutLane"] is False
 
 
 def test_idle_after_0945():
-    s = Settings(open_index_lane_enabled=True, open_sensex_call_lane_enabled=True)
+    s = Settings(
+        open_setup_book_enabled=True,
+        open_index_lane_enabled=True,
+        open_sensex_call_lane_enabled=True,
+    )
     cand = _candidate(symbol="SENSEX", side="PUT")
     ok, reason, meta = validate_open_index_lane(cand, settings=s, when=AFTER_OPEN)
     assert ok is True
@@ -69,6 +73,7 @@ def test_idle_after_0945():
 
 def test_sensex_put_blocked_when_put_lane_off():
     s = Settings(
+        open_setup_book_enabled=True,
         open_index_lane_enabled=True,
         open_sensex_call_lane_enabled=True,
         open_sensex_put_lane_enabled=False,
@@ -89,7 +94,11 @@ def test_sensex_call_passes_lane(mock_rank, mock_setup, mock_stage, mock_elite):
     mock_stage.return_value = "ARMED"
     mock_elite.return_value = (95.0, "ELITE", {})
 
-    s = Settings(open_index_lane_enabled=True, open_sensex_call_lane_enabled=True)
+    s = Settings(
+        open_setup_book_enabled=True,
+        open_index_lane_enabled=True,
+        open_sensex_call_lane_enabled=True,
+    )
     cand = _candidate(symbol="SENSEX", side="CALL")
     ok, reason, meta = validate_open_index_lane(cand, settings=s, when=OPEN_TIME)
     assert ok is True
@@ -98,6 +107,7 @@ def test_sensex_call_passes_lane(mock_rank, mock_setup, mock_stage, mock_elite):
 
 def test_nifty_put_lane_opt_in_blocks_call():
     s = Settings(
+        open_setup_book_enabled=True,
         open_index_lane_enabled=True,
         open_nifty_put_lane_enabled=True,
         open_sensex_call_lane_enabled=False,
@@ -116,7 +126,12 @@ def test_resolve_lane_when_uses_snap_timestamp():
 
 
 def test_open_index_lane_qualified_requires_passed_quality():
-    s = Settings(open_sensex_call_lane_enabled=True, open_sensex_put_lane_enabled=False)
+    s = Settings(
+        open_setup_book_enabled=True,
+        open_index_lane_enabled=True,
+        open_sensex_call_lane_enabled=True,
+        open_sensex_put_lane_enabled=False,
+    )
     cand = _candidate(symbol="SENSEX", side="PUT")
     ok, reason, _ = open_index_lane_qualified(cand, settings=s, when=OPEN_TIME)
     assert ok is False
@@ -140,7 +155,12 @@ def test_expiry_pair_nifty_primary_ce_and_sensex_pe():
         "NIFTY": _snap("NIFTY", "2026-11-03"),
         "SENSEX": _snap("SENSEX", "2026-11-05"),
     }
-    s = Settings(open_session_expiry_lane_enabled=True, open_sensex_call_lane_enabled=True)
+    s = Settings(
+        open_setup_book_enabled=True,
+        open_index_lane_enabled=True,
+        open_session_expiry_lane_enabled=True,
+        open_sensex_call_lane_enabled=True,
+    )
     assert allowed_open_lane_sides("NIFTY", s, snapshots=snapshots) == {"CALL"}
     assert allowed_open_lane_sides("SENSEX", s, snapshots=snapshots) == {"PUT"}
 
@@ -151,7 +171,12 @@ def test_expiry_pair_sensex_primary_ce_and_nifty_pe():
         "NIFTY": _snap("NIFTY", "2026-11-05"),
         "SENSEX": _snap("SENSEX", "2026-11-03"),
     }
-    s = Settings(open_session_expiry_lane_enabled=True, open_sensex_call_lane_enabled=True)
+    s = Settings(
+        open_setup_book_enabled=True,
+        open_index_lane_enabled=True,
+        open_session_expiry_lane_enabled=True,
+        open_sensex_call_lane_enabled=True,
+    )
     assert allowed_open_lane_sides("SENSEX", s, snapshots=snapshots) == {"CALL"}
     assert allowed_open_lane_sides("NIFTY", s, snapshots=snapshots) == {"PUT"}
 
@@ -172,7 +197,12 @@ def test_nifty_call_passes_lane_when_nifty_expiry_primary(
         "NIFTY": _snap("NIFTY", "2026-11-03"),
         "SENSEX": _snap("SENSEX", "2026-11-05"),
     }
-    s = Settings(open_session_expiry_lane_enabled=True, open_sensex_call_lane_enabled=True)
+    s = Settings(
+        open_setup_book_enabled=True,
+        open_index_lane_enabled=True,
+        open_session_expiry_lane_enabled=True,
+        open_sensex_call_lane_enabled=True,
+    )
     cand = _candidate(symbol="NIFTY", side="CALL")
     cand.snap = snapshots["NIFTY"]
     ok, reason, meta = validate_open_index_lane(
