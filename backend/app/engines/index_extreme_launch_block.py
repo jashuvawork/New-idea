@@ -20,6 +20,74 @@ def _off_session_pcts(hi: float, lo: float, spot: float) -> tuple[float, float]:
     return off_high, off_low
 
 
+def _local_pad_pct_from_alert(alert: Optional[dict[str, Any]]) -> float:
+    if not isinstance(alert, dict):
+        return 0.0
+    return float(
+        alert.get("localBaseMovePct")
+        or alert.get("offLowMovePct")
+        or alert.get("offHighMovePct")
+        or 0
+    )
+
+
+def session_extreme_mid_pad_chase_blocked(
+    side: Any,
+    snap: Optional[SymbolSnapshot],
+    *,
+    alert: Optional[dict[str, Any]] = None,
+    settings: Any = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Block mid-pad chase at session high (CALL) or low (PUT) — waivers are for near-base only.
+    CE/PE symmetric (Nov27 25750 pattern).
+    """
+    settings = settings or get_settings()
+    meta: dict[str, Any] = {}
+    side_u = _side_val(side)
+    if snap is None or side_u not in ("CALL", "PUT"):
+        return False, "ok", meta
+
+    sym = str(getattr(snap, "symbol", "") or "").upper()
+    if not sym and isinstance(alert, dict):
+        sym = str(alert.get("symbol") or "").upper()
+    from app.engines.index_tick_helpers import resolve_index_session
+
+    ext = resolve_index_session(sym, snap)
+    hi = float(ext.get("hi") or 0)
+    lo = float(ext.get("lo") or 0)
+    spot = float(ext.get("last") or 0) or float(getattr(snap, "spot", 0) or 0)
+    if hi <= 0 or lo <= 0 or spot <= 0:
+        return False, "ok", meta
+
+    off_high, off_low = _off_session_pcts(hi, lo, spot)
+    near_pct = float(getattr(settings, "pre_entry_index_near_extreme_pct", 1.0) or 1.0)
+    pad = _local_pad_pct_from_alert(alert)
+    max_shallow = float(
+        getattr(settings, "pre_entry_mid_pad_at_extreme_max_local_pad_pct", 8.0) or 8.0
+    )
+    meta.update(
+        localPadPct=round(pad, 2),
+        offSessionHighPct=round(off_high, 3),
+        offSessionLowPct=round(off_low, 3),
+        nearExtremePct=near_pct,
+    )
+
+    if side_u == "CALL" and bool(
+        getattr(settings, "pre_entry_block_call_mid_pad_at_session_high", True)
+    ):
+        if off_high <= near_pct + 1e-6 and pad > max_shallow + 1e-6:
+            meta["sessionExtremeMidPadChase"] = "call_at_session_high"
+            return True, "exec_preflight_call_mid_pad_at_session_high", meta
+    if side_u == "PUT" and bool(
+        getattr(settings, "pre_entry_block_put_mid_pad_at_session_low", True)
+    ):
+        if off_low <= near_pct + 1e-6 and pad > max_shallow + 1e-6:
+            meta["sessionExtremeMidPadChase"] = "put_at_session_low"
+            return True, "exec_preflight_put_mid_pad_at_session_low", meta
+    return False, "ok", meta
+
+
 def index_extreme_launch_preflight_blocked(
     side: Any,
     snap: Optional[SymbolSnapshot],
@@ -98,6 +166,13 @@ def index_extreme_launch_preflight_blocked(
     mom_min = min_mom
 
     if side_u == "PUT":
+        chase_block, chase_reason, chase_meta = session_extreme_mid_pad_chase_blocked(
+            side_u, snap, alert=alert, settings=settings,
+        )
+        meta.update(chase_meta)
+        if chase_block:
+            return True, chase_reason, meta
+
         near_high = off_high <= near_pct + 1e-6
         if not near_high:
             return False, "ok", meta
@@ -127,6 +202,13 @@ def index_extreme_launch_preflight_blocked(
             return True, "exec_preflight_put_bullish_chart_at_high", meta
 
     elif side_u == "CALL":
+        chase_block, chase_reason, chase_meta = session_extreme_mid_pad_chase_blocked(
+            side_u, snap, alert=alert, settings=settings,
+        )
+        meta.update(chase_meta)
+        if chase_block:
+            return True, chase_reason, meta
+
         near_low = off_low <= near_pct + 1e-6
         if not near_low:
             return False, "ok", meta

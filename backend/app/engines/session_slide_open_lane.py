@@ -169,9 +169,15 @@ def session_call_near_day_high_blocked(
 
     intent = resolve_session_intent(sym, snap, state, settings=settings)
     meta["sessionIntent"] = intent
-    if str(intent.get("participationSide") or "BOTH") == "CALL":
-        return False, "ok", meta
-    if str(intent.get("sessionLeg") or "") != "SLIDE":
+
+    from app.engines.session_intent_authority import _local_pad_from_candidate
+
+    local_pad = _local_pad_from_candidate(candidate)
+    near_cap = float(
+        getattr(settings, "session_intent_counter_near_base_max_pct", 8.0) or 8.0
+    )
+    meta["localPadPct"] = round(local_pad, 2)
+    if local_pad <= near_cap + 1e-6:
         return False, "ok", meta
 
     ext = resolve_index_session(sym, snap)
