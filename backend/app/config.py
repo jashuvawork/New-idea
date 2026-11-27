@@ -2959,6 +2959,14 @@ class Settings(BaseSettings):
     execution_order_preflight_min_drawdown_pct: float = 8.0
     execution_order_preflight_min_live_score_recheck: bool = True
     execution_order_preflight_force_post_spike_dump: bool = True
+    # Final structural pass after preflight — fresh session intent + live index leg (not full pretrade).
+    order_time_entry_pass_enabled: bool = True
+    order_time_entry_pass_session_intent: bool = True
+    order_time_entry_pass_live_index_leg: bool = True
+    # Fresh execution-chart index read + participation veto at the wire
+    order_time_entry_pass_wire_hydration: bool = True
+    order_time_entry_pass_participation_veto: bool = True
+    order_time_participation_veto_margin_pts: float = 15.0
     # Nov25 SENSEX 83600 PE — block PUT at session high without index slide + weak prem mom5.
     pre_entry_index_extreme_block_enabled: bool = True
     pre_entry_index_near_extreme_pct: float = 1.0
