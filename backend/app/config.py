@@ -4268,6 +4268,20 @@ class Settings(BaseSettings):
     # When rally/slide points tie, breadth wins over 5m mom before picking dominant leg.
     index_trend_tie_break_breadth_over_mom5_enabled: bool = True
     session_intent_tactical_timeframe: str = "3m"  # 3m vs 5m tactical anchor for counter-side MTF
+    # Live open-trade thesis: scratch/snatch counter-leg when session+HTF oppose side.
+    live_trade_thesis_exit_enabled: bool = True
+    live_trade_thesis_min_hold_seconds: float = 120.0
+    live_trade_thesis_min_htf_oppose: int = 1
+    live_trade_thesis_require_tactical_oppose: bool = True
+    live_trade_thesis_max_velocity_3s: float = 0.35
+    live_trade_thesis_min_underwater_pts: float = 6.0
+    live_trade_thesis_scratch_max_pnl_pts: float = 2.5
+    live_trade_thesis_snatch_min_pts: float = 0.35
+    live_trade_thesis_snatch_max_pts: float = 9.0
+    live_trade_thesis_never_green_max_best_pts: float = 1.5
+    live_trade_thesis_never_green_loss_pts: float = 10.0
+    live_trade_thesis_runner_min_best_points: float = 18.0
+    live_trade_thesis_skip_max_profit: bool = True
     session_slide_open_lane_enabled: bool = True
     session_slide_open_lane_start_hour: int = 9
     session_slide_open_lane_start_minute: int = 45
