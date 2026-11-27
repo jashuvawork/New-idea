@@ -62,8 +62,9 @@ def test_mtf_summary_counts():
     price = candles[-1][4]
     reads = _reads_from_1m(candles, price)
     summary = mtf_summary(reads, Side.CALL)
-    assert summary["total"] == 5
+    assert summary["total"] == len(SCALP_TIMEFRAMES)
     assert "1m" in summary["timeframes"]
+    assert "3m" in summary["timeframes"]
     assert summary["alignedCount"] >= 3
 
 
