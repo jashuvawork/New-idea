@@ -92,6 +92,7 @@ def _base_premium_inr(candidate: Any, snap: Optional[SymbolSnapshot]) -> float:
             premium=prem,
             velocity_3s=v3,
             fallback=fallback,
+            snap=snap,
             settings=settings,
         )
         if eff > 0:

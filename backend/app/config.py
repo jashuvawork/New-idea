@@ -1107,8 +1107,9 @@ class Settings(BaseSettings):
     index_lift_turn_option_rip_respect_session_fall: bool = True
     index_lift_turn_put_rip_requires_slide_or_not_bullish_breadth: bool = True
     new_session_base_identify_enabled: bool = True
-    # CE bases only on index RALLY leg (or breakout); PE on SLIDE — skip stamp on counter-participation.
+    # CE bases only on index RALLY leg (or breakout); PE on SLIDE — newSessionBase + ICT armed coil.
     new_session_base_require_index_participation: bool = True
+    ict_armed_base_require_index_participation: bool = True
     # Nov26: session_trough stamped CE chase-at-high (0% off peak). Keep post_rip_pullback only by default.
     new_session_base_session_trough_stamp_enabled: bool = False
     new_session_base_trough_max_off_low_pct: float = 14.0

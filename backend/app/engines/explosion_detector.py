@@ -1207,12 +1207,36 @@ def mid_rip_false_early_pad(
     return 0 < pad <= max(early_hi, launch_hi) + 1e-6
 
 
+def _armed_base_participation_ok(
+    symbol: str,
+    side: Side | str,
+    *,
+    snap: Any = None,
+    state: Any = None,
+    settings: Any = None,
+) -> tuple[bool, dict[str, Any]]:
+    if snap is None:
+        return True, {}
+    from app.engines.new_session_base import index_participation_allows_base_side
+
+    allowed, reason, idx_meta = index_participation_allows_base_side(
+        symbol, side, snap, state, settings=settings, scope="ict",
+    )
+    if allowed:
+        return True, idx_meta
+    out = dict(idx_meta)
+    out["indexBaseFormationBlocked"] = reason
+    return False, out
+
+
 def armed_base_anchor(
     symbol: str,
     strike: float,
     side: Side | str,
     premium: float = 0.0,
     *,
+    snap: Any = None,
+    state: Any = None,
     settings: Any = None,
 ) -> dict[str, Any]:
     """Return/update the causal sticky launch base for one contract and session.
@@ -1344,6 +1368,8 @@ def armed_base_anchor(
             live,
             velocity_3s=0.0,
             stale_ict_base=stale_ref,
+            snap=snap,
+            state=state,
             settings=settings,
         )
         if ok and kind == "post_rip_pullback":
@@ -1394,6 +1420,15 @@ def armed_base_anchor(
                 range_pct=0.0,
             )
 
+    participation_meta: dict[str, Any] = {}
+
+    if current is None and candidate is not None:
+        ok_part, part_meta = _armed_base_participation_ok(
+            symbol, side_v, snap=snap, state=state, settings=settings,
+        )
+        participation_meta.update(part_meta)
+        if not ok_part:
+            candidate = None
     if current is None and candidate is not None:
         # Prefer the deeper session trough over a higher poll coil while still
         # near the V-base (chart 125 vs a noisy 126–128 coil).
@@ -1472,9 +1507,22 @@ def armed_base_anchor(
             _armed_base_anchors[key] = current
 
     if current is None and not rows and not mid_rip_rejected:
-        return {"armed": False}
+        out = {"armed": False}
+        if participation_meta:
+            out.update(participation_meta)
+        return out
+
+    if current is not None:
+        ok_part, part_meta = _armed_base_participation_ok(
+            symbol, side_v, snap=snap, state=state, settings=settings,
+        )
+        participation_meta.update(part_meta)
+        if not ok_part:
+            current = None
 
     out = current.to_dict(premium) if current is not None else {"armed": False}
+    if participation_meta:
+        out.update(participation_meta)
     if sess_low > 0:
         out["sessionLow"] = round(sess_low, 2)
     if mid_rip_rejected:

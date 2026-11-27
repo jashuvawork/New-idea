@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 import app.engines.explosion_detector as ed
-from app.engines.explosion_detector import _open_key
+from app.engines.explosion_detector import _open_key, armed_base_anchor
 from app.engines.new_session_base import (
     alert_pad_move_pct,
     new_session_base_near_miss_waive,
@@ -67,6 +67,7 @@ def teardown_function(_):
     ed._session_low.clear()
     ed._session_peak.clear()
     ed._local_base_hist.clear()
+    ed._armed_base_anchors.clear()
 
 
 def test_session_trough_stamp_disabled_by_default():
@@ -253,6 +254,61 @@ def test_put_base_allowed_on_index_slide_leg(_m0, _m1):
     )
     assert ok is True
     assert kind == "session_trough"
+
+
+@patch(
+    "app.engines.index_tick_helpers.index_trend_breakout",
+    return_value={},
+)
+@patch(
+    "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+    return_value=("SLIDE", {}),
+)
+def test_resolve_rejects_stale_ict_base_on_counter_index_leg(_m0, _m1):
+    """Legacy ictBasePremium must not chase CE when participation is slide."""
+    prem, meta = resolve_effective_base_premium_inr(
+        {"ictBasePremium": 210.0, "symbol": "NIFTY", "side": "CALL", "strike": 25750.0},
+        premium=232.0,
+        snap=_slide_snap(),
+        settings=_settings(),
+    )
+    assert prem == 0.0
+    assert meta.get("indexBaseFormationBlocked") == "index_base_counter_participation"
+    assert meta.get("indexBaseIctFallbackRejected") == "ictBasePremium"
+
+
+@patch(
+    "app.engines.index_tick_helpers.index_trend_breakout",
+    return_value={},
+)
+@patch(
+    "app.engines.index_session_dominant_trend.index_session_dominant_trend",
+    return_value=("SLIDE", {}),
+)
+def test_armed_base_call_blocked_on_index_slide(_m0, _m1):
+    from collections import deque
+    from datetime import timedelta
+
+    ed._armed_base_anchors.clear()
+    settings = _settings()
+    side = Side.CALL
+    key = _open_key("NIFTY", 25750.0, side)
+    start = datetime.now(IST) - timedelta(seconds=30)
+    ed._local_base_hist[key] = deque(
+        [(start + timedelta(seconds=i * 3), 52.8 + (i % 2) * 0.2) for i in range(8)],
+        maxlen=1200,
+    )
+    _seed_session("NIFTY", 25750.0, side, 52.0, 120.0)
+    armed = armed_base_anchor(
+        "NIFTY",
+        25750.0,
+        side,
+        57.0,
+        snap=_slide_snap(),
+        settings=settings,
+    )
+    assert armed.get("armed") is False
+    assert armed.get("indexBaseFormationBlocked") == "index_base_counter_participation"
 
 
 def test_observability_bundle_merges_rip_fall_and_alert():

@@ -3294,7 +3294,7 @@ def analyze_ict_breakout(
     from app.engines.explosion_detector import armed_base_anchor
 
     armed_meta = armed_base_anchor(
-        symbol, strike, side, premium, settings=settings,
+        symbol, strike, side, premium, snap=snap, settings=settings,
     )
     base_armed = bool(armed_meta.get("armed"))
     armed_samples = int(armed_meta.get("sampleCount") or 0)
