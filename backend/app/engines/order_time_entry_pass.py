@@ -131,6 +131,26 @@ def participation_veto_blocks_entry(
     if local_pad <= near_cap + 1e-6:
         return False, "ok", meta
 
+    alert = getattr(candidate, "alert", None)
+    if not isinstance(alert, dict):
+        alert = {}
+    from app.engines.index_extreme_launch_block import session_extreme_mid_pad_chase_blocked
+
+    chase_block, chase_reason, chase_meta = session_extreme_mid_pad_chase_blocked(
+        side_u, snap, alert=alert, settings=settings,
+    )
+    if chase_block:
+        if side_u == "CALL" and bool(
+            getattr(settings, "order_time_participation_veto_chase_at_session_high", True)
+        ):
+            meta.update(chase_meta)
+            return True, "participation_veto_call_chase_at_session_high", meta
+        if side_u == "PUT" and bool(
+            getattr(settings, "order_time_participation_veto_chase_at_session_low", True)
+        ):
+            meta.update(chase_meta)
+            return True, "participation_veto_put_chase_at_session_low", meta
+
     from app.engines.index_rally_side_flip import _min_move_pts, index_rally_metrics
     from app.engines.index_tick_helpers import index_trend_breakout
 

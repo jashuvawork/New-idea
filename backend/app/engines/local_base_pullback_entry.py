@@ -253,6 +253,19 @@ def local_base_pullback_blocks_entry(
                     meta.update(rip_meta)
                     return True, rip_reason, meta
 
+        if not stale and bool(
+            getattr(settings, "local_base_pullback_block_mid_pad_at_session_extreme", True)
+        ):
+            alert = _alert_dict(candidate)
+            from app.engines.index_extreme_launch_block import session_extreme_mid_pad_chase_blocked
+
+            chase_block, chase_reason, chase_meta = session_extreme_mid_pad_chase_blocked(
+                getattr(candidate, "side", None), snap, alert=alert, settings=settings,
+            )
+            if chase_block:
+                meta.update(chase_meta)
+                return True, chase_reason, meta
+
         if not stale:
             meta["localBasePullbackFill"] = "armed_base_launch_waiver"
             return False, "ok", meta

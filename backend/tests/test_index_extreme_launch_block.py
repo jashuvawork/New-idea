@@ -119,6 +119,60 @@ def test_put_at_high_waived_when_slide_flip_ok(mock_ext):
 
 
 @patch("app.engines.index_tick_helpers.resolve_index_session")
+def test_blocks_call_mid_pad_at_session_high_nov27_pattern(mock_ext):
+    """25750 CE: index near HOD + ~15% local pad — no rally flip waiver path."""
+    mock_ext.return_value = {"hi": 26200.0, "lo": 25800.0, "last": 26156.0, "open": 25900.0}
+    settings = Settings()
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=26156.0,
+        spotChart=SpotChart(direction="BULLISH", spot=26156.0, momentum5Pct=0.12),
+    )
+    alert = {"symbol": "NIFTY", "localBaseMovePct": 15.2, "dailyMovePct": 32.0}
+    with patch(
+        "app.engines.index_rally_side_flip.index_rally_side_flip_bypass",
+        return_value=(True, "index_rally_side_flip", {}),
+    ):
+        blocked, reason, meta = index_extreme_launch_preflight_blocked(
+            Side.CALL,
+            snap,
+            premium_chart=PremiumChart(lastPremium=165.0, momentum5Pct=2.5),
+            alert=alert,
+            settings=settings,
+        )
+    assert blocked is True
+    assert reason == "exec_preflight_call_mid_pad_at_session_high"
+    assert meta.get("offSessionHighPct", 99) < 1.0
+    assert meta.get("localPadPct", 0) > 8.0
+
+
+@patch("app.engines.index_tick_helpers.resolve_index_session")
+def test_near_base_call_at_session_high_not_blocked_by_mid_pad_rule(mock_ext):
+    mock_ext.return_value = {"hi": 26200.0, "lo": 25800.0, "last": 26156.0, "open": 25900.0}
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=26156.0,
+        spotChart=SpotChart(direction="BULLISH", spot=26156.0, momentum5Pct=0.12),
+    )
+    alert = {"symbol": "NIFTY", "localBaseMovePct": 6.0}
+    blocked, reason, _ = index_extreme_launch_preflight_blocked(
+        Side.CALL,
+        snap,
+        premium_chart=PremiumChart(lastPremium=120.0, momentum5Pct=3.0),
+        alert=alert,
+        settings=Settings(),
+    )
+    assert blocked is False
+    assert reason == "ok"
+
+
+@patch("app.engines.index_tick_helpers.resolve_index_session")
 def test_preflight_wires_index_extreme_block(mock_ext):
     mock_ext.return_value = {"hi": 84166.0, "lo": 83380.0, "last": 84147.0, "open": 83400.0}
     settings = Settings()

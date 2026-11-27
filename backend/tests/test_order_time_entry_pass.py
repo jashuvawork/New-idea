@@ -163,6 +163,7 @@ def test_order_time_syncs_fresh_snap_onto_candidate():
     settings = _settings()
     settings.order_time_entry_pass_session_intent = False
     settings.order_time_entry_pass_live_index_leg = False
+    settings.order_time_entry_pass_participation_veto = False
     cand = _cand("CALL")
     stale = _snap()
     fresh = _snap()
@@ -188,6 +189,10 @@ def test_order_time_disabled_is_noop():
 
 
 @patch(
+    "app.engines.index_tick_helpers.resolve_index_session",
+    return_value={"hi": 26200.0, "lo": 25400.0, "last": 25800.0},
+)
+@patch(
     "app.engines.index_tick_helpers.index_trend_breakout",
     return_value={},
 )
@@ -195,12 +200,13 @@ def test_order_time_disabled_is_noop():
     "app.engines.index_rally_side_flip.index_rally_metrics",
     return_value={"rallyPoints": 20.0, "slidePoints": 70.0},
 )
-def test_participation_veto_blocks_ce_mid_pad_on_slide(_m0, _m1):
+def test_participation_veto_blocks_ce_mid_pad_on_slide(_m0, _m1, _m2):
     from app.engines.index_session_dominant_trend import reset_index_session_dominant_trend_for_tests
 
     reset_index_session_dominant_trend_for_tests()
     settings = _settings()
     snap = _snap()
+    snap.spot = 25800.0
     snap.spotChart = SpotChart(direction="BEARISH", momentum5Pct=-0.05)
     snap.breadth = Breadth(bias="BEARISH", score=35, aligned=True)
     cand = _cand("CALL", local=15.0)
@@ -217,6 +223,10 @@ def test_participation_veto_blocks_ce_mid_pad_on_slide(_m0, _m1):
 
 
 @patch(
+    "app.engines.index_tick_helpers.resolve_index_session",
+    return_value={"hi": 26200.0, "lo": 25400.0, "last": 25800.0},
+)
+@patch(
     "app.engines.index_tick_helpers.index_trend_breakout",
     return_value={},
 )
@@ -224,7 +234,7 @@ def test_participation_veto_blocks_ce_mid_pad_on_slide(_m0, _m1):
     "app.engines.index_rally_side_flip.index_rally_metrics",
     return_value={"rallyPoints": 80.0, "slidePoints": 15.0},
 )
-def test_participation_veto_blocks_pe_mid_pad_on_rally(_m0, _m1):
+def test_participation_veto_blocks_pe_mid_pad_on_rally(_m0, _m1, _m2):
     from app.engines.index_session_dominant_trend import reset_index_session_dominant_trend_for_tests
 
     reset_index_session_dominant_trend_for_tests()
@@ -239,7 +249,7 @@ def test_participation_veto_blocks_pe_mid_pad_on_rally(_m0, _m1):
         timestamp=datetime.now(IST),
         marketPhase=MarketPhase.LIVE_MARKET,
         dataAvailable=True,
-        spot=25700.0,
+        spot=25800.0,
         regime=Regime.CHOP,
         tradeQualityScore=50.0,
         breadth=Breadth(bias="BULLISH", score=60, aligned=True),

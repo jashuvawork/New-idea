@@ -2979,6 +2979,13 @@ class Settings(BaseSettings):
     pre_entry_index_extreme_allow_rally_flip_waiver: bool = True
     pre_entry_index_extreme_block_put_bullish_chart: bool = True
     pre_entry_index_extreme_block_call_bearish_chart: bool = True
+    # Nov27 25750 CE: mid-pad CALL at session high — no rally-flip / armed-base waiver.
+    pre_entry_block_call_mid_pad_at_session_high: bool = True
+    pre_entry_block_put_mid_pad_at_session_low: bool = True
+    pre_entry_mid_pad_at_extreme_max_local_pad_pct: float = 8.0
+    local_base_pullback_block_mid_pad_at_session_extreme: bool = True
+    order_time_participation_veto_chase_at_session_high: bool = True
+    order_time_participation_veto_chase_at_session_low: bool = True
     # Slow-grind coil in the pad band — catch the flat base before volume/velocity spike.
     # Aug24 24200 PE: 18–23 LTP for ~45min, then sudden lift at 11:15.
     slow_grind_sudden_lift_enabled: bool = True
