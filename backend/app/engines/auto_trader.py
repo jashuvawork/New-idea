@@ -252,6 +252,14 @@ def _closed_trade_from_store_row(
             raw["bestPnlPoints"] = float(ctx_best) if ctx_best is not None else float(raw["pnlPoints"])
         except (TypeError, ValueError):
             raw["bestPnlPoints"] = float(raw["pnlPoints"] or 0)
+    if raw.get("worstPnlPoints") is None:
+        ctx_worst = raw["entryContext"].get("worstPnlPoints")
+        try:
+            raw["worstPnlPoints"] = (
+                float(ctx_worst) if ctx_worst is not None else float(raw["pnlPoints"])
+            )
+        except (TypeError, ValueError):
+            raw["worstPnlPoints"] = float(raw["pnlPoints"] or 0)
     if raw.get("lots") in (None, ""):
         raw["lots"] = 1
     return PaperTrade.model_validate(raw)
@@ -544,6 +552,12 @@ def _record_observed_max_ltp(trade: PaperTrade, current_ltp: float) -> None:
     giveback = max(0.0, peak_after - current)
     ctx["givebackFromMaxLtpPoints"] = round(giveback, 2)
     ctx["givebackFromMaxLtpPct"] = round(giveback / peak_after * 100.0, 3) if peak_after > 0 else 0.0
+    if entry > 0:
+        pnl_pts = round(current - entry, 2)
+        prev_worst = float(ctx.get("worstPnlPoints") or getattr(trade, "worstPnlPoints", 0) or 0)
+        if pnl_pts < prev_worst:
+            trade.worstPnlPoints = pnl_pts
+            ctx["worstPnlPoints"] = pnl_pts
     trade.entryContext = ctx
 
 
@@ -3816,10 +3830,13 @@ async def _process_open_trades(
             trade.pnlPoints = mtm_pts
             trade.pnlInr = mtm_inr
             trade.bestPnlPoints = max(trade.bestPnlPoints, mtm_pts)
+            worst = min(trade.worstPnlPoints, mtm_pts)
+            trade.worstPnlPoints = worst
         else:
             trade.pnlPoints = current - trade.entryPremium
             trade.pnlInr = trade.pnlPoints * trade.lots * lot_mult
             trade.bestPnlPoints = max(trade.bestPnlPoints, trade.pnlPoints)
+            trade.worstPnlPoints = min(trade.worstPnlPoints, trade.pnlPoints)
             eval_premium = current
 
         profile = snap.optimizedProfile or get_session_targets()

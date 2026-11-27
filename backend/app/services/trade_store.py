@@ -148,6 +148,7 @@ def _trade_payload(trade: PaperTrade, context: Optional[dict] = None) -> dict[st
         "pnlInr": trade.pnlInr,
         "pnlPoints": trade.pnlPoints,
         "bestPnlPoints": trade.bestPnlPoints,
+        "worstPnlPoints": trade.worstPnlPoints,
         "maxLtp": trade.maxLtp,
         "maxLtpAt": trade.maxLtpAt.isoformat() if trade.maxLtpAt else None,
         "status": trade.status,
