@@ -2548,6 +2548,7 @@ def detect_fake_explosion_trap(
 
     chop_regime = _regime_chopish(snap, settings=settings)
     midday = _midday_chop_active()
+    dm_chop = False
     if bool(getattr(settings, "chopish_midday_union_enabled", True)):
         chopish = chop_regime or midday
     else:
@@ -2568,6 +2569,18 @@ def detect_fake_explosion_trap(
             getattr(settings, "explosion_early_window_max_move_pct", 65.0) or 65.0
         )
     local_pad = float(effective_local_base_move_pct(event, ict) or 0.0)
+    from app.engines.day_mode_counter_trap import day_mode_counter_side_trap_chopish
+
+    dm_chop, dm_meta = day_mode_counter_side_trap_chopish(
+        candidate.side,
+        snap,
+        state,
+        local_pad=local_pad,
+        settings=settings,
+    )
+    if dm_chop:
+        chopish = True
+        meta.update(dm_meta)
     local_max = float(
         getattr(settings, "explosion_local_base_chase_max_move_pct", 65.0) or 65.0
     )
@@ -2600,6 +2613,8 @@ def detect_fake_explosion_trap(
     flags: list[str] = []
     if chop_regime:
         flags.append("chop_regime")
+    if dm_chop:
+        flags.append("day_mode_counter_side")
     if midday:
         flags.append("midday_chop")
     if elite_hot:

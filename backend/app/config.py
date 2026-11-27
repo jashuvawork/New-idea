@@ -2079,6 +2079,14 @@ class Settings(BaseSettings):
     fake_explosion_trap_post_win_require_top_confidence: bool = True
     # Nov25 live −₹18k: trap stamped action=block but top_must_take bypass still filled.
     fake_trap_honor_hard_action_block: bool = True
+    # Nov27 NIFTY 25750 CE: BEARISH DAY + mid-pad CE chase — treat as chopish for fake-trap (CE/PE mirror).
+    fake_trap_day_mode_counter_side_chopish_enabled: bool = True
+    fake_trap_day_mode_counter_side_min_pad_pct: float = 10.0
+    fake_trap_day_mode_counter_side_suppress_fade_waivers: bool = True
+    counter_day_block_post_spike_red_candle_exec: bool = True
+    counter_day_post_spike_min_big_red_bars: int = 1
+    counter_day_post_spike_min_drawdown_pct: float = 8.0
+    counter_day_post_spike_min_spike_run_pct: float = 20.0
     # Nov26 SENSEX 83900 CE: action=block still filled via fast_bullish building_rip bypass.
     fake_trap_block_denies_building_rip_bypass: bool = True
     fake_trap_post_win_opposite_breadth_block_enabled: bool = True
