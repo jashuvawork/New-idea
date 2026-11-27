@@ -67,7 +67,7 @@ def _base_premium_inr(candidate: Any, snap: Optional[SymbolSnapshot]) -> float:
     alert = _alert_dict(candidate)
     event = getattr(candidate, "explosion_event", None)
     settings = get_settings()
-    if bool(getattr(settings, "new_session_base_identify_enabled", True)):
+    if bool(getattr(settings, "new_session_base_identify_enabled", False)):
         from app.engines.new_session_base import resolve_effective_base_premium_inr
 
         sym = str(getattr(candidate, "symbol", "") or alert.get("symbol") or "")

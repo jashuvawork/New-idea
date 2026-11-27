@@ -42,11 +42,6 @@ _NEW_BASE_MOMENT_TOKENS = frozenset({
     "ict_flat_then_vertical",
     "early_radar_pad",
     "ict_armed",
-    "new_session_base",
-    "session_trough",
-    "post_rip_pullback",
-    "postripPullbackBase",
-    "sessionTroughBase",
 })
 
 

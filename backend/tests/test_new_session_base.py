@@ -151,9 +151,9 @@ def test_resolve_prefers_effective_over_stale_ict():
 
 
 def test_session_base_guard_summary_keys():
-    s = session_base_guard_summary(_settings())
-    assert s["newSessionBaseIdentifyEnabled"] is True
-    assert s["newSessionBaseSessionTroughStampEnabled"] is True
+    s = session_base_guard_summary(settings_mock())
+    assert s["newSessionBaseIdentifyEnabled"] is False
+    assert s["newSessionBaseSessionTroughStampEnabled"] is False
     assert s["explosionSessionRipFallBlockEnabled"] is True
     assert s["fakeExplosionTrapPostWinArmedBaseBypassEnabled"] is False
 
@@ -178,7 +178,9 @@ def test_near_miss_waive_at_trough_building():
         "explosionScore": 24,
         "velocity3s": 1.2,
     }
-    assert new_session_base_near_miss_waive(alert, settings=_settings()) is True
+    s = _settings()
+    s.new_session_base_near_miss_waive_enabled = True
+    assert new_session_base_near_miss_waive(alert, settings=s) is True
 
 
 def test_near_miss_waive_rejects_chase_pad():

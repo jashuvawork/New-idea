@@ -1110,7 +1110,8 @@ class Settings(BaseSettings):
     local_base_pullback_armed_launch_stale_trough_blocks_waiver: bool = True
     index_lift_turn_option_rip_respect_session_fall: bool = True
     index_lift_turn_put_rip_requires_slide_or_not_bullish_breadth: bool = True
-    new_session_base_identify_enabled: bool = True
+    # Nov25 #991 rolled back in production — re-stamp pads mis-timed live CE/PE chase losses.
+    new_session_base_identify_enabled: bool = False
     # CE bases only on index RALLY leg (or breakout); PE on SLIDE — newSessionBase + ICT armed coil.
     new_session_base_require_index_participation: bool = True
     ict_armed_base_require_index_participation: bool = True
@@ -1126,7 +1127,7 @@ class Settings(BaseSettings):
     # When newSessionBase is stamped, selectors use true pad floors (2–22%) not stale ICT 15%.
     new_session_base_entry_min_move_pct: float = 2.0
     new_session_base_entry_max_move_pct: float = 22.0
-    new_session_base_near_miss_waive_enabled: bool = True
+    new_session_base_near_miss_waive_enabled: bool = False
     new_session_base_near_miss_min_velocity_3s: float = 0.35
     new_session_base_near_miss_min_explosion_score: float = 18.0
     # Sep07 23900 PE: block deep ITM fallback when near-strike OTM armed on same side.
@@ -4062,7 +4063,7 @@ class Settings(BaseSettings):
     never_green_hard_stop_min_hold_seconds: float = 300.0
     # ELITE/EXPLODING: longer before failed-launch cut (Nov25 SENSEX PE dipped then
     # re-rated above entry after the 300s never-green exit).
-    never_green_hard_stop_elite_min_hold_seconds: float = 900.0
+    never_green_hard_stop_elite_min_hold_seconds: float = 300.0
     # 0–1 DTE: exit at planned stop without 300–900s elite/executed min-hold defer
     # (Nov25/26 SENSEX: 40pt plan became 52–115pt while clock waited).
     near_expiry_price_stop_enabled: bool = True
