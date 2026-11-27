@@ -101,10 +101,16 @@ def _base_premium_inr(candidate: Any, snap: Optional[SymbolSnapshot]) -> float:
             return eff
         if base_meta.get("indexBaseFormationBlocked") and snap is not None:
             return 0.0
+    sym = str(getattr(candidate, "symbol", "") or alert.get("symbol") or "")
+    side = getattr(candidate, "side", None) or alert.get("side")
     for key in ("ictBasePremium", "localBaseBasePremium", "basePremium"):
         try:
             v = float(alert.get(key) or 0)
             if v > 0:
+                if key == "ictBasePremium" and not _ict_base_participation_ok(
+                    sym, side, snap, settings=settings,
+                ):
+                    return 0.0
                 return v
         except (TypeError, ValueError):
             pass
@@ -130,9 +136,182 @@ def _base_premium_inr(candidate: Any, snap: Optional[SymbolSnapshot]) -> float:
     ict = merge_alert_ict_stamps(ict, alert or None)
     try:
         v = float(getattr(ict, "base_premium", 0) or 0)
+        if v > 0 and not _ict_base_participation_ok(sym, side, snap, settings=settings):
+            return 0.0
         return v if v > 0 else 0.0
     except (TypeError, ValueError):
         return 0.0
+
+
+def _ict_base_participation_ok(
+    sym: str,
+    side: Any,
+    snap: Optional[SymbolSnapshot],
+    *,
+    settings: Any,
+) -> bool:
+    if snap is None or not sym:
+        return True
+    if not bool(getattr(settings, "ict_armed_base_require_index_participation", True)):
+        return True
+    side_u = getattr(side, "value", None) or str(side or "").upper()
+    if side_u not in ("CALL", "PUT"):
+        return True
+    from app.models.schemas import Side
+    from app.engines.new_session_base import index_participation_allows_base_side
+
+    side_v = Side.CALL if side_u == "CALL" else Side.PUT
+    allowed, _reason, _meta = index_participation_allows_base_side(
+        sym, side_v, snap, state=None, settings=settings, scope="ict",
+    )
+    return bool(allowed)
+
+
+def _session_trough_premium(
+    candidate: Any,
+    snap: Optional[SymbolSnapshot],
+) -> float:
+    alert = _alert_dict(candidate)
+    for key in ("sessionLowPremium", "sessionTroughPremium"):
+        try:
+            v = float(alert.get(key) or 0)
+            if v > 0:
+                return v
+        except (TypeError, ValueError):
+            pass
+    if snap is None:
+        return 0.0
+    event = getattr(candidate, "explosion_event", None)
+    if event is None:
+        return 0.0
+    try:
+        from app.engines.explosion_detector import get_session_low_premium
+
+        return float(
+            get_session_low_premium(
+                str(getattr(event, "symbol", "") or ""),
+                float(getattr(event, "strike", 0) or 0),
+                getattr(event, "side", None),
+            )
+            or 0
+        )
+    except Exception:
+        return 0.0
+
+
+def _stale_base_vs_session_trough(
+    candidate: Any,
+    snap: Optional[SymbolSnapshot],
+    base: float,
+    *,
+    settings: Any,
+    meta: dict[str, Any],
+) -> bool:
+    stale_gap = float(
+        getattr(settings, "local_base_pullback_stale_trough_gap_pct", 15.0) or 15.0
+    )
+    sess_low = _session_trough_premium(candidate, snap)
+    if sess_low <= 0 or base <= 0:
+        return False
+    gap_pct = (base - sess_low) / sess_low * 100.0
+    stale = gap_pct >= stale_gap - 1e-6
+    if stale:
+        meta["armedBaseStaleVsSessionTrough"] = round(gap_pct, 1)
+    return stale
+
+
+def _elevated_pad_chase_cap_blocked(
+    candidate: Any,
+    metrics: dict[str, float],
+    alert: dict[str, Any],
+    *,
+    settings: Any,
+    meta: dict[str, Any],
+) -> tuple[bool, str]:
+    pad_thr = float(
+        getattr(
+            settings,
+            "local_base_pullback_chase_cap_require_pullback_above_pad_pct",
+            8.0,
+        )
+        or 8.0
+    )
+    try:
+        pad = float(
+            alert.get("localBaseMovePct")
+            or alert.get("offLowMovePct")
+            or alert.get("offHighMovePct")
+            or 0
+        )
+    except (TypeError, ValueError):
+        pad = 0.0
+    if pad <= pad_thr + 1e-6:
+        return False, "ok"
+    min_dd = float(
+        getattr(settings, "local_base_pullback_min_drawdown_from_high_pct", 3.0) or 3.0
+    )
+    dd = float(metrics.get("drawdownFromHighPct") or 0)
+    if dd <= -min_dd + 1e-6:
+        return False, "ok"
+    meta["chaseCapElevatedPadPct"] = round(pad, 2)
+    meta["chaseCapDrawdownFromHighPct"] = round(dd, 2)
+    return True, "local_base_chase_cap_elevated_pad_no_pullback"
+
+
+def _chase_cap_preflight_blocks_entry(
+    candidate: Any,
+    snap: Optional[SymbolSnapshot],
+    *,
+    premium_chart: Optional[PremiumChart] = None,
+    settings: Any,
+    meta: dict[str, Any],
+) -> tuple[bool, str]:
+    """Same structural vetoes as armed-launch waiver — applied before within_chase_cap pass."""
+    if bool(
+        getattr(settings, "local_base_pullback_armed_launch_stale_trough_blocks_waiver", True)
+    ):
+        base = _base_premium_inr(candidate, snap)
+        if _stale_base_vs_session_trough(candidate, snap, base, settings=settings, meta=meta):
+            return True, "local_base_pullback_wait"
+
+    if bool(getattr(settings, "local_base_pullback_armed_launch_respect_rip_fall", True)):
+        event = getattr(candidate, "explosion_event", None)
+        if event is not None:
+            from app.engines.explosion_entry_guards import (
+                explosion_session_rip_fall_entry_blocked,
+            )
+
+            metrics = _chase_metrics(candidate, premium_chart=premium_chart)
+            rip_block, rip_reason, rip_meta = explosion_session_rip_fall_entry_blocked(
+                event,
+                settings=settings,
+                momentum5_pct=float(metrics.get("premiumMomentum5Pct") or 0),
+                snap=snap,
+            )
+            if rip_block:
+                meta.update(rip_meta)
+                return True, rip_reason
+
+    if bool(getattr(settings, "local_base_pullback_block_mid_pad_at_session_extreme", True)):
+        alert = _alert_dict(candidate)
+        from app.engines.index_extreme_launch_block import session_extreme_mid_pad_chase_blocked
+
+        chase_block, chase_reason, chase_meta = session_extreme_mid_pad_chase_blocked(
+            getattr(candidate, "side", None), snap, alert=alert, settings=settings,
+        )
+        if chase_block:
+            meta.update(chase_meta)
+            return True, chase_reason
+
+    metrics = _chase_metrics(candidate, premium_chart=premium_chart)
+    alert = _alert_dict(candidate)
+    elev_block, elev_reason = _elevated_pad_chase_cap_blocked(
+        candidate, metrics, alert, settings=settings, meta=meta,
+    )
+    if elev_block:
+        return True, elev_reason
+
+    return False, "ok"
 
 
 def _chase_metrics(
@@ -192,51 +371,18 @@ def local_base_pullback_blocks_entry(
         return False, "ok", meta
 
     if _armed_base_launch_confirmed(candidate, snap):
-        alert = _alert_dict(candidate)
-        stale_gap = float(
-            getattr(settings, "local_base_pullback_stale_trough_gap_pct", 15.0) or 15.0
-        )
-        stale = False
-        sess_low = 0.0
         armed_base = _base_premium_inr(candidate, snap)
-        for key in ("sessionLowPremium", "sessionTroughPremium"):
-            try:
-                sess_low = float(alert.get(key) or 0)
-                if sess_low > 0:
-                    break
-            except (TypeError, ValueError):
-                pass
-        if sess_low <= 0 and snap is not None:
-            event = getattr(candidate, "explosion_event", None)
-            if event is not None:
-                try:
-                    from app.engines.explosion_detector import get_session_low_premium
-
-                    sess_low = float(
-                        get_session_low_premium(
-                            str(getattr(event, "symbol", "") or ""),
-                            float(getattr(event, "strike", 0) or 0),
-                            getattr(event, "side", None),
-                        )
-                        or 0
-                    )
-                except Exception:
-                    sess_low = 0.0
-        if (
-            bool(
-                getattr(
-                    settings,
-                    "local_base_pullback_armed_launch_stale_trough_blocks_waiver",
-                    True,
-                )
+        stale = False
+        if bool(
+            getattr(
+                settings,
+                "local_base_pullback_armed_launch_stale_trough_blocks_waiver",
+                True,
             )
-            and sess_low > 0
-            and armed_base > 0
         ):
-            gap_pct = (armed_base - sess_low) / sess_low * 100.0
-            stale = gap_pct >= stale_gap - 1e-6
-            if stale:
-                meta["armedBaseStaleVsSessionTrough"] = round(gap_pct, 1)
+            stale = _stale_base_vs_session_trough(
+                candidate, snap, armed_base, settings=settings, meta=meta,
+            )
 
         if not stale and bool(
             getattr(settings, "local_base_pullback_armed_launch_respect_rip_fall", True)
@@ -286,7 +432,11 @@ def local_base_pullback_blocks_entry(
         except (TypeError, ValueError):
             signal = 0.0
     base = _base_premium_inr(candidate, snap)
-    if base <= 0 or signal <= 0:
+    if signal <= 0:
+        return False, "ok", meta
+    if base <= 0:
+        if _ict_base_armed(candidate, snap) and snap is not None:
+            return True, "local_base_pullback_participation_base", meta
         return False, "ok", meta
 
     chase_inr = signal - base
@@ -308,6 +458,11 @@ def local_base_pullback_blocks_entry(
     )
 
     if chase_inr <= max_inr + 1e-6 and chase_pct <= max_pct + 1e-6:
+        cap_block, cap_reason = _chase_cap_preflight_blocks_entry(
+            candidate, snap, premium_chart=premium_chart, settings=settings, meta=meta,
+        )
+        if cap_block:
+            return True, cap_reason, meta
         meta["localBasePullbackFill"] = "within_chase_cap"
         return False, "ok", meta
 

@@ -210,6 +210,90 @@ def test_base_premium_zero_when_ict_vetoed_on_counter_leg(_m0, _m1):
         assert _base_premium_inr(cand, snap) == 0.0
 
 
+@patch("app.engines.index_tick_helpers.resolve_index_session")
+def test_chase_cap_blocked_elevated_pad_without_pullback(mock_ext):
+    mock_ext.return_value = {
+        "hi": 84000.0,
+        "lo": 82500.0,
+        "last": 83100.0,
+        "open": 82600.0,
+    }
+    """Nov26 SENSEX 84400: 12% pad, drawdown≈0 — cap pass must not waive wait."""
+    settings = _settings()
+    cand = _candidate(
+        tier="ELITE",
+        premium=503.0,
+        alert={
+            "ictBaseArmed": True,
+            "ictBasePremium": 490.0,
+            "localBaseMovePct": 12.0,
+        },
+        liveEntryScoreMeta={"drawdownFromHighPct": 0.0, "premiumMomentum5Pct": 4.0},
+    )
+    snap = SymbolSnapshot(
+        symbol="SENSEX",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=83100.0,
+        regime=Regime.CHOP,
+        tradeQualityScore=50.0,
+        breadth=Breadth(bias="BULLISH", score=50, aligned=True),
+        spotChart=SpotChart(direction="BULLISH", momentum5Pct=0.05),
+        chartAnalysis=ChartAnalysis(consensus="BULLISH"),
+    )
+    with patch("app.engines.local_base_pullback_entry.get_settings", return_value=settings):
+        blocked, reason, meta = local_base_pullback_blocks_entry(
+            cand, snap, settings=settings,
+        )
+    assert blocked is True, (reason, meta)
+    assert reason in (
+        "local_base_chase_cap_elevated_pad_no_pullback",
+        "exec_preflight_call_mid_pad_at_session_high",
+        "local_base_pullback_wait",
+        "local_base_pullback_participation_base",
+    )
+    assert "within_chase_cap" not in (meta.get("localBasePullbackFill") or "")
+
+
+@patch("app.engines.index_tick_helpers.resolve_index_session")
+def test_chase_cap_blocked_mid_pad_at_session_high(mock_ext):
+    mock_ext.return_value = {
+        "hi": 26200.0,
+        "lo": 25800.0,
+        "last": 26156.0,
+        "open": 25900.0,
+    }
+    settings = _settings()
+    cand = _candidate(
+        symbol="NIFTY",
+        strike=25750.0,
+        premium=227.0,
+        alert={
+            "ictBaseArmed": True,
+            "ictBasePremium": 220.0,
+            "localBaseMovePct": 10.5,
+        },
+        liveEntryScoreMeta={"drawdownFromHighPct": 0.0},
+    )
+    snap = SymbolSnapshot(
+        symbol="NIFTY",
+        timestamp=datetime.now(IST),
+        marketPhase=MarketPhase.LIVE_MARKET,
+        dataAvailable=True,
+        spot=26156.0,
+        regime=Regime.CHOP,
+        tradeQualityScore=50.0,
+        breadth=Breadth(bias="BEARISH", score=40, aligned=True),
+        spotChart=SpotChart(direction="BULLISH", momentum5Pct=0.12),
+        chartAnalysis=ChartAnalysis(consensus="BULLISH"),
+    )
+    with patch("app.engines.local_base_pullback_entry.get_settings", return_value=settings):
+        blocked, reason, _ = local_base_pullback_blocks_entry(cand, snap, settings=settings)
+    assert blocked is True
+    assert reason == "exec_preflight_call_mid_pad_at_session_high"
+
+
 def test_allows_after_pullback_from_session_high_ce():
     settings = _settings()
     chart = PremiumChart(
