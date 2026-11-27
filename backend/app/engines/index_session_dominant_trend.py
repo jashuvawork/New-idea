@@ -72,6 +72,16 @@ def _resolve_trend_arms(
     if slide_pts > rally_pts + margin:
         meta["indexTrendFlip"] = "slide_dominant"
         return False, True, meta
+    if bool(getattr(settings, "index_trend_tie_break_breadth_over_mom5_enabled", True)):
+        br = getattr(snap, "breadth", None)
+        bias = str(getattr(br, "bias", "") or "").upper() if br else "NEUTRAL"
+        aligned = bool(getattr(br, "aligned", False)) if br else False
+        if aligned and bias == "BEARISH" and slide_pts >= rally_pts - margin:
+            meta["indexTrendFlip"] = "breadth_slide"
+            return False, True, meta
+        if aligned and bias == "BULLISH" and rally_pts >= slide_pts - margin:
+            meta["indexTrendFlip"] = "breadth_rally"
+            return True, False, meta
     if mom5 > 0.02:
         meta["indexTrendFlip"] = "mom5_rally"
         return True, False, meta

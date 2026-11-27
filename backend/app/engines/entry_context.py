@@ -76,6 +76,22 @@ def snapshot_chart_context(snap: Optional[SymbolSnapshot]) -> dict[str, Any]:
             "source": getattr(snap.breadth, "source", None),
         }
 
+    try:
+        from app.engines.session_intent_authority import resolve_session_intent
+
+        intent = resolve_session_intent(str(snap.symbol or ""), snap, None)
+        if intent.get("enabled"):
+            out["sessionIntent"] = {
+                "sessionLeg": intent.get("sessionLeg"),
+                "participationSide": intent.get("participationSide"),
+                "confidence": intent.get("confidence"),
+                "allowCounterSide": intent.get("allowCounterSide"),
+                "breadthBias": intent.get("breadthBias"),
+                "mtf": intent.get("mtf"),
+            }
+    except Exception:
+        pass
+
     return out
 
 

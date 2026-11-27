@@ -1083,6 +1083,15 @@ def validate_candidate(
     sym = candidate.symbol.upper()
     snap = snap_map.get(sym) or candidate.snap
 
+    from app.engines.session_intent_authority import session_intent_blocks_entry
+
+    si_blocked, si_reason, si_meta = session_intent_blocks_entry(
+        candidate, state, snap_map, settings=settings,
+    )
+    meta.update(si_meta)
+    if si_blocked:
+        return False, si_reason, meta
+
     from app.engines.index_lift_turn_guards import index_lift_turn_blocks_side
     from app.engines.preorder_rejection_suppression import (
         symbol_opposite_side_preorder_blocked,

@@ -830,6 +830,20 @@ def premium_led_explosion_bypass(
     settings = get_settings()
     if not settings.premium_led_explosion_bypass_enabled:
         return False
+    local_pad = max(
+        float(getattr(event, "local_base_move_pct", 0) or 0),
+        float(event.daily_move_pct or 0),
+        float(getattr(event, "peak_move_pct", 0) or 0),
+    )
+    if snap is not None:
+        from app.engines.session_intent_authority import (
+            session_intent_suppresses_premium_led_bypass,
+        )
+
+        if session_intent_suppresses_premium_led_bypass(
+            event.side, snap, local_pad=local_pad, settings=settings,
+        ):
+            return False
     if not settings.premium_led_counter_breadth_enabled:
         return False
     if not in_premium_capture_window():
