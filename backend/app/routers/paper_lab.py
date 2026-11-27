@@ -40,6 +40,16 @@ async def sync_prod_once():
     return {"ran": ran, **st}
 
 
+@router.post("/bootstrap-upstox")
+async def bootstrap_upstox_local():
+    """Pull prod token (sync key) or UPSTOX_ACCESS_TOKEN runtime secret into local paper VM."""
+    from app.services.upstox_vm_bootstrap import maybe_bootstrap_vm_upstox
+
+    boot = await maybe_bootstrap_vm_upstox()
+    st = await paper_lab_status()
+    return {"boot": boot, **st}
+
+
 @router.get("/vm-upstox-session")
 async def export_vm_upstox_session(
     x_paper_lab_vm_sync_key: str = Header(default="", alias="X-Paper-Lab-VM-Sync-Key"),
