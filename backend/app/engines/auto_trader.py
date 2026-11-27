@@ -3439,6 +3439,7 @@ async def _open_from_candidate(
             state,
             snapshots,
             premium_chart=prem_chart_obj,
+            chart_meta=chart_meta if chart_meta else None,
             is_live=is_live,
             settings=settings,
         )

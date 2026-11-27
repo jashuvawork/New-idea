@@ -2963,6 +2963,10 @@ class Settings(BaseSettings):
     order_time_entry_pass_enabled: bool = True
     order_time_entry_pass_session_intent: bool = True
     order_time_entry_pass_live_index_leg: bool = True
+    # Fresh execution-chart index read + participation veto at the wire
+    order_time_entry_pass_wire_hydration: bool = True
+    order_time_entry_pass_participation_veto: bool = True
+    order_time_participation_veto_margin_pts: float = 15.0
     # Nov25 SENSEX 83600 PE — block PUT at session high without index slide + weak prem mom5.
     pre_entry_index_extreme_block_enabled: bool = True
     pre_entry_index_near_extreme_pct: float = 1.0
