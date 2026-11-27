@@ -8,6 +8,25 @@ from app.engines.spot_direction import chart_summary_dict
 from app.models.schemas import Side, SymbolSnapshot
 
 
+def alert_for_execution_chart(candidate: Any) -> Optional[dict[str, Any]]:
+    """Merge causal rank from pretrade into alert for exec-chart bypass stamps."""
+    raw = getattr(candidate, "alert", None)
+    if not isinstance(raw, dict):
+        return None
+    out = dict(raw)
+    pretrade = getattr(candidate, "pretrade_meta", None)
+    pretrade = pretrade if isinstance(pretrade, dict) else {}
+    causal = pretrade.get("causalRanking") or {}
+    if isinstance(causal, dict):
+        rank = causal.get("rankScore")
+        if rank is not None:
+            out.setdefault("causalRankScore", rank)
+        grade = causal.get("grade")
+        if grade:
+            out.setdefault("causalGrade", grade)
+    return out
+
+
 def snapshot_chart_context(snap: Optional[SymbolSnapshot]) -> dict[str, Any]:
     """Compact chart + breadth + MTF read for entryContext (audit / milestone review)."""
     if not snap:
@@ -57,6 +76,22 @@ def snapshot_chart_context(snap: Optional[SymbolSnapshot]) -> dict[str, Any]:
             "source": getattr(snap.breadth, "source", None),
         }
 
+    try:
+        from app.engines.session_intent_authority import resolve_session_intent
+
+        intent = resolve_session_intent(str(snap.symbol or ""), snap, None)
+        if intent.get("enabled"):
+            out["sessionIntent"] = {
+                "sessionLeg": intent.get("sessionLeg"),
+                "participationSide": intent.get("participationSide"),
+                "confidence": intent.get("confidence"),
+                "allowCounterSide": intent.get("allowCounterSide"),
+                "breadthBias": intent.get("breadthBias"),
+                "mtf": intent.get("mtf"),
+            }
+    except Exception:
+        pass
+
     return out
 
 
@@ -96,6 +131,9 @@ def merge_execution_chart_context(
             }
             out["chartAnalysis"] = ca
     out["executionChartSource"] = execution_chart.get("source", "unknown")
+    qctx = execution_chart.get("quoteContext")
+    if isinstance(qctx, dict) and qctx:
+        out["indexQuoteContext"] = qctx
     return out
 
 
