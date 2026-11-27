@@ -652,6 +652,94 @@ def _local_base_pad_premium_band_ok(
     return True, ""
 
 
+def _fast_bullish_premium_drawdown_pct(
+    event: Any,
+    row: dict[str, Any],
+) -> float:
+    """Premium drawdown from session high (%), negative when below high."""
+    pc = getattr(event, "premium_chart", None)
+    if pc is not None:
+        return float(getattr(pc, "drawdownFromHighPct", 0) or 0)
+    for key in ("drawdownFromHighPct", "premiumDrawdownFromHighPct"):
+        try:
+            v = float(row.get(key) or 0)
+            return v
+        except (TypeError, ValueError):
+            pass
+    meta = row.get("liveEntryScoreMeta") or row.get("premiumChaseMetrics")
+    if isinstance(meta, dict):
+        try:
+            return float(meta.get("drawdownFromHighPct") or 0)
+        except (TypeError, ValueError):
+            pass
+    return 0.0
+
+
+def _fast_bullish_trough_awakening(
+    *,
+    volume_awake: bool,
+    base_move: float,
+    v3: float,
+    settings: Any,
+) -> bool:
+    pad_floor = float(getattr(settings, "ict_v_rip_pad_min_move_pct", 2.0) or 2.0)
+    trough_eps = float(
+        getattr(settings, "bullish_local_base_trough_velocity_eps", 0.05) or 0.05
+    )
+    return bool(
+        volume_awake
+        and base_move + 1e-6 >= pad_floor
+        and 0 <= v3 <= trough_eps + 1e-6
+    )
+
+
+def _fast_bullish_loss_shaped_block(
+    *,
+    side: str,
+    snap: Optional[SymbolSnapshot],
+    event: Any,
+    row: dict[str, Any],
+    base_move: float,
+    v3: float,
+    volume_awake: bool,
+    predictor_active: bool,
+    settings: Any,
+) -> tuple[bool, str]:
+    """Block Nov26-style fast_bullish: extended pad chase at session extreme, no pullback."""
+    s = settings
+    elevated_thr = float(
+        getattr(s, "fast_bullish_local_base_elevated_pad_pct", 8.0) or 8.0
+    )
+    if base_move <= elevated_thr + 1e-6:
+        return False, "ok"
+    trough = _fast_bullish_trough_awakening(
+        volume_awake=volume_awake, base_move=base_move, v3=v3, settings=s,
+    )
+    pred_thr = float(
+        getattr(s, "fast_bullish_local_base_require_predictor_above_pad_pct", 8.0)
+        or 8.0
+    )
+    if base_move > pred_thr + 1e-6 and not predictor_active and not trough:
+        return True, "fast_bullish_elevated_pad_requires_predictor"
+    min_dd = float(
+        getattr(s, "fast_bullish_local_base_min_drawdown_from_high_pct", 3.0) or 3.0
+    )
+    dd = _fast_bullish_premium_drawdown_pct(event, row)
+    if not trough and not predictor_active and dd > -min_dd + 1e-6:
+        return True, "fast_bullish_elevated_pad_no_pullback"
+    if bool(
+        getattr(s, "fast_bullish_local_base_block_mid_pad_at_session_extreme", True)
+    ) and not trough:
+        from app.engines.index_extreme_launch_block import session_extreme_mid_pad_chase_blocked
+
+        chase_block, chase_reason, _ = session_extreme_mid_pad_chase_blocked(
+            side, snap, alert=row, settings=s,
+        )
+        if chase_block:
+            return True, chase_reason
+    return False, "ok"
+
+
 def _fast_bullish_local_base_readiness(
     *,
     snap: Optional[SymbolSnapshot],
@@ -701,6 +789,15 @@ def _fast_bullish_local_base_readiness(
     if not structured:
         return False, "fast_bullish_structure_missing"
 
+    volume_awake = bool(
+        getattr(ict, "volume_awakening", False)
+        or row.get("ictVolumeAwakening")
+        or row.get("volumeAwaken")
+    )
+    v3 = float(
+        getattr(event, "velocity_3s", 0) or row.get("velocity3s") or 0
+    )
+
     from app.engines.bullish_local_base import bullish_local_base_prediction
 
     pred = bullish_local_base_prediction(snap, event, ict, alert=row)
@@ -708,11 +805,6 @@ def _fast_bullish_local_base_readiness(
         pred.get("active") or row.get("bullishLocalBaseActive")
     )
     if not predictor_active:
-        volume_awake = bool(
-            getattr(ict, "volume_awakening", False)
-            or row.get("ictVolumeAwakening")
-            or row.get("volumeAwaken")
-        )
         if not volume_awake:
             return False, "fast_bullish_volume_not_awake"
         from app.engines.local_base_chart_bypass import local_base_momentum_turn
@@ -729,9 +821,6 @@ def _fast_bullish_local_base_readiness(
             _Side(side_v), snap, event=event, alert=row,
         ):
             return False, "fast_bullish_momentum_turn_missing"
-        v3 = float(
-            getattr(event, "velocity_3s", 0) or row.get("velocity3s") or 0
-        )
         if v3 < 0:
             return False, "fast_bullish_velocity_negative"
         pad_floor = float(
@@ -772,6 +861,19 @@ def _fast_bullish_local_base_readiness(
     )
     if money not in ("ATM", "ITM"):
         return False, f"fast_bullish_requires_atm_itm_{money.lower()}"
+    loss_block, loss_reason = _fast_bullish_loss_shaped_block(
+        side=side,
+        snap=snap,
+        event=event,
+        row=row,
+        base_move=base_move,
+        v3=v3,
+        volume_awake=volume_awake,
+        predictor_active=predictor_active,
+        settings=s,
+    )
+    if loss_block:
+        return False, loss_reason
     if isinstance(alert, dict):
         alert["fastBullishLocalBaseReady"] = True
         alert["bullishLocalBaseActive"] = True

@@ -2942,6 +2942,11 @@ class Settings(BaseSettings):
     fast_bullish_local_base_min_velocity_3s: float = 0.8
     fast_bullish_local_base_soft_min_score: float = 45.0
     fast_bullish_local_base_soft_min_confidence: float = 60.0
+    # Nov26 CE chase at HOD — no volume-only fast_bullish on extended pad; require pullback or trough ignition.
+    fast_bullish_local_base_elevated_pad_pct: float = 8.0
+    fast_bullish_local_base_min_drawdown_from_high_pct: float = 3.0
+    fast_bullish_local_base_require_predictor_above_pad_pct: float = 8.0
+    fast_bullish_local_base_block_mid_pad_at_session_extreme: bool = True
     # Nov26 SENSEX 84400: rank velocity + but live premium mom3 negative — call_rally fade waive filled into dip.
     fast_bullish_local_base_block_fading_exec_fill: bool = True
     fast_bullish_local_base_exec_min_premium_mom3_pct: float = 0.0
