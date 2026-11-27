@@ -1,4 +1,29 @@
-import type { AutoTraderState, DeploymentStatus, PaperTrade, SymbolSnapshot } from '../types';
+import type {
+  AutoTraderState,
+  DeploymentStatus,
+  PaperTrade,
+  PostExitLtpMonitor,
+  SymbolSnapshot,
+} from '../types';
+
+function readPostExitMonitor(trade: PaperTrade): PostExitLtpMonitor | null {
+  const top = trade.postExitLtpMonitor;
+  if (top && typeof top === 'object') return top;
+  const nested = trade.entryContext?.postExitLtpMonitor;
+  if (nested && typeof nested === 'object') return nested as PostExitLtpMonitor;
+  return null;
+}
+
+function peakWhileOpen(trade: PaperTrade): number | null {
+  const v = trade.maxLtp;
+  return v != null && Number.isFinite(v) && v > 0 ? v : null;
+}
+
+function postExitPeak(trade: PaperTrade): number | null {
+  const mon = readPostExitMonitor(trade);
+  const v = mon?.postExitPeakLtp;
+  return v != null && Number.isFinite(v) && v > 0 ? v : null;
+}
 
 function formatInr(n: number, decimals = 2): string {
   const sign = n >= 0 ? '+' : '';
@@ -34,33 +59,65 @@ function PremiumDistanceChart({ trades }: { trades: PaperTrade[] }) {
   const rows = trades
     .map((t) => {
       const exitPx = exitPremium(t);
-      const max = t.maxLtp ?? exitPx;
-      const dist = Math.max(0, max - exitPx);
-      return { id: t.id, label: `${t.strike} ${t.side}`, dist };
+      const openPeak = peakWhileOpen(t);
+      const afterPeak = postExitPeak(t);
+      const openDist = openPeak != null ? Math.max(0, openPeak - exitPx) : 0;
+      const postDist = afterPeak != null ? Math.max(0, afterPeak - exitPx) : 0;
+      return {
+        id: t.id,
+        label: `${t.strike} ${t.side}`,
+        openDist,
+        postDist,
+        hasOpen: openPeak != null,
+        hasPost: afterPeak != null,
+      };
     })
+    .filter((r) => r.hasOpen || r.hasPost)
     .slice(0, 8);
 
   if (rows.length === 0) {
     return <p className="text-[11px] text-nexus-muted py-8 text-center">No closed trades — premium distance appears after exits.</p>;
   }
 
-  const peak = Math.max(...rows.map((r) => r.dist), 1);
+  const peak = Math.max(...rows.flatMap((r) => [r.openDist, r.postDist]), 1);
 
   return (
     <div className="space-y-3 py-2">
       {rows.map((r) => (
-        <div key={r.id} className="grid grid-cols-[5.5rem_1fr_3rem] gap-2 items-center text-[11px]">
-          <span className="font-mono text-nexus-muted">{r.label}</span>
-          <div className="h-5 rounded bg-black/40 border border-nexus-border/50 overflow-hidden">
-            <div
-              className="h-full rounded-sm bg-gradient-to-r from-nexus-accent/80 to-emerald-500/70"
-              style={{ width: `${Math.min(100, (r.dist / peak) * 100)}%` }}
-            />
-          </div>
-          <span className="font-mono text-right text-white">{r.dist.toFixed(1)}</span>
+        <div key={r.id} className="space-y-1">
+          {r.hasOpen ? (
+            <div className="grid grid-cols-[5.5rem_1fr_3rem] gap-2 items-center text-[11px]">
+              <span className="font-mono text-nexus-muted">{r.label}</span>
+              <div className="h-4 rounded bg-black/40 border border-nexus-border/50 overflow-hidden">
+                <div
+                  className="h-full rounded-sm bg-gradient-to-r from-amber-500/60 to-amber-400/50"
+                  style={{ width: `${Math.min(100, (r.openDist / peak) * 100)}%` }}
+                />
+              </div>
+              <span className="font-mono text-right text-amber-200/90" title="Peak while position was open">
+                {r.openDist.toFixed(1)}
+              </span>
+            </div>
+          ) : null}
+          {r.hasPost ? (
+            <div className="grid grid-cols-[5.5rem_1fr_3rem] gap-2 items-center text-[11px]">
+              <span className="font-mono text-nexus-muted text-[9px]">post-exit</span>
+              <div className="h-4 rounded bg-black/40 border border-nexus-border/50 overflow-hidden">
+                <div
+                  className="h-full rounded-sm bg-gradient-to-r from-nexus-accent/80 to-emerald-500/70"
+                  style={{ width: `${Math.min(100, (r.postDist / peak) * 100)}%` }}
+                />
+              </div>
+              <span className="font-mono text-right text-white">{r.postDist.toFixed(1)}</span>
+            </div>
+          ) : null}
         </div>
       ))}
-      <p className="text-[10px] text-nexus-muted">Points left on table (max LTP − exit premium).</p>
+      <p className="text-[10px] text-nexus-muted leading-relaxed">
+        Amber: exit vs{' '}
+        <span className="text-amber-200/80">peak while open</span> (in-trade high — not after exit). Green: exit vs{' '}
+        <span className="text-nexus-accent">post-exit tape peak</span> when monitor finalized.
+      </p>
     </div>
   );
 }
@@ -140,15 +197,19 @@ function ClosedTradeTable({ trades }: { trades: PaperTrade[] }) {
             <th className="py-2.5 px-3 font-medium">Contract / size</th>
             <th className="py-2.5 px-3 font-medium">Entry → exit</th>
             <th className="py-2.5 px-3 font-medium text-right">Booked P&L</th>
-            <th className="py-2.5 px-3 font-medium text-right">Later LTP</th>
-            <th className="py-2.5 px-3 font-medium text-right">Exit → later</th>
+            <th className="py-2.5 px-3 font-medium text-right">Peak while open</th>
+            <th className="py-2.5 px-3 font-medium text-right">Exit → open peak</th>
+            <th className="py-2.5 px-3 font-medium text-right">Post-exit peak</th>
+            <th className="py-2.5 px-3 font-medium text-right">Exit → post-exit</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((t) => {
             const exitPx = exitPremium(t);
-            const later = t.maxLtp ?? exitPx;
-            const left = later - exitPx;
+            const openPeak = peakWhileOpen(t);
+            const openLeft = openPeak != null ? openPeak - exitPx : null;
+            const afterPeak = postExitPeak(t);
+            const postLeft = afterPeak != null ? afterPeak - exitPx : null;
             const hold = holdMinutes(t);
             const pnlPos = (t.pnlInr ?? 0) >= 0;
             return (
@@ -172,8 +233,20 @@ function ClosedTradeTable({ trades }: { trades: PaperTrade[] }) {
                 <td className={`py-3 px-3 text-right font-mono font-semibold ${pnlPos ? 'text-nexus-accent' : 'text-nexus-red'}`}>
                   {formatInr(t.pnlInr ?? 0)}
                 </td>
-                <td className="py-3 px-3 text-right font-mono text-white">{later.toFixed(1)}</td>
-                <td className="py-3 px-3 text-right font-mono text-nexus-muted">+{left.toFixed(1)} pts</td>
+                <td className="py-3 px-3 text-right font-mono text-amber-100/90">
+                  {openPeak != null ? openPeak.toFixed(1) : '—'}
+                </td>
+                <td className="py-3 px-3 text-right font-mono text-nexus-muted">
+                  {openLeft != null && openLeft > 0.05 ? `+${openLeft.toFixed(1)}` : '—'}
+                </td>
+                <td className="py-3 px-3 text-right font-mono text-white">
+                  {afterPeak != null ? afterPeak.toFixed(1) : '—'}
+                </td>
+                <td className="py-3 px-3 text-right font-mono text-nexus-muted">
+                  {postLeft != null && Math.abs(postLeft) > 0.05
+                    ? `${postLeft >= 0 ? '+' : ''}${postLeft.toFixed(1)}`
+                    : '—'}
+                </td>
               </tr>
             );
           })}
@@ -273,8 +346,8 @@ export function ProfitsLossPage({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <section className="audit-panel">
-          <h2 className="audit-panel-title">Exit — later / premium distance</h2>
-          <p className="audit-panel-sub">How much premium was still available after each exit.</p>
+          <h2 className="audit-panel-title">Exit — open peak vs post-exit tape</h2>
+          <p className="audit-panel-sub">In-trade high vs premium seen on tape after exit (when monitor ran).</p>
           <PremiumDistanceChart trades={closed} />
         </section>
         <section className="audit-panel">
@@ -286,7 +359,9 @@ export function ProfitsLossPage({
 
       <section className="audit-panel">
         <h2 className="audit-panel-title">Closed trade journal</h2>
-        <p className="audit-panel-sub">Full session log — booked vs tape high after exit.</p>
+        <p className="audit-panel-sub">
+          Booked fills vs in-trade peak (max LTP) and post-exit monitor peak — not the same clock.
+        </p>
         <ClosedTradeTable trades={closed} />
       </section>
     </div>

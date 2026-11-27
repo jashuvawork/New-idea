@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -14,6 +15,18 @@ from app.services.token_manager import get_daily_token_status, record_token_gene
 logger = logging.getLogger(__name__)
 
 _SYNC_HEADER = "X-Paper-Lab-VM-Sync-Key"
+
+
+async def _bootstrap_from_runtime_access_token() -> dict[str, Any]:
+    """Optional UPSTOX_ACCESS_TOKEN runtime secret (today's token) — never commit."""
+    token = os.environ.get("UPSTOX_ACCESS_TOKEN", "").strip()
+    if not token:
+        return {"ok": False, "error": "no_runtime_access_token"}
+    await store_upstox_token(token, os.environ.get("UPSTOX_REFRESH_TOKEN", "").strip())
+    await record_token_generated(token, "")
+    status = await get_daily_token_status()
+    logger.info("VM Upstox session loaded from UPSTOX_ACCESS_TOKEN (validToday=%s)", status.get("validToday"))
+    return {"ok": True, "tokenStatus": status, "source": "runtime_env"}
 
 
 async def maybe_bootstrap_vm_upstox() -> dict[str, Any]:
@@ -28,6 +41,9 @@ async def maybe_bootstrap_vm_upstox() -> dict[str, Any]:
             "reason": "local_token_present",
             "tokenStatus": status,
         }
+    from_env = await _bootstrap_from_runtime_access_token()
+    if from_env.get("ok"):
+        return {"bootstrapped": True, **from_env}
     synced = await sync_upstox_session_from_prod()
     if synced.get("ok"):
         return {"bootstrapped": True, "source": "prod_sync", **synced}

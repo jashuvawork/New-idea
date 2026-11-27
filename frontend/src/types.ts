@@ -1119,8 +1119,19 @@ export interface PaperTrade {
   bestPnlPoints: number;
   maxLtp?: number;
   maxLtpAt?: string;
+  /** Finalized tape/live peak after exit (from post-exit LTP monitor). */
+  postExitLtpMonitor?: PostExitLtpMonitor;
   entryContext?: Record<string, unknown>;
   context?: Record<string, unknown>;
+}
+
+export interface PostExitLtpMonitor {
+  postExitPeakLtp?: number | null;
+  missedPointsAfterExit?: number;
+  whileOpenMaxLtp?: number;
+  exitPremium?: number;
+  peakAt?: string | null;
+  earlyExitLikely?: boolean;
 }
 
 export interface DayArchiveSummary {
