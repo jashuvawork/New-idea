@@ -833,6 +833,45 @@ async def monitor_trade_chart_before_execution(
         settings=settings,
     )
 
+    from app.engines.explosion_entry_guards import effective_local_base_move_pct
+    from app.engines.day_mode_counter_trap import (
+        counter_day_exec_post_spike_red_candle_blocked,
+        counter_day_suppress_exec_fade_waivers,
+    )
+
+    alert_map_exec = alert if isinstance(alert, dict) else {}
+    exec_local_pad = float(
+        effective_local_base_move_pct(explosion_event, None)
+        or alert_map_exec.get("localBaseMovePct")
+        or alert_map_exec.get("ictBaseRelativeMovePct")
+        or 0
+    )
+    suppress_fade, suppress_meta = counter_day_suppress_exec_fade_waivers(
+        side,
+        snap,
+        state,
+        local_pad=exec_local_pad,
+        settings=settings,
+    )
+    if suppress_fade:
+        meta.update(suppress_meta)
+        premium_bypass = False
+        vertical_bypass = False
+        local_ichi_bypass = False
+        open_gap_mtf_bypass = False
+        strict_first_lift_bypass = False
+        first_lift_bypass = False
+        pad_lane_chart_bypass = False
+        index_turn_fade_bypass = False
+        open_setup_fade_bypass = False
+        open_caution_fade_bypass = False
+        post_open_fade_bypass = False
+        symmetric_fade_bypass = False
+        building_rip_fade_bypass = False
+        confirmed_ftv_bypass = False
+        premium_fade_pad_lane = False
+        structure_chart_bypass = bool(breadth_bypass or expiry_chart_bypass or index_trough_bypass)
+
     from app.engines.winner_entry_guards import apply_falling_premium_exec_fill_guard
 
     alert_map = alert if isinstance(alert, dict) else {}
@@ -864,6 +903,22 @@ async def monitor_trade_chart_before_execution(
     prem_ltp = float(
         getattr(premium_chart, "lastPremium", 0) or meta.get("strike") or 0
     )
+    cd_block, cd_reason, cd_meta = counter_day_exec_post_spike_red_candle_blocked(
+        side,
+        snap,
+        prem_candles_1m,
+        prem_ltp,
+        state=state,
+        local_pad=exec_local_pad,
+        settings=settings,
+    )
+    if cd_block:
+        meta["counterDayPostSpikeTrap"] = cd_meta
+        meta["enabled"] = True
+        meta["passed"] = False
+        meta["blockReason"] = cd_reason
+        return False, cd_reason, meta
+
     if side == Side.CALL and fast_bullish_call_rally_exec_lane(alert_map):
         trap_blocked, trap_reason, trap_meta = fast_bullish_post_spike_red_candle_blocked(
             prem_candles_1m,
