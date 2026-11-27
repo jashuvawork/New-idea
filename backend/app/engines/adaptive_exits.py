@@ -426,6 +426,8 @@ def evaluate_adaptive_explosion_exit(
     lot_multiplier: int,
     *,
     current_velocity_3s: float = 0.0,
+    symbol_snapshot: Any = None,
+    trader_state: Any = None,
 ) -> tuple[Optional[str], float]:
     """Explosion exits — per-trade adaptive SL/trail; no fixed global stop."""
     from datetime import datetime
@@ -445,6 +447,8 @@ def evaluate_adaptive_explosion_exit(
         lot_multiplier,
         params=params,
         live_velocity_3s=current_velocity_3s,
+        symbol_snapshot=symbol_snapshot,
+        trader_state=trader_state,
     )
     if exit_reason:
         return exit_reason, pnl

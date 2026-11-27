@@ -3921,6 +3921,8 @@ async def _process_open_trades(
                     tier,
                     lot_mult,
                     current_velocity_3s=live_vel,
+                    symbol_snapshot=snap,
+                    trader_state=state,
                 )
             else:
                 from app.engines.morning_premium_capture import afternoon_capture_exit_params
@@ -3935,6 +3937,8 @@ async def _process_open_trades(
                     lot_mult,
                     params=exit_params,
                     live_velocity_3s=live_vel,
+                    symbol_snapshot=snap,
+                    trader_state=state,
                 )
         elif not exit_reason and (trade.entryContext or {}).get("selectionMode") == "worst_day_itm_fade":
             exit_reason, pnl = evaluate_worst_day_itm_fade_exit(

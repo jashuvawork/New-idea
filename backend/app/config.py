@@ -4268,6 +4268,29 @@ class Settings(BaseSettings):
     # When rally/slide points tie, breadth wins over 5m mom before picking dominant leg.
     index_trend_tie_break_breadth_over_mom5_enabled: bool = True
     session_intent_tactical_timeframe: str = "3m"  # 3m vs 5m tactical anchor for counter-side MTF
+    # Live open-trade thesis: scratch/snatch counter-leg when session+HTF oppose side.
+    live_trade_thesis_exit_enabled: bool = True
+    # Assessment runs all day; exits only after patience + sustained broken thesis.
+    live_trade_thesis_min_hold_seconds: float = 180.0
+    live_trade_thesis_broken_min_seconds: float = 240.0
+    live_trade_thesis_min_htf_oppose: int = 1
+    live_trade_thesis_require_tactical_oppose: bool = True
+    live_trade_thesis_max_velocity_3s: float = 0.35
+    live_trade_thesis_min_underwater_pts: float = 6.0
+    live_trade_thesis_scratch_max_pnl_pts: float = 2.5
+    live_trade_thesis_snatch_min_pts: float = 0.35
+    live_trade_thesis_snatch_max_pts: float = 9.0
+    # Do not thesis-exit while normal profit booking should own the trade.
+    live_trade_thesis_profit_booking_min_best_points: float = 10.0
+    live_trade_thesis_profit_booking_min_remain_points: float = 4.0
+    live_trade_thesis_max_action_pnl_pts: float = 12.0
+    live_trade_thesis_never_green_max_best_pts: float = 1.5
+    live_trade_thesis_never_green_loss_pts: float = 10.0
+    # Long-horizon wrong leg: sustained broken thesis, still struggling (not runners).
+    live_trade_thesis_long_fade_min_hold_seconds: float = 2700.0
+    live_trade_thesis_long_fade_max_pnl_pts: float = 4.0
+    live_trade_thesis_runner_min_best_points: float = 18.0
+    live_trade_thesis_skip_max_profit: bool = True
     session_slide_open_lane_enabled: bool = True
     session_slide_open_lane_start_hour: int = 9
     session_slide_open_lane_start_minute: int = 45

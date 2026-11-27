@@ -2946,6 +2946,8 @@ def evaluate_explosion_exit(
     params: Optional[ExplosionExitParams] = None,
     *,
     live_velocity_3s: float = 0.0,
+    symbol_snapshot: Any = None,
+    trader_state: Any = None,
 ) -> tuple[Optional[str], float]:
     """
     Explosion exits: hard SL when losing, trailing SL + TP while winning.
@@ -3000,6 +3002,21 @@ def evaluate_explosion_exit(
         chop_exit = _apply_elite_respected_early_exit(trade, chop_exit, settings=settings)
         if chop_exit:
             return chop_exit, pnl_inr
+
+        from app.engines.live_trade_thesis_monitor import live_wrong_side_thesis_exit_reason
+
+        thesis_exit = live_wrong_side_thesis_exit_reason(
+            trade,
+            symbol_snapshot,
+            trader_state,
+            pnl_pts=pnl_pts,
+            best=best,
+            hold_seconds=hold,
+            live_velocity_3s=v3,
+            settings=settings,
+        )
+        if thesis_exit:
+            return thesis_exit, pnl_inr
 
     # Failed launch: wait ≥1m, then scratch if premium is falling and not bullish.
     if not hold_to_sl and _failed_launch_exit_allowed(settings):
