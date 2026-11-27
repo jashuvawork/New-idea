@@ -69,6 +69,7 @@ def test_open_setup_blocks_in_window_with_explicit_when(mock_session):
         "lo": 72800.0,
     }
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_side_align_index_enabled=True,
@@ -91,6 +92,7 @@ def test_open_setup_idle_after_945_despite_morning_snap(mock_guard_when, mock_se
         "lo": 72800.0,
     }
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_side_align_index_enabled=True,
@@ -129,6 +131,7 @@ def test_daily_prefilter_no_open_caution_block_after_945(mock_guard_when, mock_s
         "lo": 72800.0,
     }
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_side_align_index_enabled=True,

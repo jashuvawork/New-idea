@@ -446,7 +446,10 @@ def open_caution_structural_side_align_waiver(
 
 def open_setup_guard_summary(settings: Any = None) -> dict[str, Any]:
     settings = settings or get_settings()
+    from app.engines.open_setup_policy import is_open_setup_book_enabled
+
     return {
+        "bookEnabled": is_open_setup_book_enabled(settings),
         "sideAlignIndex": bool(getattr(settings, "open_caution_side_align_index_enabled", True)),
         "structuralSideAlignWaiver": bool(
             getattr(settings, "open_caution_structural_side_align_waiver_enabled", True)
@@ -507,6 +510,11 @@ def validate_open_setup_entry(
     meta: dict[str, Any] = {"openSetupGuard": True}
     if not in_open_caution_window_at(when):
         return True, "ok", {}
+
+    from app.engines.open_setup_policy import is_open_setup_book_enabled
+
+    if not is_open_setup_book_enabled(settings):
+        return True, "ok", {**meta, "openBookDisabled": True}
 
     if not bool(getattr(settings, "open_setup_guards_enabled", True)):
         return True, "ok", meta
@@ -690,6 +698,10 @@ def open_caution_deep_itm_rank_bonus(
 ) -> float:
     """Prefer deeper ITM (73000 over 73400) during open caution."""
     settings = settings or get_settings()
+    from app.engines.open_setup_policy import is_open_setup_book_enabled
+
+    if not is_open_setup_book_enabled(settings):
+        return 0.0
     when = open_setup_guard_when(candidate, when)
     if not in_open_caution_window_at(when):
         return 0.0

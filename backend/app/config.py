@@ -3417,7 +3417,8 @@ class Settings(BaseSettings):
     recent_win_rank_bonus: float = 0.0
     calibration_block_min_losses: int = 5
 
-    # Open setup book: 09:15–09:45 IST entries (lanes, open guards, first-lift). Idle after 09:45.
+    # Open setup book: 09:15–09:45 IST (master off — no shadow loop, guards, lanes, or fade waivers).
+    open_setup_book_enabled: bool = False
     open_setup_start_hour: int = 9
     open_setup_start_minute: int = 15
     open_caution_until_hour: int = 9
@@ -3427,7 +3428,7 @@ class Settings(BaseSettings):
     entry_earliest_minute: int = 45
     # Macro side check 09:25–09:45. Idle before 09:25 and after 09:45.
     # The cash-candle hold covers 09:15–09:45. First order at 09:15 with open-setup guards.
-    open_side_confirmation_enabled: bool = True
+    open_side_confirmation_enabled: bool = False
     open_side_confirmation_start_hour: int = 9
     open_side_confirmation_start_minute: int = 25
     open_side_confirmation_min_minutes: float = 1.0
@@ -3443,7 +3444,7 @@ class Settings(BaseSettings):
     open_caution_score_bonus: int = 0
     open_caution_min_rank_score: float = 55.0
     # 09:15–09:45 index open lanes (idle after open_caution_until — normal CE/PE book).
-    open_index_lane_enabled: bool = True
+    open_index_lane_enabled: bool = False
     open_sensex_call_lane_enabled: bool = True
     open_sensex_put_lane_enabled: bool = True
     open_nifty_put_lane_enabled: bool = False
@@ -3454,7 +3455,7 @@ class Settings(BaseSettings):
     open_index_lane_max_local_base_pct: float = 15.0
     open_index_lane_allowed_setups_csv: str = "FTV,V"
     # 09:15–09:45: cold 1m premium momentum often reads as “fade” on base lifts — allow shallow retest.
-    open_caution_premium_fade_fill_enabled: bool = True
+    open_caution_premium_fade_fill_enabled: bool = False
     open_caution_premium_fade_max_drawdown_pct: float = -2.8
     open_caution_premium_fade_max_local_base_pct: float = 28.0
     open_caution_premium_fade_min_rank_score: float = 90.0
@@ -3462,14 +3463,14 @@ class Settings(BaseSettings):
     # 09:45–10:30 (default): open-rip continuation — same shallow MTF fade floor as open caution.
     post_open_setup_until_hour: int = 10
     post_open_setup_until_minute: int = 30
-    post_open_setup_premium_fade_fill_enabled: bool = True
+    post_open_setup_premium_fade_fill_enabled: bool = False
     # NIFTY lane opens for index-aligned side during 09:15–09:45 (bullish CE / bearish PE).
     open_nifty_call_lane_on_aligned_open_enabled: bool = True
     open_nifty_put_lane_on_aligned_open_enabled: bool = True
     open_index_lane_align_to_session_enabled: bool = True
     # 09:15–09:45: nearest weekly expiry → CE lane; same-week next index → PE lane
     # (SENSEX CE + NIFTY PE when SENSEX is #1; NIFTY CE + SENSEX PE when NIFTY is #1).
-    open_session_expiry_lane_enabled: bool = True
+    open_session_expiry_lane_enabled: bool = False
     open_session_primary_ce_lane_enabled: bool = True
     open_session_secondary_pe_lane_enabled: bool = True
     # Midday PUT slide breakdown timing (enter on roll-off high, not bounce).
@@ -3518,11 +3519,10 @@ class Settings(BaseSettings):
     ce_cold_timing_chase_block_enabled: bool = False
     ce_cold_timing_max_local_base_pct: float = 10.0
     # Combined open setup (selector + pretrade + selective fade bypass).
-    open_setup_guards_enabled: bool = True
-    # 09:15–09:45: run selector + funnel SELECT + pretrade shadow; never place orders until
-    # entry_earliest (default 09:45). Builds proof for a future live open book at 09:15.
-    open_setup_shadow_record_enabled: bool = True
-    open_setup_shadow_pretrade_enabled: bool = True
+    open_setup_guards_enabled: bool = False
+    # 09:15–09:45 shadow funnel (requires open_setup_book_enabled).
+    open_setup_shadow_record_enabled: bool = False
+    open_setup_shadow_pretrade_enabled: bool = False
     # When True, block PUT on bullish open / CALL on bearish open (not all PUTs).
     open_caution_side_align_index_enabled: bool = True
     # Open dump + V off session extreme: stamped pad lift may trade before cash open reclaims.

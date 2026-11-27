@@ -18,6 +18,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def _settings():
     s = settings_mock()
+    s.open_setup_book_enabled = True
     s.open_setup_shadow_record_enabled = True
     s.open_setup_shadow_pretrade_enabled = True
     s.entry_earliest_hour = 9

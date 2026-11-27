@@ -73,6 +73,7 @@ def test_nov6_style_call_waives_bearish_open_with_v_rip(mock_session):
         "lo": 24388.05,
     }
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_side_align_index_enabled=True,
@@ -130,6 +131,7 @@ def test_put_waives_bullish_open_with_v_rip_off_high(mock_session):
         "lo": 22600.0,
     }
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_side_align_index_enabled=True,
@@ -158,6 +160,7 @@ def test_structural_waiver_disabled_keeps_hard_block(mock_session):
         "lo": 24388.05,
     }
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_structural_side_align_waiver_enabled=False,

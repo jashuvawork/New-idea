@@ -44,6 +44,10 @@ def open_side_confirmation(
 ) -> tuple[bool, str, dict[str, Any]]:
     """Return (blocked, reason, meta) for an entry on ``side`` during the open window."""
     settings = settings or get_settings()
+    from app.engines.open_setup_policy import is_open_setup_book_enabled
+
+    if not is_open_setup_book_enabled(settings):
+        return False, "", {}
     if getattr(settings, "open_side_confirmation_enabled", False) is not True:
         return False, "", {}
     now = (now or datetime.now(IST)).astimezone(IST)

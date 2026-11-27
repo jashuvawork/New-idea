@@ -84,6 +84,7 @@ def test_exploding_tier_structural_waiver_with_index_leg_only(mock_session):
         "lo": 25800.0,
     }
     s = Settings(
+        open_setup_book_enabled=True,
         open_setup_guards_enabled=True,
         open_index_lane_enabled=False,
         open_caution_structural_side_align_waiver_enabled=True,

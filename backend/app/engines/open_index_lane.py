@@ -542,6 +542,10 @@ def validate_open_index_lane(
     Returns (allowed, reason, meta). Idle outside open caution and when master off.
     """
     settings = settings or get_settings()
+    from app.engines.open_setup_policy import is_open_setup_book_enabled
+
+    if not is_open_setup_book_enabled(settings):
+        return True, "ok", {}
     if not bool(getattr(settings, "open_index_lane_enabled", True)):
         return True, "ok", {}
 

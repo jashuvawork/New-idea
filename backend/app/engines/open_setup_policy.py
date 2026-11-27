@@ -15,11 +15,10 @@ from typing import Any
 from app.config import get_settings
 
 # Bump when intentionally changing the saved open book (document in PR body).
-OPEN_SETUP_POLICY_ID = "2026-11-open-v2"
+OPEN_SETUP_POLICY_ID = "2026-11-open-off"
 OPEN_SETUP_POLICY_NOTE = (
-    "Open book 09:15–09:45 (caution, lanes, side align, structural V waiver, ITM). "
-    "Post-open = normal CE/PE book 09:45–15:45; open guards idle after 09:45. "
-    "Config post_open_setup_until 10:30 = rip fade bypass only."
+    "Open book disabled (open_setup_book_enabled=false). Normal CE/PE book 09:45–15:45 only. "
+    "Re-enable only with explicit policy confirm + frozen-defaults update."
 )
 
 # User-facing session clocks (IST).
@@ -34,7 +33,8 @@ OPEN_SETUP_SHARED_ENTRY_PATHS = (
 )
 
 OPEN_BOOK_FROZEN_DEFAULTS: dict[str, Any] = {
-    "open_setup_guards_enabled": True,
+    "open_setup_book_enabled": False,
+    "open_setup_guards_enabled": False,
     "open_setup_start_hour": 9,
     "open_setup_start_minute": 15,
     "open_caution_until_hour": 9,
@@ -53,12 +53,12 @@ OPEN_BOOK_FROZEN_DEFAULTS: dict[str, Any] = {
     "open_caution_sensex_call_max_itm_points": 800.0,
     "open_caution_sensex_put_max_itm_points": 800.0,
     "open_caution_nifty_put_max_itm_points": 400.0,
-    "open_caution_premium_fade_fill_enabled": True,
+    "open_caution_premium_fade_fill_enabled": False,
     "open_caution_premium_fade_max_drawdown_pct": -2.8,
     "open_caution_premium_fade_max_local_base_pct": 28.0,
     "open_caution_premium_fade_min_rank_score": 90.0,
     "open_caution_premium_fade_allow_grade_s": True,
-    "open_index_lane_enabled": True,
+    "open_index_lane_enabled": False,
     "open_sensex_call_lane_enabled": True,
     "open_sensex_put_lane_enabled": True,
     "open_nifty_put_lane_enabled": False,
@@ -68,8 +68,10 @@ OPEN_BOOK_FROZEN_DEFAULTS: dict[str, Any] = {
     "open_index_lane_open_rip_first_lift_waiver_enabled": True,
     "open_index_lane_min_elite_score": 90.0,
     "open_index_lane_max_local_base_pct": 15.0,
-    "open_session_expiry_lane_enabled": True,
-    "open_side_confirmation_enabled": True,
+    "open_session_expiry_lane_enabled": False,
+    "open_side_confirmation_enabled": False,
+    "open_setup_shadow_record_enabled": False,
+    "open_setup_shadow_pretrade_enabled": False,
     "open_side_confirmation_start_hour": 9,
     "open_side_confirmation_start_minute": 25,
     "open_side_confirmation_min_index_move_pct": 0.10,
@@ -79,8 +81,14 @@ OPEN_BOOK_FROZEN_DEFAULTS: dict[str, Any] = {
 OPEN_RIP_CONTINUATION_FROZEN_DEFAULTS: dict[str, Any] = {
     "post_open_setup_until_hour": 10,
     "post_open_setup_until_minute": 30,
-    "post_open_setup_premium_fade_fill_enabled": True,
+    "post_open_setup_premium_fade_fill_enabled": False,
 }
+
+
+def is_open_setup_book_enabled(settings: Any = None) -> bool:
+    """Master gate: shadow loop, open guards, lanes, and open fade waivers require this."""
+    settings = settings or get_settings()
+    return bool(getattr(settings, "open_setup_book_enabled", False))
 
 # Backward-compatible alias (not “post-open day” — see NORMAL_BOOK_WINDOW_IST).
 POST_OPEN_BOOK_FROZEN_DEFAULTS = OPEN_RIP_CONTINUATION_FROZEN_DEFAULTS
@@ -152,6 +160,7 @@ def open_setup_policy_snapshot(settings: Any = None) -> dict[str, Any]:
         "postOpenBook": dict(POST_OPEN_BOOK_FROZEN_DEFAULTS),
         "openIndexLane": open_index_lane_summary(settings),
         "openSetupGuards": open_setup_guard_summary(settings),
+        "openBookEnabled": is_open_setup_book_enabled(settings),
         "frozenFields": dict(OPEN_SETUP_FROZEN_DEFAULTS),
     }
 
