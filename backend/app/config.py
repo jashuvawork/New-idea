@@ -37,7 +37,11 @@ LATENCY_PRESETS: dict[str, dict[str, Any]] = {
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Under pytest, conftest sets NEXUSQUANT_TESTING so suite matches CI (no local .env drift).
+    model_config = SettingsConfigDict(
+        env_file=None if os.environ.get("NEXUSQUANT_TESTING") else ".env",
+        extra="ignore",
+    )
 
     # App
     app_name: str = "NexusQuant"
