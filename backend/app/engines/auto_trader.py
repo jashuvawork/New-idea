@@ -3431,14 +3431,22 @@ async def _open_from_candidate(
         _record_deferred_candidate_fallback(candidate, pre_reason)
         return False, pre_reason
 
-    if is_live and snapshots:
-        from app.engines.live_entry_integrity import live_index_leg_hard_blocks_entry
+    if snapshots:
+        from app.engines.order_time_entry_pass import order_time_entry_blocked
 
-        leg_blocked, leg_reason, _leg_meta = live_index_leg_hard_blocks_entry(
-            candidate, state, snapshots, settings=settings,
+        ot_blocked, ot_reason, ot_meta = order_time_entry_blocked(
+            candidate,
+            state,
+            snapshots,
+            premium_chart=prem_chart_obj,
+            is_live=is_live,
+            settings=settings,
         )
-        if leg_blocked:
-            return False, leg_reason
+        ctx_extra["orderTimeEntryPass"] = ot_meta
+        if ot_blocked:
+            _stash_exec_chart_reject_telemetry(candidate, chart_meta, ot_reason)
+            _record_deferred_candidate_fallback(candidate, ot_reason)
+            return False, ot_reason
 
     if is_live or use_parity:
         if not client:
