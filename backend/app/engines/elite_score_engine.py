@@ -2019,12 +2019,29 @@ def elite_entry_allowed(
         return False, "elite_chase_past_local_base_window", assessment
 
     if not _timing_ok(evidence):
+        timing_waived = False
+        if mirror_snap is not None and state is not None:
+            from app.engines.session_slide_open_lane import (
+                rally_open_call_elite_timing_waiver,
+                slide_open_put_elite_timing_waiver,
+            )
+
+            if resolved_side == "PUT":
+                timing_waived, _tw = slide_open_put_elite_timing_waiver(
+                    evidence, state, mirror_snap, settings=settings,
+                )
+                assessment["slideOpenPutTimingWaiver"] = _tw
+            elif resolved_side == "CALL":
+                timing_waived, _tw = rally_open_call_elite_timing_waiver(
+                    evidence, state, mirror_snap, settings=settings,
+                )
+                assessment["rallyOpenCallTimingWaiver"] = _tw
         if not (
             best_capture
             and bool(
                 getattr(settings, "live_entry_best_trade_capture_waives_elite_timing", True)
             )
-        ) and not building_rip_helper_ok and not call_capture_waive:
+        ) and not building_rip_helper_ok and not call_capture_waive and not timing_waived:
             return False, "elite_timing_not_good_or_ok", assessment
 
     assessment = {
