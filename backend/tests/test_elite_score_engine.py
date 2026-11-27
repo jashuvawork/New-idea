@@ -268,7 +268,7 @@ def test_elite_entry_blocks_shallow_elite_tier_without_lift():
     }
 
 
-def test_momentum_rally_waives_v_rip_shallow_on_armed_base_launch():
+def test_momentum_rally_v_rip_waiver_off_by_default():
     blocked, reason = elite_v_rip_shallow_lift_blocked(
         {
             "momentType": "armed_base_launch",
@@ -284,6 +284,27 @@ def test_momentum_rally_waives_v_rip_shallow_on_armed_base_launch():
             "flatVerticalQuality": 79.0,
         },
         settings=Settings(),
+    )
+    assert blocked
+    assert reason == "elite_v_rip_shallow_first_lift_blocked"
+
+
+def test_momentum_rally_waives_v_rip_shallow_on_armed_base_launch_when_opt_in():
+    blocked, reason = elite_v_rip_shallow_lift_blocked(
+        {
+            "momentType": "armed_base_launch",
+            "explosionScore": 99.0,
+            "dayMode": "MOMENTUM RALLY",
+        },
+        {
+            "setup": "V",
+            "dayMode": "MOMENTUM RALLY",
+            "localBaseMovePct": 6.5,
+            "firstLift": False,
+            "activeBreakout": True,
+            "flatVerticalQuality": 79.0,
+        },
+        settings=Settings(momentum_rally_waive_v_rip_shallow_enabled=True),
     )
     assert not blocked
     assert reason == ""
